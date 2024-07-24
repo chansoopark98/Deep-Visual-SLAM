@@ -6,6 +6,13 @@ __pycache__/
 # C extensions
 *.so
 
+/depth/data/*
+/depth/weights/
+/depth/tensorboard/
+/vio/data/
+/vio/weights/
+/vio/tensorboard/
+
 # Distribution / packaging
 .Python
 build/
