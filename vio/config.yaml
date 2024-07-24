@@ -1,0 +1,27 @@
+Directory:
+  exp_name: test_data_generator
+  data_dir: ./vio/data/raw/tspxr_capture/
+  log_dir: ./vio/tensorboard
+  weights: ./weights
+
+Train:
+  img_w: 768
+  img_h: 432
+  v_f_len: 512
+  i_f_len: 256
+  imu_dropout: 0.2
+  rnn_hidden_size: 512 #1024
+  rnn_dropout: 0.2 #0.2
+  weight_decay: 0.00001
+  batch_size: 8 # 1
+  seq_len: 11
+  epoch: 101
+  epochs_warmup: 30
+  epochs_joint: 80
+  init_lr: 0.0001
+  lr_warmup: 0.0005 # 0.0005
+  lr_joint: 0.00005 # 0.00005
+  lr_fine: 0.000001 # 0.000001
+  eta: 0.05
+  temp_init: 5
+  Lamda: 0.00003
