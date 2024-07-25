@@ -10,8 +10,8 @@ from datetime import datetime
 from vio.dataset.tspxr_loader import TspxrTFDSGenerator
 from model.model_warp import build_vio
 from utils.utils import *
-from utils.plot_utils import plot_warped_image, plot_depths, plot_images
-from vio.utils.projection_utils import projective_inverse_warp
+from utils.plot_utils import plot_warped_image, plot_depths, plot_images, plot_masks
+from vio.utils.projection_utils import projective_inverse_warp, projective_inverse_warp_legacy
 from loss.warp_loss import compute_reprojection_loss, get_smooth_loss
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))))
@@ -54,6 +54,7 @@ class Trainer(object):
         self.model = build_vio(config=self.config)
         self.model.build([[self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 6],
                           [self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 3]])
+        self.model.summary()
         # source_image = keras.layers.Input((*self.image_size, 6), batch_size=batch_size)
         # target_image = keras.layers.Input((*self.image_size, 3), batch_size=batch_size)
 
@@ -141,11 +142,16 @@ class Trainer(object):
                                                  (self.config['Train']['img_h'], self.config['Train']['img_w']),
                                                  tf.image.ResizeMethod.BILINEAR)
                     
-                    curr_proj_image = projective_inverse_warp(source_stack[i],
-                                                              tf.squeeze(pred_depth, axis=-1),
-                                                              poses[:, i, :],
-                                                              intrinsics=intrinsic,
-                                                              invert=True if i == 0 else False)
+                    # curr_proj_image = projective_inverse_warp(source_stack[i],
+                    #                                           tf.squeeze(pred_depth, axis=-1),
+                    #                                           poses[:, i, :],
+                    #                                           intrinsics=intrinsic,
+                    #                                           invert=True if i == 0 else False)
+                    
+                    curr_proj_image = projective_inverse_warp_legacy(source_stack[i],
+                                                                     tf.squeeze(pred_depth, axis=-1),
+                                                                     poses[:, i, :],
+                                                                     intrinsics=intrinsic,)
                     
                     curr_proj_error = tf.abs(curr_proj_image - target_image)
 
@@ -208,9 +214,10 @@ class Trainer(object):
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_weights))
 
         return losses, source_left, source_right, target_image,\
-               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, poses
+               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, pred_auto_masks,\
+                poses
 
-    @tf.function() # jit_compile=True
+    @tf.function(jit_compile=True)
     def validation_step(self, source_left, source_right, target_image, intrinsic) -> tf.Tensor:
         """
         target_img: t-1
@@ -252,11 +259,16 @@ class Trainer(object):
                                                 (self.config['Train']['img_h'], self.config['Train']['img_w']),
                                                 tf.image.ResizeMethod.BILINEAR)
                 
-                curr_proj_image = projective_inverse_warp(source_stack[i],
-                                                            tf.squeeze(pred_depth, axis=-1),
-                                                            poses[:, i, :],
-                                                            intrinsics=intrinsic,
-                                                            invert=True if i == 0 else False)
+                # curr_proj_image = projective_inverse_warp(source_stack[i],
+                #                                             tf.squeeze(pred_depth, axis=-1),
+                #                                             poses[:, i, :],
+                #                                             intrinsics=intrinsic,
+                #                                             invert=True if i == 0 else False)
+
+                curr_proj_image = projective_inverse_warp_legacy(source_stack[i],
+                                                                     tf.squeeze(pred_depth, axis=-1),
+                                                                     poses[:, i, :],
+                                                                     intrinsics=intrinsic)
                 
                 curr_proj_error = tf.abs(curr_proj_image - target_image)
 
@@ -310,12 +322,12 @@ class Trainer(object):
         }
 
         return losses, source_left, source_right, target_image,\
-               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, poses
+               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, pred_auto_masks, poses
 
     
     def decode_items(self, source_left, source_right, target_image,
                      proj_image_stack_all, proj_error_stack_all, pred_depth_stacks,
-                     poses):
+                     pred_auto_masks, poses):
         """
         source_left: (B, H, W, 3)
         source_right: (B, H, W, 3)
@@ -323,7 +335,7 @@ class Trainer(object):
         proj_image_stack_all: List [(B, H, W, 6)] * 4
         proj_error_stack_all: List [(B, H, W, 6)] * 4
         pred_depth_stacks: List [(B, H, W, 1)] * 4
-
+        pred_auto_masks: List [(B, H, W, 1)] * 4
         """
 
         source_left = self.dataset.decode_image(source_left[0]).numpy()
@@ -333,6 +345,7 @@ class Trainer(object):
         decoded_proj_images = []
         decoded_proj_errors = []
         decoded_depths = []
+        decoded_masks = []
 
         for proj_image in proj_image_stack_all:
             # (B, H, W, 6) -> (H, W, 6)
@@ -356,6 +369,8 @@ class Trainer(object):
             # (B, H, W, 1) -> (H, W, 1)
             decoded_depths.append(pred_depth[0].numpy())
 
+        for pred_mask in pred_auto_masks:
+            decoded_masks.append(pred_mask[0].numpy())
 
         # Plot raw image
         plot_image_buffer = plot_images(source_left=source_left,
@@ -374,7 +389,12 @@ class Trainer(object):
         plot_depth = tf.image.decode_png(depth_plot_buffer.getvalue(), channels=4)
         plot_depth = tf.expand_dims(plot_depth, 0)
         
-        return plot_image, plot_warp, plot_depth
+        # Plot mask
+        mask_plot_buffer = plot_masks(decoded_masks)
+        plot_mask = tf.image.decode_png(mask_plot_buffer.getvalue(), channels=4)
+        plot_mask = tf.expand_dims(plot_mask, 0)
+
+        return plot_image, plot_warp, plot_depth, plot_mask
 
     def train(self) -> None:
         train_freq = 200
@@ -393,26 +413,29 @@ class Trainer(object):
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
             for i, (source_left, source_right, target_image, intrinsic) in enumerate(train_tqdm):
                 total_loss, source_left, source_right, target_image,\
-               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, poses = self.train_step(source_left,
-                                                                                   source_right,
-                                                                                   target_image,
-                                                                                   intrinsic)
+               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, pred_auto_masks,\
+                  poses = self.train_step(source_left,
+                                          source_right,
+                                          target_image,
+                                          intrinsic)
                 
                 train_idx += 1
 
                 if i % train_freq == 0:
-                    train_plot_image, train_plot_warp, train_plot_depth = self.decode_items(source_left,
+                    train_plot_image, train_plot_warp, train_plot_depth, train_plot_mask = self.decode_items(source_left,
                                                                                             source_right,
                                                                                             target_image,
                                                                                             proj_image_stack_all,
                                                                                             proj_error_stack_all,
                                                                                             pred_depth_stacks,
+                                                                                            pred_auto_masks,
                                                                                             poses)
 
                     with self.train_summary_writer.as_default():
                         tf.summary.image('Train Plot Image', train_plot_image, step=train_idx)
                         tf.summary.image('Train Plot Warp', train_plot_warp, step=train_idx)
-                        tf.summary.image('Train plot Depth', train_plot_depth, step=train_idx)
+                        tf.summary.image('Train Plot Depth', train_plot_depth, step=train_idx)
+                        tf.summary.image('Train Plot Mask', train_plot_mask, step=train_idx)
                         tf.summary.scalar('pixel_losses', tf.reduce_mean(total_loss['pixel_losses']).numpy(), step=train_idx)
                         tf.summary.scalar('smooth_losses', tf.reduce_mean(total_loss['smooth_losses']).numpy(), step=train_idx)
                         tf.summary.scalar('total_loss', tf.reduce_mean(total_loss['total_loss']).numpy(), step=train_idx)
@@ -422,22 +445,25 @@ class Trainer(object):
             valid_tqdm.set_description('Validation || ')
             for i, (source_left, source_right, target_image, intrinsic) in enumerate(valid_tqdm):
                 total_loss, source_left, source_right, target_image,\
-               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, poses = self.validation_step(source_left, source_right, target_image, intrinsic)
+               proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, pred_auto_masks,\
+                poses = self.validation_step(source_left, source_right, target_image, intrinsic)
                 valid_idx += 1
             
                 if i % valid_freq == 0:
-                    valid_plot_image, valid_plot_warp, valid_plot_depth = self.decode_items(source_left,
+                    valid_plot_image, valid_plot_warp, valid_plot_depth, valid_plot_mask = self.decode_items(source_left,
                                                                         source_right,
                                                                         target_image,
                                                                         proj_image_stack_all,
                                                                         proj_error_stack_all,
                                                                         pred_depth_stacks,
+                                                                        pred_auto_masks,
                                                                         poses)
 
                     with self.valid_summary_writer.as_default():
                         tf.summary.image('Valid Plot Image', valid_plot_image, step=valid_idx)
                         tf.summary.image('Valid Plot Warp', valid_plot_warp, step=valid_idx)
-                        tf.summary.image('Valid plot Depth', valid_plot_depth, step=valid_idx)
+                        tf.summary.image('Valid Plot Depth', valid_plot_depth, step=valid_idx)
+                        tf.summary.image('Valid Plot Mask', valid_plot_mask, step=valid_idx)
                         tf.summary.scalar('pixel_losses', tf.reduce_mean(total_loss['pixel_losses']).numpy(), step=valid_idx)
                         tf.summary.scalar('smooth_losses', tf.reduce_mean(total_loss['smooth_losses']).numpy(), step=valid_idx)
                         tf.summary.scalar('total_loss', tf.reduce_mean(total_loss['total_loss']).numpy(), step=valid_idx)

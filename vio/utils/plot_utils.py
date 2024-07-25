@@ -146,13 +146,13 @@ def plot_images(source_left, source_right, target_image):
     axes[0].imshow(source_left)
     axes[0].set_title('source_left')
     axes[0].axis('off')
-    
-    axes[1].imshow(source_right)
-    axes[1].set_title('source_right')
+
+    axes[1].imshow(target_image)
+    axes[1].set_title('target_image')
     axes[1].axis('off')
 
-    axes[2].imshow(target_image)
-    axes[2].set_title('target_image')
+    axes[2].imshow(source_right)
+    axes[2].set_title('source_right')
     axes[2].axis('off')
 
     fig.tight_layout()
@@ -198,8 +198,8 @@ def plot_warped_image(decoded_proj_images, decoded_proj_errors, poses):
         axes[i, 3].axis('off')
 
 
-    fig.text(0.5, 1., f"Left Pose: {left_pose}", ha='center', fontsize=12)
-    fig.text(0.5, 0.95, f"Right Pose: {right_pose}", ha='center', fontsize=12)
+    fig.text(0.5, 0.95, f"Left Pose: {left_pose}", ha='center', fontsize=12)
+    fig.text(0.5, 0.9, f"Right Pose: {right_pose}", ha='center', fontsize=12)
 
     fig.tight_layout()
 
@@ -274,6 +274,28 @@ def plot_depths(depth_lists):
     for i in range(len(depth_lists)):
         depth = depth_lists[i]
         axes[i].imshow(depth[:, :, 0], vmin=0., vmax=10., cmap='plasma')
+        axes[i].set_title(f'Depth Image : {i}')
+        axes[i].axis('off')
+
+    fig.tight_layout()
+
+    # 이미지를 Tensorboard에 로깅하기 위해 버퍼에 저장
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+
+    plt.close()
+    return buf
+
+def plot_masks(mask_lists):
+    
+    # Plot 설정
+    fig, axes = plt.subplots(1, 4, figsize=(20, 10))
+
+    # # 세 번째 이미지 (depth)
+    for i in range(len(mask_lists)):
+        mask = mask_lists[i]
+        axes[i].imshow(mask[:, :, 0])
         axes[i].set_title(f'Depth Image : {i}')
         axes[i].axis('off')
 
