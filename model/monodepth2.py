@@ -26,6 +26,8 @@ def build_disp_net(image_shape: tuple, batch_size: int) -> keras.models.Model:
                                                 batch_size=batch_size,
                                                 prefix='disp_resnet')
     
+    keras.applications.ResNet50()
+
     x, skips = resnet_model.output
     
     image_height = image_shape[0]

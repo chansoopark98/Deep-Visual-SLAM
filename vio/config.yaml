@@ -2,7 +2,7 @@ Directory:
   exp_name: test_data_generator
   data_dir: ./vio/data/raw/tspxr_capture/
   log_dir: ./vio/tensorboard
-  weights: ./weights
+  weights: ./vio/weights
 
 Train:
   img_w: 768
