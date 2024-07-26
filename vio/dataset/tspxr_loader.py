@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))))
-from vio.utils.tspxr_capture_utils import TspDataHandler
+from vio.utils.tspxr_capture_utils_new import TspDataHandler
 
 AUTO = tf.data.experimental.AUTOTUNE
 
@@ -91,9 +91,10 @@ class TspxrTFDSGenerator(DataGenerator):
         'intrinsic'
         """
         # Load samples
-        source_left = tf.cast(sample['source_left'], dtype=tf.uint8)
-        source_right = tf.cast(sample['source_right'], dtype=tf.uint8)
-        target_image = tf.cast(sample['target_image'], dtype=tf.uint8)
+        source_left = sample['source_left']
+        source_right = sample['source_right']
+        target_image = sample['target_image']
+        target_depth = sample['target_depth']
         intrinsic = tf.cast(sample['intrinsic'], dtype=tf.float32)
 
 
@@ -106,6 +107,8 @@ class TspxrTFDSGenerator(DataGenerator):
         
         target_image = tf.image.resize(target_image, self.image_size,
                                     method=tf.image.ResizeMethod.BILINEAR)
+        target_depth = tf.image.resize(target_depth, self.image_size,
+                                    method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         
         # Rescale intrinsic
         intrinsic = self.rescale_intrinsic_matrix(intrinsic,
@@ -115,7 +118,7 @@ class TspxrTFDSGenerator(DataGenerator):
                                                   self.image_size[1])
 
 
-        return (source_left, source_right, target_image, intrinsic)
+        return (source_left, source_right, target_image, target_depth, intrinsic)
 
     @tf.function(jit_compile=True)
     def preprocess(self, sample: dict) -> Union[tf.Tensor, tf.Tensor]:
@@ -128,8 +131,8 @@ class TspxrTFDSGenerator(DataGenerator):
             Returns:
                 (img, labels) (dict) : tf.Tensor
         """
-        source_left, source_right, target_image, intrinsic = self.prepare_data(sample)
-        return (source_left, source_right, target_image, intrinsic)
+        source_left, source_right, target_image, target_depth, intrinsic = self.prepare_data(sample)
+        return (source_left, source_right, target_image, target_depth, intrinsic)
     
     @tf.function(jit_compile=True)
     def rescale_intrinsic_matrix(self, K, original_height, original_width, new_height, new_width):
@@ -169,12 +172,12 @@ class TspxrTFDSGenerator(DataGenerator):
         return K_new
 
     @tf.function(jit_compile=True)
-    def normalize_images(self, source_left, source_right, target_image, intrinsic):
+    def normalize_images(self, source_left, source_right, target_image, target_depth, intrinsic):
         source_left = keras.applications.imagenet_utils.preprocess_input(source_left, mode='torch')
         source_right = keras.applications.imagenet_utils.preprocess_input(source_right, mode='torch')
         target_image = keras.applications.imagenet_utils.preprocess_input(target_image, mode='torch')
         
-        return (source_left, source_right, target_image, intrinsic)
+        return (source_left, source_right, target_image, target_depth, intrinsic)
 
     @tf.function(jit_compile=True)
     def augment_brightness(self, image):

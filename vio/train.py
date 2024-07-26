@@ -100,7 +100,7 @@ class Trainer(object):
         return depth
 
     @tf.function(jit_compile=True) 
-    def train_step(self, source_left, source_right, target_image, intrinsic) -> tf.Tensor:
+    def train_step(self, source_left, source_right, target_image, target_depth, intrinsic) -> tf.Tensor:
         """
         target_img: t-1
         source_img: t
@@ -411,12 +411,13 @@ class Trainer(object):
             print(' LR : {0}'.format(self.optimizer.learning_rate))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
-            for i, (source_left, source_right, target_image, intrinsic) in enumerate(train_tqdm):
+            for i, (source_left, source_right, target_image, target_depth, intrinsic) in enumerate(train_tqdm):
                 total_loss, source_left, source_right, target_image,\
                proj_image_stack_all, proj_error_stack_all, pred_depth_stacks, pred_auto_masks,\
                   poses = self.train_step(source_left,
                                           source_right,
                                           target_image,
+                                          target_depth,
                                           intrinsic)
                 
                 train_idx += 1

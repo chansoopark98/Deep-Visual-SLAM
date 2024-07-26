@@ -9,35 +9,13 @@ import matplotlib.animation as animation
 import tensorflow as tf
 import time
 import pandas as pd
+import gc
 
 class DataUtils(object):    
     def extract_position_and_orientation(self, matrix):
         position = matrix[:3, 3]
         orientation = matrix[:3, :3] @ np.array([1, 0, 0])
         return position, orientation
-    
-    def visualize_traj(self, matrix_list: list, limit: int):
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        x, y, z = [], [], []
-
-        for matrix in matrix_list:
-            position, orientation = self.extract_position_and_orientation(matrix)
-            x.append(position[0])
-            y.append(position[1])
-            z.append(position[2])
-        ax.plot(x, y, z, color='blue')
-
-        # 축 설정
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        ax.set_title('3D Transformation Visualization')
-        ax.set_xlim([-limit, limit])
-        ax.set_ylim([-limit, limit])
-        ax.set_zlim([-limit, limit])
-        ax.view_init(elev=20., azim=120)  # 뷰 각도 조정
-        plt.show()
 
     def transform_matrix_to_pose(self, matrix):
         # 변위 벡터 (x, y, z) 추출
@@ -92,74 +70,18 @@ class DataUtils(object):
             relative_poses.append(relative_transform)
         
         return relative_poses
-    
-    def visualize_global_pose_animation(self, image_list, poses):
-        """
-        이미지와 포즈 (x, y, z, roll, pitch, yaw)를 받아 애니메이션을 생성합니다.
-
-        Parameters:
-        - image_list: 이미지 리스트
-        - poses: 각 이미지 당 포즈 리스트 [(x, y, z, roll, pitch, yaw)]
-        """
-
-        fig = plt.figure()
-        ax_image = fig.add_subplot(121)
-        ax_pose = fig.add_subplot(122, projection='3d')
-
-        # 전체 경로를 플로팅하기 위해 모든 포즈 좌표를 계산
-        all_positions = np.array([pose[:3] for pose in poses])
-        all_rotations = np.array([pose[3:] for pose in poses])
-
-        def update(frame):
-            ax_image.clear()
-            ax_pose.clear()
-
-            # 이미지 표시
-            img = image_list[frame]
-            ax_image.imshow(img)
-            ax_image.axis('off')
-
-            # 전체 경로 시각화
-            ax_pose.plot(all_positions[:, 0], all_positions[:, 1], all_positions[:, 2], color='blue', linestyle='-', marker='o')
-
-            # 현재 프레임의 포즈 강조
-            current_position = all_positions[frame]
-            current_rotation = all_rotations[frame]
-            print(current_position, current_rotation)
-            ax_pose.scatter(current_position[0], current_position[1], current_position[2], color='red', s=100, label='Current Frame')
-
-            # 축 설정
-            ax_pose.set_xlim(all_positions[:, 0].min() - 0.1, all_positions[:, 0].max() + 0.1)
-            ax_pose.set_ylim(all_positions[:, 1].min() - 0.1, all_positions[:, 1].max() + 0.1)
-            ax_pose.set_zlim(all_positions[:, 2].min() - 0.1, all_positions[:, 2].max() + 0.1)
-            ax_pose.set_xlabel('X')
-            ax_pose.set_ylabel('Y')
-            ax_pose.set_zlabel('Z')
-            # ax_pose.view_init(elev=20., azim=30)
-            ax_pose.legend()
-
-        ani = animation.FuncAnimation(fig, update, frames=len(image_list), repeat=True)
-        plt.show()
 
 class TspDataHandler(DataUtils):
     def __init__(self, root: str,
-                 target_image_shape: tuple = (720, 1280),
+                 target_image_shape: tuple = (1080, 1920),
                  original_image_shape: tuple = (1080, 1920),
-                 imu_frequency: int = 11,
-                 data_mode: dict = {
-                     'image': True,
-                     'depth': True,
-                     'imu': True,
-                     'rel_pose': True,
-                     'global_pose': True,
-                     'intrinsic': True,
-                 }) -> None:
+                 imu_frequency: int = 11) -> None:
         super(TspDataHandler, self).__init__()
         self.root = root
         self.target_image_shape = target_image_shape
         self.original_image_shape = original_image_shape
         self.imu_freq = imu_frequency
-        self.data_mode = data_mode
+        
         self.img_data_type = 'jpg'
         self.depth_data_type = 'npy'
         self.data_len = 0.
@@ -180,8 +102,16 @@ class TspDataHandler(DataUtils):
     def load_and_process_image(self, image_path):
         with Image.open(image_path) as img:
             img = img.resize(size=(self.target_image_shape[1], self.target_image_shape[0]))
-            return [np.array(img, dtype=np.uint8)][0]
+            img = np.array(img, dtype=np.uint8)
+            return img 
     
+    def load_and_process_depth(self, depth_path):
+        with np.load(depth_path) as depth:
+            depth = np.expand_dims(depth, axis=-1)
+            depth = np.nan_to_num(depth)
+            depth = depth.astype(np.float32)
+            return depth
+        
     def rescale_intrinsic_matrix(self, K):
         """
         기존 intrinsic matrix를 새로운 이미지 해상도에 맞춰 조정하는 함수
@@ -251,11 +181,11 @@ class TspDataHandler(DataUtils):
             sampled_imu_list.append(resampled_segment)
 
         # 모든 구간의 데이터를 하나로 합침
-        sampled_imu = np.array(sampled_imu_list)
+        sampled_imu_list = np.array(sampled_imu_list)
         
-        return sampled_imu
+        return sampled_imu_list
 
-    def zed_to_kitti_format(self, sampled_imu: np.ndarray) -> np.ndarray:
+    def zed_to_kitti_format(self, sampled_imu: np.ndarray, is_rad: bool = True) -> np.ndarray:
         """
         sampled_imu(np.ndarray): shape=(samples, seq, 6)
         data: (timestamp, acc_x, acc_y, acc_z, velo_x, velo_y, velo_z)
@@ -263,18 +193,25 @@ class TspDataHandler(DataUtils):
         return kitti_formatted_imu(np.ndarray): shape=(samples, seq, 6)
         data: (timestamp, acc_x, acc_y, acc_z, angular_vel_x, angular_vel_y, angular_vel_z)
         """
+        gravity = 9.81
+        
         # Deg/s to rad/s conversion factor
-        deg_to_rad = np.pi / 180.0
+        if is_rad:
+            factor = np.pi / 180.0 # Degree to Radian
+        else:
+            factor = 1.
 
         # Assuming sampled_imu has shape (samples, seq, 7) where
         # 0: timestamp, 1-3: linear_acceleration, 4-6: angular_velocity
         kitti_formatted_imu = np.zeros_like(sampled_imu)
 
-        # Copying the timestamp
-        kitti_formatted_imu[:, :, 0] = sampled_imu[:, :, 0]
+        # Copying the acceleration
+        kitti_formatted_imu[:, :, 0:3] = sampled_imu[:, :, 0:3]
 
         # Converting angular velocity from deg/s to rad/s
-        kitti_formatted_imu[:, :, 3:6] = sampled_imu[:, :, 3:6] * deg_to_rad
+        kitti_formatted_imu[:, :, 3:6] = sampled_imu[:, :, 3:6] * factor
+
+        kitti_formatted_imu[:, :, 2] = kitti_formatted_imu[:, :, 2] - gravity
 
         return kitti_formatted_imu
         
@@ -282,12 +219,10 @@ class TspDataHandler(DataUtils):
         # load data paths
         rgb_path = glob.glob(os.path.join(file_list, 'rgb') + '/*.{0}'.format(self.img_data_type))
         rgb_path.sort()
+
         imu_path = os.path.join(file_list, 'sensor/zed_imu.csv')
         intrinsics_path = os.path.join(file_list, 'sensor/intrinsics.npy')
         zed_path = os.path.join(file_list, 'sensor/zed_pose.csv')
-
-        # load rgb images
-        image_list = [self.load_and_process_image(rgb_sample_path) for rgb_sample_path in rgb_path]
 
         # load npy files(imu/intrinsic/tracker pose/zed pose)
         imu_npy = np.loadtxt(imu_path, delimiter=',', skiprows=1)
@@ -302,14 +237,15 @@ class TspDataHandler(DataUtils):
         zed_npy = zed_npy[:, 1:]
 
         # ZED IMU data convert to KITTI format
-        imu_npy = self.zed_to_kitti_format(sampled_imu=imu_npy)
+        imu_npy = self.zed_to_kitti_format(sampled_imu=imu_npy,
+                                           is_rad=False)
 
         # Ensure the lengths are the same as tracker_npy.shape[0]
         expected_length = zed_npy.shape[0]
 
-        if len(image_list) != expected_length:
-            print(f'Adjusting image list size from {len(image_list)} to {expected_length}')
-            image_list = image_list[:expected_length]
+        if len(rgb_path) != expected_length:
+            print(f'Adjusting image list size from {len(rgb_path)} to {expected_length}')
+            rgb_path = rgb_path[:expected_length]
         
         if imu_npy.shape[0] != expected_length:
             print(f'Adjusting IMU data size from {imu_npy.shape[0]} to {expected_length}')
@@ -322,10 +258,10 @@ class TspDataHandler(DataUtils):
         # IMU npy to list
         imu_list = [imu_npy[i] for i in range(imu_npy.shape[0])]
 
-        return image_list, imu_list, intrinsics_npy, zed_npy    
+        return rgb_path, imu_list, intrinsics_npy, zed_npy    
 
     def get_sync_file(self, file_list):
-        images, imus, intrinsics, zeds = self.parsing_files(file_list)
+        rgb_paths, imus, intrinsics, zeds = self.parsing_files(file_list)
 
         intrinsics = self.rescale_intrinsic_matrix(K=intrinsics)
             
@@ -353,64 +289,42 @@ class TspDataHandler(DataUtils):
         rel_camera_pose = self.convert_transform_list(transform_list=relative_tracker_pose)
         global_camera_pose = self.convert_transform_list(transform_list=global_mat_list)
         
-        return images, imus, intrinsics, rel_camera_pose, global_camera_pose
-
-    def get_sync_all_files(self):
-        for file_list in self.file_lists:
-            images, imus, intrinsic, rel_camera_pose, global_camera_pose = self.get_sync_file(file_list)
-
-            # image list to npy
-            images = np.array(images, np.uint8)
-            intrinsic = tf.cast(intrinsic, tf.float32)
-
-            for idx in range(images.shape[0] - 1):
-                source_image = images[idx]
-                target_image = images[idx + 1]
-                imu = imus[idx]
-                rel_pose = rel_camera_pose[idx]
-                source_global_pose = global_camera_pose[idx]
-                target_global_pose = global_camera_pose[idx + 1]
-                
-                batch_source_image = tf.convert_to_tensor(source_image, tf.uint8)
-                batch_target_image = tf.convert_to_tensor(target_image, tf.uint8)
-                batch_imu = tf.convert_to_tensor(imu, tf.float32)
-                batch_rel_pose = tf.convert_to_tensor(rel_pose, tf.float32)
-                batch_source_pose = tf.convert_to_tensor(source_global_pose, tf.float32)
-                batch_target_pose = tf.convert_to_tensor(target_global_pose, tf.float32)
-
-                # yield {
-                # 'image': image_array,
-                # 'depth': depth_array,
-                # 'imu': imu_array,
-                # 'rel_pose': rel_pose_array,
-                # 'global_pose': global_pose_array,
-                # 'intrinsic': intrinsic
-                # }
+        return rgb_paths, imus, intrinsics, rel_camera_pose, global_camera_pose
 
     def vio_generator(self):
         for file_list in self.file_lists:
-            raw_images, _, intrinsic, _, _ = self.get_sync_file(file_list)
+            rgb_paths, _, intrinsic, _, _ = self.get_sync_file(file_list)
 
             # image list to npy
-            images = np.array(raw_images, np.uint8)
             intrinsic = tf.cast(intrinsic, tf.float32)
 
             img_freq = 1
-            for idx in range(img_freq, images.shape[0] - img_freq):
-                source_left = images[idx - img_freq]
-                source_right = images[idx + img_freq]
-                target_image = images[idx]
-                
-                batch_source_left = tf.convert_to_tensor(source_left, tf.uint8)
-                batch_source_right = tf.convert_to_tensor(source_right, tf.uint8)
-                batch_target_image = tf.convert_to_tensor(target_image, tf.uint8)
+            for idx in range(img_freq, len(rgb_paths) - img_freq):
+                source_left = rgb_paths[idx - img_freq]
+                source_right = rgb_paths[idx + img_freq]
+                target_image = rgb_paths[idx]
+
+                source_left = tf.io.read_file(source_left)
+                source_right = tf.io.read_file(source_right)
+                target_image = tf.io.read_file(target_image)
+
+                source_left = tf.io.decode_image(source_left, dtype=tf.uint8)
+                source_right = tf.io.decode_image(source_right, dtype=tf.uint8)
+                target_image = tf.io.decode_image(target_image, dtype=tf.uint8)
+            
 
                 yield {
-                'source_left': batch_source_left,
-                'source_right': batch_source_right,
-                'target_image': batch_target_image,
+                'source_left': source_left,
+                'source_right': source_right,
+                'target_image': target_image,
                 'intrinsic': intrinsic
                 }
+                del source_left
+                del source_right
+                del target_image                
+            del intrinsic
+            del rgb_paths
+            gc.collect()
 
     def create_vio_dataset(self) -> tf.data.Dataset:
         dataset = tf.data.Dataset.from_generator(
@@ -425,22 +339,14 @@ class TspDataHandler(DataUtils):
         return dataset
     
 if __name__ == '__main__':
-    root_path = '../data/raw/tspxr_capture/train/'
+    root_path = './vio/data/raw/tspxr_capture/train/'
     debug = True
+    
     dataset = TspDataHandler(root=root_path,
-                             imu_frequency=11)
+                   target_image_shape=(720, 1280),
+                   original_image_shape=(1080, 1920),
+                   imu_frequency=11)
     if debug:
         dataset.get_sync_all_files()
     else:
         dataset.create_vio_dataset()
-    # print(dataset.__len__)
-    # # dataset = TspxrCaptureDataset(root='../data/tspxr_capture/train/') 
-    # # dataset = dataset.batch(8)
-    # # dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
-    
-    # for batch in dataset.take(100):
-    #     print()
-    #     # print("Image batch shape:", batch['image'].shape)
-    #     # print("IMU batch shape:", batch['imu'].shape)
-    #     # print("Rel pose batch shape:", batch['rel_pose'].shape)
-    #     # print("Global pose batch shape:", batch['global_pose'].shape)
