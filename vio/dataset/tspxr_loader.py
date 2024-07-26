@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))))
-from vio.utils.tspxr_capture_utils_new import TspDataHandler
+from vio.utils.tspxr_capture_utils import TspDataHandler
 
 AUTO = tf.data.experimental.AUTOTUNE
 
@@ -109,6 +109,8 @@ class TspxrTFDSGenerator(DataGenerator):
                                     method=tf.image.ResizeMethod.BILINEAR)
         target_depth = tf.image.resize(target_depth, self.image_size,
                                     method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        target_depth = tf.where(target_depth > 10., 0., target_depth)
+        target_depth = tf.clip_by_value(target_depth, 0., 10.)
         
         # Rescale intrinsic
         intrinsic = self.rescale_intrinsic_matrix(intrinsic,
@@ -300,20 +302,14 @@ class TspxrTFDSGenerator(DataGenerator):
         return valid_data
     
 if __name__ == '__main__':
-    root_path = '../data/raw/tspxr_capture/'
+    root_path = './vio/data/raw/tspxr_capture/'
     dataset = TspxrTFDSGenerator(data_dir=root_path,
-                       image_size=(360, 640),
-                       batch_size=1)
+                                 image_size=(360, 640),
+                                 batch_size=1)
     
     train_data = dataset.get_trainData(dataset.train_data)
     
-    for source_img, target_img, imu, rel_pose, source_global_pose, target_global_pose, intrinsic in train_data.take(dataset.number_train_iters):
-        print('imu_data', imu.shape)
-        print('rel_pose', rel_pose.shape, rel_pose)
-        print('source_global_pose', source_global_pose.shape, source_global_pose)
-        print('target_global_pose', target_global_pose.shape, target_global_pose)
-        print('intrinsic', intrinsic.shape, intrinsic)
-        plt.imshow(source_img[0])
-        plt.show()
-        plt.imshow(target_img[0])
+    for source_left, source_right, target_image, target_depth, intrinsic in train_data.take(dataset.number_train_iters):
+        print(target_depth.shape)
+        plt.imshow(target_depth[0][:, :, 0])
         plt.show()
