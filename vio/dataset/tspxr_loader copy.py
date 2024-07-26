@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))))
-from vio.utils.tspxr_capture_utils_new import TspDataHandler
+from vio.utils.tspxr_capture_utils import TspDataHandler
 
 AUTO = tf.data.experimental.AUTOTUNE
 
@@ -91,10 +91,10 @@ class TspxrTFDSGenerator(DataGenerator):
         'intrinsic'
         """
         # Load samples
-        source_left = sample['source_left']
-        source_right = sample['source_right']
-        target_image = sample['target_image']
-        target_depth = sample['target_depth']
+        source_left = tf.cast(sample['source_left'], dtype=tf.uint8)
+        source_right = tf.cast(sample['source_right'], dtype=tf.uint8)
+        target_image = tf.cast(sample['target_image'], dtype=tf.uint8)
+        target_depth = tf.cast(sample['target_depth'], dtype=tf.float32)
         intrinsic = tf.cast(sample['intrinsic'], dtype=tf.float32)
 
 

@@ -106,11 +106,11 @@ class TspDataHandler(DataUtils):
             return img 
     
     def load_and_process_depth(self, depth_path):
-        with np.load(depth_path) as depth:
-            depth = np.expand_dims(depth, axis=-1)
-            depth = np.nan_to_num(depth)
-            depth = depth.astype(np.float32)
-            return depth
+        depth = np.load(depth_path)
+        depth = np.expand_dims(depth, axis=-1)
+        depth = np.nan_to_num(depth)
+        depth = depth.astype(np.float32)
+        return depth
         
     def rescale_intrinsic_matrix(self, K):
         """
@@ -220,6 +220,9 @@ class TspDataHandler(DataUtils):
         rgb_path = glob.glob(os.path.join(file_list, 'rgb') + '/*.{0}'.format(self.img_data_type))
         rgb_path.sort()
 
+        depth_path = glob.glob(os.path.join(file_list, 'depth') + '/*.{0}'.format(self.depth_data_type))
+        depth_path.sort()
+
         imu_path = os.path.join(file_list, 'sensor/zed_imu.csv')
         intrinsics_path = os.path.join(file_list, 'sensor/intrinsics.npy')
         zed_path = os.path.join(file_list, 'sensor/zed_pose.csv')
@@ -258,10 +261,10 @@ class TspDataHandler(DataUtils):
         # IMU npy to list
         imu_list = [imu_npy[i] for i in range(imu_npy.shape[0])]
 
-        return rgb_path, imu_list, intrinsics_npy, zed_npy    
+        return rgb_path, depth_path, imu_list, intrinsics_npy, zed_npy    
 
     def get_sync_file(self, file_list):
-        rgb_paths, imus, intrinsics, zeds = self.parsing_files(file_list)
+        rgb_paths, depth_paths, imus, intrinsics, zeds = self.parsing_files(file_list)
 
         intrinsics = self.rescale_intrinsic_matrix(K=intrinsics)
             
@@ -289,11 +292,11 @@ class TspDataHandler(DataUtils):
         rel_camera_pose = self.convert_transform_list(transform_list=relative_tracker_pose)
         global_camera_pose = self.convert_transform_list(transform_list=global_mat_list)
         
-        return rgb_paths, imus, intrinsics, rel_camera_pose, global_camera_pose
+        return rgb_paths, depth_paths, imus, intrinsics, rel_camera_pose, global_camera_pose
 
     def vio_generator(self):
         for file_list in self.file_lists:
-            rgb_paths, _, intrinsic, _, _ = self.get_sync_file(file_list)
+            rgb_paths, depth_paths, _, intrinsic, _, _ = self.get_sync_file(file_list)
 
             # image list to npy
             intrinsic = tf.cast(intrinsic, tf.float32)
@@ -303,6 +306,10 @@ class TspDataHandler(DataUtils):
                 source_left = rgb_paths[idx - img_freq]
                 source_right = rgb_paths[idx + img_freq]
                 target_image = rgb_paths[idx]
+                target_depth = depth_paths[idx]
+
+                target_depth = self.load_and_process_depth(target_depth)
+                target_depth = tf.convert_to_tensor(target_depth, dtype=tf.float32)
 
                 source_left = tf.io.read_file(source_left)
                 source_right = tf.io.read_file(source_right)
@@ -317,6 +324,7 @@ class TspDataHandler(DataUtils):
                 'source_left': source_left,
                 'source_right': source_right,
                 'target_image': target_image,
+                'target_depth': target_depth,
                 'intrinsic': intrinsic
                 }
                 del source_left
@@ -333,6 +341,7 @@ class TspDataHandler(DataUtils):
                 'source_left': tf.TensorSpec(shape=(*self.target_image_shape, 3), dtype=tf.uint8),
                 'source_right': tf.TensorSpec(shape=(*self.target_image_shape, 3), dtype=tf.uint8),
                 'target_image': tf.TensorSpec(shape=(*self.target_image_shape, 3), dtype=tf.uint8),
+                'target_depth': tf.TensorSpec(shape=(*self.target_image_shape, 1), dtype=tf.float32),
                 'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32)
             }
         )

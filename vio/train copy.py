@@ -21,9 +21,40 @@ matplotlib.use('Agg')
  Please call `optimizer.build(variables)`
  with the full list of trainable variables before the training loop or use legacy optimizer `keras.optimizers.legacy.Adam.'
 """
+
+# sudo apt-get install libtcmalloc-minimal4 
+# dpkg -L libtcmalloc-minimal4 
+# LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4.5.9 python train.py
 # tensorflow.python.framework.errors_impl.ResourceExhaustedError: Out of memory while trying to allocate
 
 np.set_printoptions(suppress=True)
+
+def ssim(y_true, y_pred):
+    C1 = 0.01 ** 2
+    C2 = 0.03 ** 2
+
+    y_true = tf.pad(y_true, [[0, 0], [1, 1], [1, 1], [0, 0]], mode='REFLECT')
+    y_pred = tf.pad(y_pred, [[0, 0], [1, 1], [1, 1], [0, 0]], mode='REFLECT')
+
+    mu_x = tf.nn.avg_pool2d(y_true, 3, 1, 'VALID')
+    mu_y = tf.nn.avg_pool2d(y_pred, 3, 1, 'VALID')
+
+    sigma_x = tf.nn.avg_pool2d(y_true ** 2, 3, 1, 'VALID') - mu_x ** 2
+    sigma_y = tf.nn.avg_pool2d(y_pred ** 2, 3, 1, 'VALID') - mu_y ** 2
+    sigma_xy = tf.nn.avg_pool2d(y_true * y_pred, 3, 1, 'VALID') - mu_x * mu_y
+
+    SSIM_n = (2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2)
+    SSIM_d = (mu_x ** 2 + mu_y ** 2 + C1) * (sigma_x + sigma_y + C2)
+
+    SSIM = SSIM_n / SSIM_d
+
+    return tf.clip_by_value((1 - SSIM) / 2, 0, 1)
+
+def grad_l1_loss(y_true, y_pred):
+    dy_true, dx_true = tf.image.image_gradients(y_true)
+    dy_pred, dx_pred = tf.image.image_gradients(y_pred)
+    grad_loss = tf.abs(dy_pred - dy_true) + tf.abs(dx_pred - dx_true)
+    return grad_loss
 
 class Trainer(object):
     def __init__(self, config) -> None:
@@ -110,6 +141,8 @@ class Trainer(object):
         source_image = tf.concat(source_stack, axis=-1)
         num_scale = 4
 
+        mask = tf.where(target_depth > 0., True, False)
+
         target_image_scaled = [tf.image.resize(target_image,
                                                [int(self.config['Train']['img_h'] // (2 ** s)),
                                                 int(self.config['Train']['img_w'] // (2 ** s))],
@@ -124,6 +157,8 @@ class Trainer(object):
             proj_error_stack_all = []
 
             pred_auto_masks = []
+
+            depth_losses = 0.
 
             pixel_losses = 0.
             smooth_losses = 0.
@@ -161,6 +196,19 @@ class Trainer(object):
                         proj_image_stack = curr_proj_image
                         proj_error_stack = curr_proj_error
                         pred_depth_stacks.append(pred_depth)
+                        
+                        ssim_loss = ssim(target_depth, pred_depth)
+                        grad_loss = grad_l1_loss(target_depth, pred_depth)
+                        l1_loss = tf.abs(target_depth - pred_depth)
+
+                        ssim_loss = tf.reduce_mean(ssim_loss[mask])
+                        grad_loss = tf.reduce_mean(grad_loss[mask])
+                        l1_loss = tf.reduce_mean(l1_loss[mask])
+
+                        depth_loss = ssim_loss + grad_loss + l1_loss
+                        depth_losses += depth_loss
+                        total_loss += depth_losses
+
                     else:
                         proj_image_stack = tf.concat([proj_image_stack, curr_proj_image], axis=3)
                         proj_error_stack = tf.concat([proj_error_stack, curr_proj_error], axis=3)
@@ -201,6 +249,7 @@ class Trainer(object):
         losses = {
             'pixel_losses': pixel_losses,
             'smooth_losses': smooth_losses,
+            'depth_losses': depth_losses,
             'total_loss': total_loss
         }
 
@@ -438,6 +487,7 @@ class Trainer(object):
                         tf.summary.image('Train Plot Depth', train_plot_depth, step=train_idx)
                         tf.summary.image('Train Plot Mask', train_plot_mask, step=train_idx)
                         tf.summary.scalar('pixel_losses', tf.reduce_mean(total_loss['pixel_losses']).numpy(), step=train_idx)
+                        tf.summary.scalar('depth_losses', tf.reduce_mean(total_loss['depth_losses']).numpy(), step=train_idx)
                         tf.summary.scalar('smooth_losses', tf.reduce_mean(total_loss['smooth_losses']).numpy(), step=train_idx)
                         tf.summary.scalar('total_loss', tf.reduce_mean(total_loss['total_loss']).numpy(), step=train_idx)
             

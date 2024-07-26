@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test_data_generator
+  exp_name: 20240725_NewData
   data_dir: ./vio/data/raw/tspxr_capture/
   log_dir: ./vio/tensorboard
   weights: ./vio/weights
