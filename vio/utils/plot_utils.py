@@ -212,6 +212,49 @@ def plot_warped_image(decoded_proj_images, decoded_proj_errors, poses):
     return buf
 
 
+def plot_total(source, target, warp_list, diff_list, mask, pose):
+    # Plot 설정
+    num_scales = len(warp_list)
+    fig, axes = plt.subplots(num_scales, 5, figsize=(20, 10))
+
+    decoded_pose = pose[0].numpy()
+    
+    # 첫 번째 이미지 (source_left)
+    for i in range(num_scales):
+        axes[i, 0].imshow(source)
+        axes[i, 0].set_title('Source Image')
+        axes[i, 0].axis('off')
+        
+        axes[i, 1].imshow(warp_list[i])
+        axes[i, 1].set_title('Source Warped')
+        axes[i, 1].axis('off')
+
+        axes[i, 2].imshow(target)
+        axes[i, 2].set_title('Target Image')
+        axes[i, 2].axis('off')
+
+        axes[i, 3].imshow(diff_list[i])
+        axes[i, 3].set_title('Differences')
+        axes[i, 3].axis('off')
+
+        axes[i, 4].imshow(mask)
+        axes[i, 4].set_title('Masks')
+        axes[i, 4].axis('off')
+
+
+    fig.text(0.5, 0.95, f"Pose: {decoded_pose}", ha='center', fontsize=12)
+
+    fig.tight_layout()
+
+    # 이미지를 Tensorboard에 로깅하기 위해 버퍼에 저장
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close()
+
+    return buf
+
+
 def plot_warped_image_list(l2t_warped, r2t_warped, source_left, source_right, target_image, poses):
     # Plot 설정
     fig, axes = plt.subplots(4, 5, figsize=(20, 10))

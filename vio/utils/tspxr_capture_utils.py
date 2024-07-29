@@ -334,6 +334,67 @@ class TspDataHandler(DataUtils):
             del rgb_paths
             gc.collect()
 
+    def vio_generator_v2(self):
+        for file_list in self.file_lists:
+            rgb_paths, depth_paths, imus, intrinsic, _, _ = self.get_sync_file(file_list)
+
+            # image list to npy
+            intrinsic = tf.cast(intrinsic, tf.float32)
+
+            for idx in range(len(rgb_paths) - 1):
+                source_image = rgb_paths[idx]
+                target_image = rgb_paths[idx + 1]
+                
+                target_depth = depth_paths[idx + 1]
+                target_depth = self.load_and_process_depth(target_depth)
+                target_depth = tf.convert_to_tensor(target_depth, dtype=tf.float32)
+
+                source_image = tf.io.read_file(source_image)
+                target_image = tf.io.read_file(target_image)
+
+                source_image = tf.io.decode_image(source_image, dtype=tf.uint8)
+                target_image = tf.io.decode_image(target_image, dtype=tf.uint8)
+                
+                imu = imus[idx]
+                imu = tf.convert_to_tensor(imu, tf.float32)
+
+                yield {
+                'source_image': source_image,
+                'target_image': target_image,
+                'target_depth': target_depth,
+                'imu': imu,
+                'intrinsic': intrinsic
+                }
+                del source_image
+                del target_image
+                del target_depth                
+                del imu
+            del intrinsic
+            del rgb_paths
+            gc.collect()
+
+    def get_sync_all_files(self):
+        for file_list in self.file_lists:
+            rgb_paths, depth_paths, imus, intrinsic, _, _ = self.get_sync_file(file_list)
+
+            # image list to npy
+            intrinsic = tf.cast(intrinsic, tf.float32)
+
+            for idx in range(len(rgb_paths) - 1):
+                source_image = rgb_paths[idx]
+                target_image = rgb_paths[idx + 1]
+                
+                target_depth = depth_paths[idx + 1]
+                target_depth = self.load_and_process_depth(target_depth)
+                target_depth = tf.convert_to_tensor(target_depth, dtype=tf.float32)
+
+                source_image = tf.io.read_file(source_image)
+                target_image = tf.io.read_file(target_image)
+
+                source_image = tf.io.decode_image(source_image, dtype=tf.uint8)
+                target_image = tf.io.decode_image(target_image, dtype=tf.uint8)
+
+
     def create_vio_dataset(self) -> tf.data.Dataset:
         dataset = tf.data.Dataset.from_generator(
             self.vio_generator,
@@ -342,6 +403,19 @@ class TspDataHandler(DataUtils):
                 'source_right': tf.TensorSpec(shape=(*self.target_image_shape, 3), dtype=tf.uint8),
                 'target_image': tf.TensorSpec(shape=(*self.target_image_shape, 3), dtype=tf.uint8),
                 'target_depth': tf.TensorSpec(shape=(*self.target_image_shape, 1), dtype=tf.float32),
+                'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32)
+            }
+        )
+        return dataset
+    
+    def create_vio_dataset_v2(self) -> tf.data.Dataset:
+        dataset = tf.data.Dataset.from_generator(
+            self.vio_generator_v2,
+            output_signature={
+                'source_image': tf.TensorSpec(shape=(*self.target_image_shape, 3), dtype=tf.uint8),
+                'target_image': tf.TensorSpec(shape=(*self.target_image_shape, 3), dtype=tf.uint8),
+                'target_depth': tf.TensorSpec(shape=(*self.target_image_shape, 1), dtype=tf.float32),
+                'imu': tf.TensorSpec(shape=(11, 6), dtype=tf.float32),
                 'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32)
             }
         )

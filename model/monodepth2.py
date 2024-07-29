@@ -105,6 +105,23 @@ def build_posenet(image_shape: tuple, batch_size: int) -> keras.models.Model:
     model = keras.models.Model(inputs=[resnet_model.input], outputs=pose_final)
     return model
 
+def build_feature_net(image_shape: tuple, batch_size: int) -> keras.models.Model:
+    # ResNet-18
+    resnet_model = build_resnet18(image_shape=(*image_shape, 6),
+                                                batch_size=batch_size,
+                                                prefix='pose_resnet')
+    features, _ = resnet_model.output  # [x, [skip1, skip2, skip3, skip4]]
+    
+    features = _conv(1, 256, 1, name='pose_conv0')(features)
+
+    features = _conv(3, 256, 1, name='pose_conv1')(features)
+    features = _conv(3, 256, 1, name='pose_conv2')(features)
+    
+    features = keras.layers.Flatten()(features)
+    features = keras.layers.Dense(256)(features)
+    features = keras.layers.Reshape((1, 256))(features)
+    model = keras.models.Model(inputs=[resnet_model.input], outputs=features)
+    return model
 
 def build_resnet18(image_shape: tuple, batch_size: int, prefix: str) -> keras.models.Model:
     model_input = keras.layers.Input(shape=image_shape, batch_size=batch_size)
@@ -241,7 +258,7 @@ def _activate(type='relu', name='relu'):
 
 if __name__ == '__main__':
     print('Test code')
-    disp = build_disp_net((256, 512), 1)
-    pose = build_posenet((256, 512), 1)
-    print(disp)
-    print(pose)
+    # disp = build_disp_net((256, 512), 1)
+    # pose = build_posenet((256, 512), 1)
+    test = build_feature_net((256, 512), 8)
+    print(test.output.shape)
