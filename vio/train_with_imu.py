@@ -355,8 +355,8 @@ class Trainer(object):
         return plot_image, plot_depth
 
     def train(self) -> None:
-        train_freq = 200
-        valid_freq = 100
+        train_freq = 100
+        valid_freq = 2
         train_idx = 0
         valid_idx = 0
         for epoch in range(self.config['Train']['epoch']):    
