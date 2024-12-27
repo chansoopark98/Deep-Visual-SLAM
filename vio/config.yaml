@@ -1,12 +1,16 @@
 Directory:
-  exp_name: 20240725_NewData
-  data_dir: ./vio/data/raw/tspxr_capture/
-  log_dir: ./vio/tensorboard
-  weights: ./vio/weights
+  exp_name: 241113_newsample_V2
+  data_dir: ./vio/data/
+  log_dir: ./tensorboard
+  weights: ./weights
+  results: ./results
 
 Train:
-  img_w: 768
-  img_h: 432
+  use_shuffle: True
+  train_log_interval: 10
+  valid_log_interval: 10
+  img_w: 256
+  img_h: 256
   v_f_len: 512
   i_f_len: 256
   imu_dropout: 0.2
@@ -18,7 +22,7 @@ Train:
   epoch: 101
   epochs_warmup: 30
   epochs_joint: 80
-  init_lr: 0.0001
+  init_lr: 0.001
   lr_warmup: 0.0005 # 0.0005
   lr_joint: 0.00005 # 0.00005
   lr_fine: 0.000001 # 0.000001

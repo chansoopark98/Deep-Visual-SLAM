@@ -381,6 +381,7 @@ def projective_inverse_warp_legacy(img, depth, pose, intrinsics):
   batch, height, width, _ = img.get_shape().as_list()
   # Convert pose vector to matrix
   pose = pose_vec2mat(pose)
+  
   # Construct pixel grid coordinates
   pixel_coords = meshgrid(batch, height, width)
   # Convert pixel coordinates to the camera frame
