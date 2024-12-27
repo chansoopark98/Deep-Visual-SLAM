@@ -1,5 +1,6 @@
 import tensorflow as tf
 from dataset.data_loader import DataLoader
+from utils.plot_utils import plot_images
 from model.monodepth2 import MonoDepth2Model
 from monodepth_learner import MonoDepth2Learner
 from tqdm import tqdm
@@ -67,17 +68,17 @@ class Trainer(object):
     @tf.function()
     def train_step(self, images, imus, intrinsic) -> tf.Tensor:
         with tf.GradientTape() as tape:
-            total_loss, pixel_loss, smooth_loss = self.learner.forward_step(images, intrinsic)
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(images, intrinsic, training=True)
         
         # 4. loss update
         gradients = tape.gradient(total_loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-        return total_loss, pixel_loss, smooth_loss
+        return total_loss, pixel_loss, smooth_loss, pred_depths
     
     @tf.function()
     def validation_step(self, images, imus, intrinsic) -> tf.Tensor:
-        total_loss, pixel_loss, smooth_loss = self.learner.forward_step(images, intrinsic)
-        return total_loss, pixel_loss, smooth_loss
+        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(images, intrinsic, training=False)
+        return total_loss, pixel_loss, smooth_loss, pred_depths
 
     def train(self) -> None:        
         for epoch in range(self.config['Train']['epoch']):    
@@ -91,7 +92,7 @@ class Trainer(object):
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
             for idx, (images, imus, intrinsic) in enumerate(train_tqdm):
-                train_t_loss, train_p_loss, train_s_loss = self.train_step(images, imus, intrinsic)
+                train_t_loss, train_p_loss, train_s_loss, pred_train_depths = self.train_step(images, imus, intrinsic)
 
                 # Update train metrics
                 self.train_total_loss(train_t_loss)
@@ -110,6 +111,16 @@ class Trainer(object):
                         tf.summary.scalar('Train/' + self.train_smooth_loss.name,
                                             self.train_smooth_loss.result(), step=current_step)
 
+                if idx % self.config['Train']['train_plot_interval'] == 0:
+                    # Draw depth plot
+                    target_image = self.data_loader.denormalize_image(images[:, :, :, 3:6])
+                    train_depth_plot = plot_images(image=target_image, pred_depths=pred_train_depths)
+
+                    with self.train_summary_writer.as_default():
+                        # Logging train images
+                        tf.summary.image('Train/Depth Result', train_depth_plot, step=current_step)
+                        
+
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy(),
                     pixel_loss=self.train_pixel_loss.result().numpy(),
@@ -119,7 +130,7 @@ class Trainer(object):
             valid_tqdm = tqdm(self.data_loader.valid_dataset, total=self.data_loader.num_valid_samples)
             valid_tqdm.set_description('Validation || ')
             for idx, (images, imus, intrinsic) in enumerate(valid_tqdm):
-                valid_t_loss, valid_p_loss, valid_s_loss = self.validation_step(images, imus, intrinsic)
+                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths = self.validation_step(images, imus, intrinsic)
 
                 # Update valid metrics
                 self.valid_total_loss(valid_t_loss)
@@ -137,6 +148,15 @@ class Trainer(object):
                                           self.valid_pixel_loss.result(), step=current_step)
                         tf.summary.scalar('Valid/' + self.valid_smooth_loss.name,
                                           self.valid_smooth_loss.result(), step=current_step)
+                
+                if idx % self.config['Train']['valid_plot_interval'] == 0:
+                    # Draw depth plot
+                    target_image = self.data_loader.denormalize_image(images[:, :, :, 3:6])
+                    valid_depth_plot = plot_images(image=target_image, pred_depths=pred_valid_depths)
+
+                    with self.valid_summary_writer.as_default():
+                        # Logging valid images
+                        tf.summary.image('Valid/Depth Result', valid_depth_plot, step=current_step)
 
                 valid_tqdm.set_postfix(
                     total_loss=self.valid_total_loss.result().numpy(),

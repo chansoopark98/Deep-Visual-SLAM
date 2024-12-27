@@ -364,41 +364,6 @@ def projective_inverse_warp(img, depth, pose, intrinsics, invert=False, euler=Fa
   output_img = bilinear_sampler(img, src_pixel_coords)
   return output_img
 
-
-def projective_inverse_warp_legacy(img, depth, pose, intrinsics):
-  """Inverse warp a source image to the target image plane based on projection.
-
-  Args:
-    img: the source image [batch, height_s, width_s, 3]
-    depth: depth map of the target image [batch, height_t, width_t]
-    pose: target to source camera transformation matrix [batch, 6], in the
-          order of tx, ty, tz, rx, ry, rz
-    intrinsics: camera intrinsics [batch, 3, 3]
-  Returns:
-    Source image inverse warped to the target image plane [batch, height_t,
-    width_t, 3]
-  """
-  batch, height, width, _ = img.get_shape().as_list()
-  # Convert pose vector to matrix
-  pose = pose_vec2mat(pose)
-  
-  # Construct pixel grid coordinates
-  pixel_coords = meshgrid(batch, height, width)
-  # Convert pixel coordinates to the camera frame
-  cam_coords = pixel2cam(depth, pixel_coords, intrinsics)
-  # Construct a 4x4 intrinsic matrix (TODO: can it be 3x4?)
-  filler = tf.constant([0.0, 0.0, 0.0, 1.0], shape=[1, 1, 4])
-  filler = tf.tile(filler, [batch, 1, 1])
-  intrinsics = tf.concat([intrinsics, tf.zeros([batch, 3, 1])], axis=2)
-  intrinsics = tf.concat([intrinsics, filler], axis=1)
-  # Get a 4x4 transformation matrix from 'target' camera frame to 'source'
-  # pixel frame.
-  proj_tgt_cam_to_src_pixel = tf.matmul(intrinsics, pose)
-  src_pixel_coords = cam2pixel(cam_coords, proj_tgt_cam_to_src_pixel)
-  output_img = bilinear_sampler(img, src_pixel_coords)
-  return output_img
-
-
 def bilinear_sampler(imgs, coords):
   """Construct a new image by bilinear sampling from the input image.
   Points falling outside the source image boundary have value 0.
