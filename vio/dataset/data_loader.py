@@ -7,7 +7,7 @@ except:
 
 class DataLoader(TspxrCapture):
     def __init__(self, config) -> None:
-        super().__init__(root_dir=config['Directory']['data_dir'])
+        super().__init__(config=config)
         self.batch_size = config['Train']['batch_size']
         self.use_shuffle = config['Train']['use_shuffle']
         self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
@@ -39,8 +39,9 @@ class DataLoader(TspxrCapture):
     
     @tf.function(jit_compile=True)
     def denormalize_image(self, image):
-        image *= 255.0
         image = (image * self.std) + self.mean
+        image *= 255.0
+        image = tf.cast(image, tf.uint8)
         return image
     
     def preprocess(self, sample: dict) -> tuple:
@@ -50,7 +51,7 @@ class DataLoader(TspxrCapture):
         imu_left = tf.cast(sample['imu_left'], tf.float32)
         imu_right = tf.cast(sample['imu_right'], tf.float32)
         intrinsic = tf.cast(sample['intrinsic'], tf.float32)
-        
+
         images = tf.concat([source_left, target_image, source_right], axis=-1)
         imus = tf.concat([imu_left, imu_right], axis=-1)
         return images, imus, intrinsic
@@ -89,7 +90,7 @@ if __name__ == '__main__':
     }
     data_loader = DataLoader(config)
     
-    for sample in data_loader.train_dataset.take(10):
-        print(sample)
+    for image, imu, intrinsic in data_loader.train_dataset.take(10):
+        print(intrinsic)
 
     # Test Files

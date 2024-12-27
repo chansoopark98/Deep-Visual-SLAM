@@ -2,6 +2,7 @@ import os
 import glob
 import numpy as np
 import pandas as pd
+import cv2
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation as R
 
@@ -93,8 +94,10 @@ def relative_vec_to_global_mat(relative_poses):
     return global_poses
 
 class TspxrCapture(object):
-    def __init__(self, root_dir):
-        self.root_dir = root_dir
+    def __init__(self, config):
+        self.config = config
+        self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        self.root_dir = self.config['Directory']['data_dir']
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
         self.train_data = self.generate_datasets(scene_dirs=self.train_dir, shuffle=True, test=False)
@@ -141,6 +144,10 @@ class TspxrCapture(object):
 
         # pose_data와 rgb_paths가 같은 길이, 동일한 index에 대해 시점이 매칭된다고 가정
         length = len(rgb_paths)
+
+        # Read rgb sample
+        rgb_sample = cv2.imread(rgb_paths[0])
+        new_intrinsic = self.rescale_intrinsic(rgb=rgb_sample, intrinsic=intrinsic)
 
         # for문 범위: step부터 length - step - 1까지
         # 예: step=1일 때, 1부터 length-2까지 순회
@@ -200,7 +207,7 @@ class TspxrCapture(object):
                 'source_right': right_rgb,
                 'imu_left': left_imu_resampled,
                 'imu_right': right_imu_resampled,
-                'intrinsic': intrinsic.astype(np.float32),
+                'intrinsic': new_intrinsic.astype(np.float32),
                 # 'pose_lists': {
                 #     'left_pose': left_pose,
                 #     'curr_pose': curr_pose,
@@ -210,6 +217,26 @@ class TspxrCapture(object):
             samples.append(sample)
 
         return samples
+    
+    def rescale_intrinsic(self, rgb: np.ndarray,
+                          intrinsic: np.ndarray) -> np.ndarray:
+            old_h, old_w = rgb.shape[:2]
+            new_h, new_w = self.image_size
+
+            # x 방향 스케일 비율, y 방향 스케일 비율 계산
+            scale_x = new_w / old_w
+            scale_y = new_h / old_h
+
+            # intrinsic matrix 복사본 생성
+            new_intrinsic = intrinsic.copy()
+
+            # Focal length, principal point 스케일 조정
+            new_intrinsic[0, 0] *= scale_x  # fx
+            new_intrinsic[1, 1] *= scale_y  # fy
+            new_intrinsic[0, 2] *= scale_x  # cx
+            new_intrinsic[1, 2] *= scale_y  # cy
+
+            return new_intrinsic
 
     def generate_datasets(self, scene_dirs, shuffle: False, test=False):
         scene_dirs = self._load_files(dir=scene_dirs)
