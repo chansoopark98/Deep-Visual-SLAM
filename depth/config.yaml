@@ -1,13 +1,19 @@
 Directory:
-  exp_name: 'test_monodepth' # effnetv2b0_Test_l2_Reg_inverse
-  data_dir: ./depth/dataset/
-  log_dir: ./depth/tensorboard/
-  weights: ./depth/weights/
-  
+  exp_name: test
+  data_dir: ./depth/data/
+  log_dir: ./tensorboard
+  weights: ./weights
+  results: ./results
+
 Train:
+  use_shuffle: True
+  train_log_interval: 50
+  valid_log_interval: 50
+  train_plot_interval: 200
+  valid_plot_interval: 200
   img_w: 640
   img_h: 480
-  weight_decay: 0.000001
-  batch_size: 16 # 1
-  epoch: 51
-  init_lr: 0.0005
+  weight_decay: 0.00001
+  batch_size: 32 # 1
+  epoch: 101
+  init_lr: 0.001

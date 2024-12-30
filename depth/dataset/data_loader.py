@@ -47,7 +47,6 @@ class DataLoader(object):
         depth = tf.cast(depth, tf.float32)
         depth = (depth / 65535.0) * 10.0
         depth = tf.image.resize(depth, self.image_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        
         return depth
     
     @tf.function(jit_compile=True)
@@ -66,7 +65,6 @@ class DataLoader(object):
     def preprocess(self, sample: dict) -> tuple:
         rgb = self._read_image(sample['rgb'])
         depth = self._read_depth(sample['depth'])
-        
         return rgb, depth
 
     def _compile_dataset(self, np_samples: np.ndarray, batch_size: int, use_shuffle: bool) -> tf.data.Dataset:
@@ -102,6 +100,5 @@ if __name__ == '__main__':
     for rgb, depth in data_loader.train_dataset.take(10):
         print(rgb.shape)
         print(depth.shape)
-
         plt.imshow(depth[0], cmap='plasma')
         plt.show()
