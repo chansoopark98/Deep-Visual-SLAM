@@ -81,7 +81,7 @@ class DepthLearner(object):
             pred_depth_resized = tf.image.resize(
                 pred_depth,
                 original_shape,
-                method=tf.image.ResizeMethod.NEAREST_NEIGHBOR
+                method=tf.image.ResizeMethod.BILINEAR
             )
 
             # scale-invariant log loss

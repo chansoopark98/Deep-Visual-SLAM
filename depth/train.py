@@ -48,7 +48,6 @@ class Trainer(object):
         self.train_total_loss = tf.keras.metrics.Mean(name='train_total_loss')
         self.valid_total_loss = tf.keras.metrics.Mean(name='valid_total_loss')
         
-
         # 6. Logger
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
         tensorboard_path = self.config['Directory']['log_dir'] + \
@@ -68,7 +67,6 @@ class Trainer(object):
         with tf.GradientTape() as tape:
             total_loss, pred_depths = self.learner.forward_step(rgb, depth, training=True)
         
-        # 4. loss update
         gradients = tape.gradient(total_loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return total_loss, pred_depths
@@ -101,7 +99,7 @@ class Trainer(object):
                     with self.train_summary_writer.as_default():
                         # Logging train total, pixel, smooth loss
                         tf.summary.scalar('Train/' + self.train_total_loss.name,
-                                            self.train_total_loss.result(), step=current_step)
+                                          self.train_total_loss.result(), step=current_step)
 
                 if idx % self.config['Train']['train_plot_interval'] == 0:
                     # Draw depth plot
@@ -114,7 +112,6 @@ class Trainer(object):
                         # Logging train images
                         tf.summary.image('Train/Depth Result', train_depth_plot, step=current_step)
                         
-
                 train_tqdm.set_postfix(total_loss=self.train_total_loss.result().numpy())
             
             # Validation
@@ -164,11 +161,15 @@ if __name__ == '__main__':
         # args = parser.parse_args()
 
         # Set random seed
-        # SEED = 42
+        SEED = 42
         # os.environ['PYTHONHASHSEED'] = str(SEED)
-        # os.environ['TF_DETERMINISTIC_OPS'] = '1'
+        # os.environ['TF_DETERMINISTIC_OPS'] = '0'
         # tf.random.set_seed(SEED)
         # np.random.seed(SEED)
+        # tf.keras.utils.set_random_seed(SEED)
+        # tf.config.experimental.enable_op_determinism()
+        # np.random.seed(SEED)
+        
 
         trainer = Trainer(config=config)
 
