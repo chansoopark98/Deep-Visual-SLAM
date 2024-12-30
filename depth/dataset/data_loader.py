@@ -35,20 +35,32 @@ class DataLoader(object):
     def _read_image(self, rgb_path):
         rgb_image = tf.io.read_file(rgb_path)
         rgb_image = tf.io.decode_png(rgb_image, channels=3)
-        rgb_image = tf.image.resize(rgb_image, self.image_size)
-        rgb_image = tf.cast(rgb_image, tf.float32)
-        rgb_image = self.normalize_image(rgb_image)
         return rgb_image
     
     @tf.function()
     def _read_depth(self, depth_path):
         image = tf.io.read_file(depth_path)
         depth = tf.image.decode_png(image, channels=1, dtype=tf.uint16)
+        return depth
+
+    @tf.function(jit_compile=True)
+    def preprocess_image(self, rgb: tf.Tensor):
+        rgb = tf.image.resize(rgb,
+                              self.image_size,
+                              method=tf.image.ResizeMethod.BILINEAR)
+        rgb = tf.cast(rgb, tf.float32)
+        rgb = self.normalize_image(rgb)
+        return rgb
+
+    @tf.function(jit_compile=True)
+    def preprocess_depth(self, depth: tf.Tensor):
         depth = tf.cast(depth, tf.float32)
         depth = (depth / 65535.0) * 10.0
-        depth = tf.image.resize(depth, self.image_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        depth = tf.image.resize(depth,
+                                self.image_size,
+                                method=tf.image.ResizeMethod.BILINEAR)
         return depth
-    
+        
     @tf.function(jit_compile=True)
     def normalize_image(self, image: tf.Tensor) -> tf.Tensor:
         image /= 255.0
@@ -62,9 +74,16 @@ class DataLoader(object):
         image = tf.cast(image, tf.uint8)
         return image
     
-    def preprocess(self, sample: dict) -> tuple:
+    @tf.function()
+    def load_data(self, sample: dict) -> tuple:
         rgb = self._read_image(sample['rgb'])
         depth = self._read_depth(sample['depth'])
+        return rgb, depth
+    
+    @tf.function(jit_compile=True)
+    def preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
+        rgb = self.preprocess_image(rgb)
+        depth = self.preprocess_depth(depth)
         return rgb, depth
 
     def _compile_dataset(self, np_samples: np.ndarray, batch_size: int, use_shuffle: bool) -> tf.data.Dataset:
@@ -77,6 +96,7 @@ class DataLoader(object):
         )
         if use_shuffle:
             dataset = dataset.shuffle(buffer_size=batch_size * 128, reshuffle_each_iteration=True)
+        dataset = dataset.map(self.load_data, num_parallel_calls=self.auto_opt)
         dataset = dataset.map(self.preprocess, num_parallel_calls=self.auto_opt)
         dataset = dataset.batch(batch_size, drop_remainder=True)
         dataset = dataset.prefetch(self.auto_opt)

@@ -299,7 +299,7 @@ class MonoDepth2Model(tf.keras.Model):
         for s in range(self.num_scales):
             scale_h = self.image_shape[0] // (2 ** s)
             scale_w = self.image_shape[1] // (2 ** s)
-            scaled_disp = tf.image.resize(disp_raw[s], [scale_h, scale_w], method='nearest')
+            scaled_disp = tf.image.resize(disp_raw[s], [scale_h, scale_w], method=tf.image.ResizeMethod.BILINEAR)
             pred_disp_list.append(scaled_disp)
 
         # Pose

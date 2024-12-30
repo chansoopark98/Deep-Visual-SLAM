@@ -150,9 +150,13 @@ class MonoDepth2Learner(object):
             # disp_s shape => [B, H/(2^s), W/(2^s), 1]
             disp_s = pred_disps[s]
             # target scaled => nearest or bilinear, here nearest
-            tgt_scaled = tf.image.resize(tgt_image, [H // (2**s), W // (2**s)], method='nearest')
+            tgt_scaled = tf.image.resize(tgt_image,
+                                         [H // (2**s), W // (2**s)],
+                                          method=tf.image.ResizeMethod.BILINEAR)
             # src scaled
-            src_scaled = tf.image.resize(src_image_stack, [H // (2**s), W // (2**s)], method='nearest')
+            src_scaled = tf.image.resize(src_image_stack,
+                                         [H // (2**s), W // (2**s)],
+                                          method=tf.image.ResizeMethod.BILINEAR)
 
             # 3.1) depth = disp->depth
             depth_s = self.disp_to_depth(disp_s, self.min_depth, self.max_depth)
