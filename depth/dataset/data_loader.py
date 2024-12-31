@@ -15,6 +15,7 @@ class DataLoader(object):
         self.batch_size = self.config['Train']['batch_size']
         self.use_shuffle = self.config['Train']['use_shuffle']
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        self.max_depth = self.config['Train']['max_depth']
         self.auto_opt = tf.data.AUTOTUNE
         self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
         self.std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
@@ -65,11 +66,10 @@ class DataLoader(object):
     @tf.function(jit_compile=True)
     def preprocess_depth(self, depth: tf.Tensor):
         depth = tf.cast(depth, tf.float32)
-        
-        # depth = (depth / 65535.0) * 10.0
         depth = tf.image.resize(depth,
                                 self.image_size,
                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        depth = tf.where(depth > self.max_depth, 0., depth)
         return depth
         
     @tf.function(jit_compile=True)
@@ -89,7 +89,56 @@ class DataLoader(object):
     def preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
+
+        # 1. Augmentation
+        rgb, depth = self.augment(rgb, depth)
+
+        # 2. Resize
+        rgb = tf.image.resize(rgb, self.image_size,
+                              method=tf.image.ResizeMethod.BILINEAR)
+        depth = tf.image.resize(depth, self.image_size,
+                                method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        # 3. Normalize
+        rgb = self.normalize_image(rgb)
+
         return rgb, depth
+    
+    @tf.function(jit_compile=True)
+    def augment(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
+        """
+        rgb: RGB image tensor (H, W, 3) [0, 255]
+        depth: Depth image tensor (H, W, 1) [0, max_depth]
+        """
+        # rgb augmentations
+        rgb = tf.cast(rgb, tf.float32) / 255.0
+
+        if tf.random.uniform(()) > 0.5:
+            delta_brightness = tf.random.uniform([], -0.2, 0.2)
+            rgb = tf.image.adjust_brightness(rgb, delta_brightness)
+        
+        if tf.random.uniform(()) > 0.5:
+            contrast_factor = tf.random.uniform([], 0.8, 1.2)
+            rgb = tf.image.adjust_contrast(rgb, contrast_factor)
+        
+        if tf.random.uniform(()) > 0.5:
+            gamma = tf.random.uniform([], 0.8, 1.2)
+            rgb = tf.image.adjust_gamma(rgb, gamma)
+        
+        if tf.random.uniform(()) > 0.5:
+            max_delta = 0.02
+            rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
+
+        # flip left-right
+        if tf.random.uniform(()) > 0.5:
+            rgb = tf.image.flip_left_right(rgb)
+            depth = tf.image.flip_left_right(depth)
+
+        # back to [0, 255]
+        rgb = tf.clip_by_value(rgb, 0.0, 1.0)
+        rgb = tf.cast(rgb * 255.0, tf.uint8)
+
+        return rgb, depth
+        
 
     def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool) -> tf.data.Dataset:
         combined_dataset: tf.data.Dataset = datasets[0]

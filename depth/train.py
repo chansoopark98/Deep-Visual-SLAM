@@ -170,7 +170,6 @@ if __name__ == '__main__':
         # tf.config.experimental.enable_op_determinism()
         # np.random.seed(SEED)
         
-
         trainer = Trainer(config=config)
 
         trainer.train()

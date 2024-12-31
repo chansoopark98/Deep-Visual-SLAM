@@ -62,7 +62,7 @@ class DepthLearner(object):
         loss = diff_sq - 0.5 * diff_sum
         return loss
 
-    def multi_scale_loss(self, pred_depths, gt_depth, alpha=[0.5, 0.2, 0.2, 0.1]):
+    def multi_scale_loss(self, pred_depths, gt_depth, alpha=[1/2, 1/4, 1/8, 1/16]):
         """
         여러 스케일에서 예측된 depth와 원본 GT depth 간의 손실을 가중합
         pred_depths: list of depth tensors [disp1->depth, disp2->depth, disp3->depth, disp4->depth]

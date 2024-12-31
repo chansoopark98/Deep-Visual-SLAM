@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test
+  exp_name: tfrecord_test
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -15,9 +15,10 @@ Train:
   valid_log_interval: 50
   train_plot_interval: 200
   valid_plot_interval: 200
+  max_depth: 10.0
   img_w: 640
   img_h: 480
   weight_decay: 0.00001
-  batch_size: 16 # 1
-  epoch: 101
+  batch_size: 32 # 1
+  epoch: 31
   init_lr: 0.001
