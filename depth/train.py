@@ -41,14 +41,22 @@ class Trainer(object):
                                                                               power=0.9)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
-                                                  weight_decay=self.config['Train']['weight_decay'])
+                                                  ) # weight_decay=self.config['Train']['weight_decay']
 
         # 4. Learner
         self.learner = DepthLearner(model=self.model, optimizer=self.optimizer)
 
         # 5. Metrics
         self.train_total_loss = tf.keras.metrics.Mean(name='train_total_loss')
+        self.train_smooth_loss = tf.keras.metrics.Mean(name='train_smooth_loss')
+        self.train_log_loss = tf.keras.metrics.Mean(name='train_log_loss')
+        self.train_l1_loss = tf.keras.metrics.Mean(name='train_l1_loss')
+
         self.valid_total_loss = tf.keras.metrics.Mean(name='valid_total_loss')
+        self.valid_smooth_loss = tf.keras.metrics.Mean(name='valid_smooth_loss')
+        self.valid_log_loss = tf.keras.metrics.Mean(name='valid_log_loss')
+        self.valid_l1_loss = tf.keras.metrics.Mean(name='valid_l1_loss')
+
         self.valid_depth_metrics = DepthMetrics('valid_depth_metrics')
 
         # 6. Logger
@@ -66,21 +74,22 @@ class Trainer(object):
                     exist_ok=True)
 
     @tf.function()
-    def train_step(self, rgb, depth) -> tf.Tensor:
+    def train_step(self, rgb, depth):
         with tf.GradientTape() as tape:
-            total_loss, pred_depths = self.learner.forward_step(
+            loss_dict, pred_depths = self.learner.forward_step(
                 rgb, depth, training=True)
+            total_loss = sum(loss_dict.values())
 
         gradients = tape.gradient(total_loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(
             zip(gradients, self.model.trainable_variables))
-        return total_loss, pred_depths
+        return loss_dict, pred_depths
 
     @tf.function()
-    def validation_step(self, rgb, depth) -> tf.Tensor:
-        total_loss, pred_depths = self.learner.forward_step(
+    def validation_step(self, rgb, depth):
+        loss_dict, pred_depths = self.learner.forward_step(
             rgb, depth, training=False)
-        return total_loss, pred_depths
+        return loss_dict, pred_depths
 
     def train(self) -> None:
         for epoch in range(self.config['Train']['epoch']):
@@ -95,18 +104,27 @@ class Trainer(object):
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
             for idx, (rgb, depth) in enumerate(train_tqdm):
-                train_t_loss, pred_train_depths = self.train_step(rgb, depth)
+                train_loss_result, pred_train_depths = self.train_step(rgb, depth)
 
                 # Update train metrics
-                self.train_total_loss(train_t_loss)
+                self.train_total_loss.update_state(sum(train_loss_result.values()))
+                self.train_smooth_loss.update_state(train_loss_result['smooth_loss'])
+                self.train_log_loss.update_state(train_loss_result['log_loss'])
+                self.train_l1_loss.update_state(train_loss_result['l1_loss'])
 
                 if idx % self.config['Train']['train_log_interval'] == 0:
                     current_step = self.data_loader.num_train_samples * epoch + idx
 
                     with self.train_summary_writer.as_default():
                         # Logging train total, pixel, smooth loss
-                        tf.summary.scalar('Train/' + self.train_total_loss.name,
+                        tf.summary.scalar(f'Train/{self.train_total_loss.name}' ,
                                           self.train_total_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Train/{self.train_smooth_loss.name}',
+                                            self.train_smooth_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Train/{self.train_log_loss.name}',
+                                            self.train_log_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Train/{self.train_l1_loss.name}',
+                                            self.train_l1_loss.result(), step=current_step)
 
                 if idx % self.config['Train']['train_plot_interval'] == 0:
                     # Draw depth plot
@@ -128,11 +146,13 @@ class Trainer(object):
                               total=self.data_loader.num_valid_samples)
             valid_tqdm.set_description('Validation || ')
             for idx, (rgb, depth) in enumerate(valid_tqdm):
-                valid_t_loss, pred_valid_depths = self.validation_step(
-                    rgb, depth)
+                valid_loss_result, pred_valid_depths = self.validation_step(rgb, depth)
 
                 # Update valid metrics
-                self.valid_total_loss(valid_t_loss)
+                self.valid_total_loss.update_state(sum(valid_loss_result.values()))
+                self.valid_smooth_loss.update_state(valid_loss_result['smooth_loss'])
+                self.valid_log_loss.update_state(valid_loss_result['log_loss'])
+                self.valid_l1_loss.update_state(valid_loss_result['l1_loss'])
                 self.valid_depth_metrics.update_state(depth, pred_valid_depths[0])
 
                 if idx % self.config['Train']['valid_log_interval'] == 0:
@@ -140,9 +160,14 @@ class Trainer(object):
 
                     with self.valid_summary_writer.as_default():
                         # Logging valid total, pixel, smooth loss
-                        tf.summary.scalar('Valid/' + self.valid_total_loss.name,
+                        tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
                                           self.valid_total_loss.result(), step=current_step)
-                        
+                        tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
+                                            self.valid_smooth_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Valid/{self.valid_log_loss.name}',
+                                            self.valid_log_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Valid/{self.valid_l1_loss.name}',
+                                            self.valid_l1_loss.result(), step=current_step)            
                     
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     # Draw depth plot
@@ -163,14 +188,23 @@ class Trainer(object):
             with self.valid_summary_writer.as_default():
                 metrics_dict = self.valid_depth_metrics.get_all_metrics()
                 for metric_name, metric_value in metrics_dict.items():
-                            tf.summary.scalar(f"Valid/{metric_name}", metric_value, step=current_step)
+                    tf.summary.scalar(f"Valid/{metric_name}", metric_value, step=current_step)
 
             if epoch % 5 == 0:
                 self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
                                                                             self.config['Directory']['exp_name'],
                                                                             epoch))
+                
+            # Reset metrics
             self.train_total_loss.reset_states()
+            self.train_smooth_loss.reset_states()
+            self.train_log_loss.reset_states()
+            self.train_l1_loss.reset_states()
+
             self.valid_total_loss.reset_states()
+            self.valid_smooth_loss.reset_states()
+            self.valid_log_loss.reset_states()
+            self.valid_l1_loss.reset_states()
             self.valid_depth_metrics.reset_states()
 
 if __name__ == '__main__':

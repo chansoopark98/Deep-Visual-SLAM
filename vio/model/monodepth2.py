@@ -98,6 +98,8 @@ class DispNet(tf.keras.Model):
         self.image_width = image_shape[1]
         self.batch_size = batch_size
         self.prefix_str = prefix
+        self.alpha = 9.9
+        self.beta = 0.1
 
         # 1) 인코더(ResNet18Encoder)
         self.encoder = ResNet18Encoder(
@@ -115,7 +117,7 @@ class DispNet(tf.keras.Model):
         self.iconv5_resize = tf.keras.layers.Resizing(
             height=self.image_height // 16,
             width=self.image_width // 16,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv5_resize'
         )
         self.upconv5 = reflect_conv(3, filters[4], 1, 'upconv5')
@@ -125,7 +127,7 @@ class DispNet(tf.keras.Model):
         self.iconv4_resize = tf.keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv4_resize'
         )
         self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4')
@@ -136,7 +138,7 @@ class DispNet(tf.keras.Model):
         self.iconv3_resize = tf.keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv3_resize'
         )
         self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3')
@@ -147,7 +149,7 @@ class DispNet(tf.keras.Model):
         self.iconv2_resize = tf.keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv2_resize'
         )
         self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2')
@@ -158,7 +160,7 @@ class DispNet(tf.keras.Model):
         self.iconv1_resize = tf.keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv1_resize'
         )
         self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1')
@@ -171,8 +173,6 @@ class DispNet(tf.keras.Model):
         """
         # 1) 인코더
         x, skips = self.encoder(inputs, training=training)
-        # x: conv5_x
-        # skips: [skip1, skip2, skip3, skip4]
 
         # disp5
         iconv5 = self.iconv5(x, training=training)  # [B,H/32, W/32, 256]
@@ -186,6 +186,7 @@ class DispNet(tf.keras.Model):
         iconv4_concat = tf.concat([iconv4_upsample, skips[1]], axis=3)
         upconv4 = self.upconv4(iconv4_concat, training=training)
         disp4 = self.disp4(upconv4, training=training)
+        # disp4 = self.alpha * self.disp4(upconv4, training=training) + self.beta
 
         # disp3
         iconv3 = self.iconv3(upconv4, training=training)
@@ -193,6 +194,7 @@ class DispNet(tf.keras.Model):
         iconv3_concat = tf.concat([iconv3_upsample, skips[2]], axis=3)
         upconv3 = self.upconv3(iconv3_concat, training=training)
         disp3 = self.disp3(upconv3, training=training)
+        # disp3 = self.alpha * self.disp3(upconv3, training=training) + self.beta
 
         # disp2
         iconv2 = self.iconv2(upconv3, training=training)
@@ -200,12 +202,14 @@ class DispNet(tf.keras.Model):
         iconv2_concat = tf.concat([iconv2_upsample, skips[3]], axis=3)
         upconv2 = self.upconv2(iconv2_concat, training=training)
         disp2 = self.disp2(upconv2, training=training)
+        # disp2 = self.alpha * self.disp2(upconv2, training=training) + self.beta
 
         # disp1
         iconv1 = self.iconv1(upconv2, training=training)
         iconv1_upsample = self.iconv1_resize(iconv1)
         upconv1 = self.upconv1(iconv1_upsample, training=training)
         disp1 = self.disp1(upconv1, training=training)
+        # disp1 = self.alpha * self.disp1(upconv1, training=training) + self.beta
 
         return disp1, disp2, disp3, disp4
 

@@ -7,18 +7,18 @@ Directory:
 
 Dataset:
   Nyu_depth_v2: True
-  Diode: True
+  Diode: False
 
 Train:
   use_shuffle: True
   train_log_interval: 50
   valid_log_interval: 50
-  train_plot_interval: 200
-  valid_plot_interval: 200
+  train_plot_interval: 100
+  valid_plot_interval: 100
   max_depth: 10.0
   img_w: 640
   img_h: 480
   weight_decay: 0.00001
-  batch_size: 32 # 1
+  batch_size: 16 # 1
   epoch: 31
-  init_lr: 0.001
+  init_lr: 0.0004

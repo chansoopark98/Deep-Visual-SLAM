@@ -107,32 +107,32 @@ class DataLoader(object):
         depth: Depth image tensor (H, W, 1) [0, max_depth]
         """
         # rgb augmentations
-        rgb = tf.cast(rgb, tf.float32) / 255.0
+        # rgb = tf.cast(rgb, tf.float32) / 255.0
 
-        if tf.random.uniform(()) > 0.5:
-            delta_brightness = tf.random.uniform([], -0.2, 0.2)
-            rgb = tf.image.adjust_brightness(rgb, delta_brightness)
+        # if tf.random.uniform([]) > 0.5:
+        #     delta_brightness = tf.random.uniform([], -0.2, 0.2)
+        #     rgb = tf.image.adjust_brightness(rgb, delta_brightness)
         
-        if tf.random.uniform(()) > 0.5:
-            contrast_factor = tf.random.uniform([], 0.7, 1.3)
-            rgb = tf.image.adjust_contrast(rgb, contrast_factor)
+        # if tf.random.uniform([]) > 0.5:
+        #     contrast_factor = tf.random.uniform([], 0.7, 1.3)
+        #     rgb = tf.image.adjust_contrast(rgb, contrast_factor)
         
-        if tf.random.uniform(()) > 0.5:
-            gamma = tf.random.uniform([], 0.8, 1.2)
-            rgb = tf.image.adjust_gamma(rgb, gamma)
+        # if tf.random.uniform([]) > 0.5:
+        #     gamma = tf.random.uniform([], 0.8, 1.2)
+        #     rgb = tf.image.adjust_gamma(rgb, gamma)
         
-        if tf.random.uniform(()) > 0.5:
-            max_delta = 0.1
-            rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
+        # if tf.random.uniform([]) > 0.5:
+        #     max_delta = 0.1
+        #     rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
 
         # flip left-right
-        if tf.random.uniform(()) > 0.5:
+        if tf.random.uniform([]) > 0.5:
             rgb = tf.image.flip_left_right(rgb)
             depth = tf.image.flip_left_right(depth)
 
         # back to [0, 255]
-        rgb = tf.clip_by_value(rgb, 0., 255.)
-        rgb = tf.cast(rgb * 255.0, tf.uint8)
+        # rgb = tf.clip_by_value(rgb, 0., 255.)
+        # rgb = tf.cast(rgb * 255.0, tf.uint8)
 
         return rgb, depth
         
@@ -157,7 +157,7 @@ if __name__ == '__main__':
             'data_dir': root_dir
         },
         'Dataset':{
-            'Nyu_depth_v2': True,
+            'Nyu_depth_v2': False,
             'Diode': True
         },
         'Train': {
@@ -170,7 +170,7 @@ if __name__ == '__main__':
     }
     data_loader = DataLoader(config)
     
-    for rgb, depth in data_loader.train_dataset.take(10):
+    for rgb, depth in data_loader.train_dataset.take(100):
         print(rgb.shape)
         print(depth.shape)
         rgb = data_loader.denormalize_image(rgb)
