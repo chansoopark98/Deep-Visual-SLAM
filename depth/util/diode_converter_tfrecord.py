@@ -3,6 +3,7 @@ import glob
 import numpy as np
 import tensorflow as tf
 from PIL import Image
+import json
 
 class DiodeConverterTFRecord(object):
     def __init__(self, root_dir):
@@ -17,13 +18,21 @@ class DiodeConverterTFRecord(object):
 
         os.makedirs(self.save_dir, exist_ok=True)
 
-        self.convert(self.train_dir, self.train_tfrecord_path, is_train=True)
-        self.convert(self.valid_dir, self.valid_tfrecord_path, is_train=False)
+        self.train_count = self.convert(self.train_dir, self.train_tfrecord_path, is_train=True)
+        self.valid_count = self.convert(self.valid_dir, self.valid_tfrecord_path, is_train=False)
+
+        # Save metadata with sample counts
+        metadata = {
+            "train_count": self.train_count,
+            "valid_count": self.valid_count
+        }
+        with open(os.path.join(self.save_dir, 'metadata.json'), 'w') as f:
+            json.dump(metadata, f)
 
     def serialize_example(self, rgb, depth):
         """Serialize a single RGB and depth pair into a TFRecord example."""
-        rgb_bytes = tf.io.encode_jpeg(tf.convert_to_tensor(rgb), quality=100).numpy()
-        depth_bytes = tf.io.serialize_tensor(tf.convert_to_tensor(depth)).numpy()
+        rgb_bytes = tf.io.encode_jpeg(tf.convert_to_tensor(rgb, tf.uint8), quality=100).numpy()
+        depth_bytes = tf.io.serialize_tensor(tf.convert_to_tensor(depth, tf.float32)).numpy()
 
         feature = {
             'rgb': tf.train.Feature(bytes_list=tf.train.BytesList(value=[rgb_bytes])),
@@ -33,9 +42,10 @@ class DiodeConverterTFRecord(object):
         example = tf.train.Example(features=tf.train.Features(feature=feature))
         return example.SerializeToString()
 
-    def convert(self, root_dir, tfrecord_path, is_train: bool = True):
-        """Convert the dataset to TFRecord format."""
+    def convert(self, root_dir, tfrecord_path, is_train: bool = True) -> int:
+        """Convert the dataset to TFRecord format and return the sample count."""
         scenes = glob.glob(os.path.join(root_dir, 'indoors', '*'))
+        count = 0
 
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
             for scene in scenes:
@@ -67,6 +77,10 @@ class DiodeConverterTFRecord(object):
                         # Serialize example and write to TFRecord
                         serialized_example = self.serialize_example(rgb, depth)
                         writer.write(serialized_example)
+
+                        count += 1  # Increment sample count
+
+        return count
 
 if __name__ == '__main__':
     root_dir = './depth/data/diode/'

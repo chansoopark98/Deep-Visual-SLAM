@@ -5,6 +5,10 @@ Directory:
   weights: ./weights
   results: ./results
 
+Dataset:
+  Nyu_depth_v2: True
+  Diode: True
+
 Train:
   use_shuffle: True
   train_log_interval: 50
