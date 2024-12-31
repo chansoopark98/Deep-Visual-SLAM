@@ -87,9 +87,6 @@ class DataLoader(object):
     
     @tf.function(jit_compile=True)
     def preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
-        rgb = self.preprocess_image(rgb)
-        depth = self.preprocess_depth(depth)
-
         # 1. Augmentation
         rgb, depth = self.augment(rgb, depth)
 
@@ -117,7 +114,7 @@ class DataLoader(object):
             rgb = tf.image.adjust_brightness(rgb, delta_brightness)
         
         if tf.random.uniform(()) > 0.5:
-            contrast_factor = tf.random.uniform([], 0.8, 1.2)
+            contrast_factor = tf.random.uniform([], 0.7, 1.3)
             rgb = tf.image.adjust_contrast(rgb, contrast_factor)
         
         if tf.random.uniform(()) > 0.5:
@@ -125,7 +122,7 @@ class DataLoader(object):
             rgb = tf.image.adjust_gamma(rgb, gamma)
         
         if tf.random.uniform(()) > 0.5:
-            max_delta = 0.02
+            max_delta = 0.1
             rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
 
         # flip left-right
@@ -134,7 +131,7 @@ class DataLoader(object):
             depth = tf.image.flip_left_right(depth)
 
         # back to [0, 255]
-        rgb = tf.clip_by_value(rgb, 0.0, 1.0)
+        rgb = tf.clip_by_value(rgb, 0., 255.)
         rgb = tf.cast(rgb * 255.0, tf.uint8)
 
         return rgb, depth
@@ -165,6 +162,7 @@ if __name__ == '__main__':
         },
         'Train': {
             'batch_size': 1,
+            'max_depth': 10.,
             'use_shuffle': True,
             'img_h': 256,
             'img_w': 256
@@ -175,5 +173,8 @@ if __name__ == '__main__':
     for rgb, depth in data_loader.train_dataset.take(10):
         print(rgb.shape)
         print(depth.shape)
+        rgb = data_loader.denormalize_image(rgb)
+        plt.imshow(rgb[0])
+        plt.show()
         plt.imshow(depth[0], cmap='plasma')
         plt.show()
