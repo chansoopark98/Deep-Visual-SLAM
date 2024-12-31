@@ -1,12 +1,6 @@
 import tensorflow as tf
 
 class DepthMetrics(tf.keras.metrics.Metric):
-    """
-    여러 Depth Error Metric을 한 번에 계산하는 예시.
-    - result()는 대표값으로 'rmse'만 반환
-    - 나머지 값들은 get_all_metrics()로 가져옴
-    """
-
     def __init__(self, name='depth_metrics', **kwargs):
         super().__init__(name=name, **kwargs)
 
