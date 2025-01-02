@@ -2,7 +2,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 
 class NyuHandler(object):
-    def __init__(self, image_size: tuple):
+    def __init__(self, image_size: tuple) -> None:
         self.image_size = image_size
 
     @tf.function(jit_compile=True)

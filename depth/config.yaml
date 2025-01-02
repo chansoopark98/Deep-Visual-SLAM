@@ -1,5 +1,5 @@
 Directory:
-  exp_name: nyu_diml_480x720
+  exp_name: nyu_480x720_metric
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -8,7 +8,7 @@ Directory:
 Dataset:
   Nyu_depth_v2: True
   Diode: False
-  DIML: True
+  DIML: False
 
 Train:
   use_shuffle: True
@@ -17,7 +17,7 @@ Train:
   train_plot_interval: 100
   valid_plot_interval: 100
   max_depth: 10.0
-  img_w: 720
+  img_w: 640 # 720
   img_h: 480
   weight_decay: 0.00001
   batch_size: 16 # 1
