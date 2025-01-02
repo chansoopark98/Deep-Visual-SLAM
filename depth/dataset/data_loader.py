@@ -38,7 +38,7 @@ class DataLoader(object):
         if self.config['Dataset']['Nyu_depth_v2']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'nyu_depth_v2_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
-                                     is_valid=True, image_size=(480, 640), depth_dtype=tf.float32)
+                                     is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
             handler = NyuHandler(image_size=self.image_size)
             dataset.train_dataset = dataset.train_dataset.map(handler.nyu_crop_resize,
                                                               num_parallel_calls=self.auto_opt)
@@ -61,7 +61,7 @@ class DataLoader(object):
         if self.config['Dataset']['DIML']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diml_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
-                                     is_valid=False, image_size=(792, 1408), depth_dtype=tf.float16)
+                                     is_valid=False, image_size=(None, None), depth_dtype=tf.float16)
             train_datasets.append(dataset.train_dataset)
         
             train_samples += dataset.train_samples

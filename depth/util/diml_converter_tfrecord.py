@@ -6,11 +6,13 @@ import numpy as np
 import tensorflow as tf
 from PIL import Image
 import json
+import matplotlib.pyplot as plt
 
 class DimlConverterTFRecord(object):
     def __init__(self, root_dir, save_dir):
         self.root_dir = root_dir
         self.save_dir = save_dir
+        self.target_shape = (480, 720)
         self.raw_dir = os.path.join(self.root_dir, 'diml_raw')
 
         self.save_dir = os.path.join(self.save_dir, 'diml_tfrecord')
@@ -18,7 +20,7 @@ class DimlConverterTFRecord(object):
 
         os.makedirs(self.save_dir, exist_ok=True)
 
-        # self.unzip_files(self.root_dir, self.raw_dir)
+        self.unzip_files(self.root_dir, self.raw_dir)
         self.train_count = self.convert(raw_file_dir=self.raw_dir, tfrecord_path=self.train_tfrecord_path)
 
         # Save metadata with sample counts
@@ -92,14 +94,35 @@ class DimlConverterTFRecord(object):
 
                             serialized_example = self.serialize_example(rgb, depth)
                             writer.write(serialized_example)
-                            
+                        
                             count += 1
+                        
+                        # 샘플링 되지 않은 rgb, depth 파일 삭제
+                        for file in rgb_files:
+                            if file not in rgb_files[idx:idx+3]:
+                                depth_file = file.replace('col', 'up_png').replace('c.png', 'ud.png')
+                                if os.path.exists(file):
+                                    os.remove(file)
+                                if os.path.exists(depth_file):
+                                    os.remove(depth_file)
         return count
 
     def serialize_example(self, rgb, depth):
         """Serialize a single RGB and depth pair into a TFRecord example."""
-        rgb_bytes = tf.io.encode_jpeg(tf.convert_to_tensor(rgb, tf.uint8), quality=100).numpy()
-        depth_bytes = tf.io.serialize_tensor(tf.convert_to_tensor(depth, tf.float16)).numpy()
+        rgb = tf.convert_to_tensor(rgb, tf.uint8)
+        depth = tf.convert_to_tensor(depth, tf.float16)
+        depth = tf.expand_dims(depth, axis=-1)
+
+        rgb = tf.image.resize(rgb, self.target_shape, method=tf.image.ResizeMethod.BILINEAR)
+        depth = tf.image.resize(depth, self.target_shape, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+
+        depth = tf.squeeze(depth, axis=-1)
+
+        rgb = tf.cast(rgb, tf.uint8)
+        depth = tf.cast(depth, tf.float16)
+
+        rgb_bytes = tf.io.encode_jpeg(rgb, quality=100).numpy()
+        depth_bytes = tf.io.serialize_tensor(depth).numpy()
 
         feature = {
             'rgb': tf.train.Feature(bytes_list=tf.train.BytesList(value=[rgb_bytes])),
@@ -111,5 +134,5 @@ class DimlConverterTFRecord(object):
 
 if __name__ == '__main__':
     root_dir = '/media/park-ubuntu/park_file/depth_data/'
-    save_dir = './depth/data/'
+    save_dir = './depth/data/new/'
     converter = DimlConverterTFRecord(root_dir, save_dir=save_dir)
