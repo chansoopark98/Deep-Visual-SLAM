@@ -78,7 +78,7 @@ class DimlConverterTFRecord(object):
                         rgb_path = os.path.join(raw_scene, 'col')                        
                         rgb_files = sorted(glob.glob(os.path.join(rgb_path, '*.png')))
 
-                        for idx in range(len(rgb_files)):
+                        for idx in range(0, len(rgb_files), 3):
                             rgb_name = rgb_files[idx]
                             depth_name = rgb_files[idx].replace('col', 'up_png')
                             depth_name = depth_name.replace('c.png', 'ud.png')
@@ -86,7 +86,7 @@ class DimlConverterTFRecord(object):
                             # depth 파일 존재 확인
                             if not os.path.exists(depth_name):
                                 continue
-
+                    
                             rgb = np.array(Image.open(rgb_name))
                             depth = np.array(Image.open(depth_name)) * 0.001
 
@@ -99,7 +99,7 @@ class DimlConverterTFRecord(object):
     def serialize_example(self, rgb, depth):
         """Serialize a single RGB and depth pair into a TFRecord example."""
         rgb_bytes = tf.io.encode_jpeg(tf.convert_to_tensor(rgb, tf.uint8), quality=100).numpy()
-        depth_bytes = tf.io.serialize_tensor(tf.convert_to_tensor(depth, tf.float32)).numpy()
+        depth_bytes = tf.io.serialize_tensor(tf.convert_to_tensor(depth, tf.float16)).numpy()
 
         feature = {
             'rgb': tf.train.Feature(bytes_list=tf.train.BytesList(value=[rgb_bytes])),
