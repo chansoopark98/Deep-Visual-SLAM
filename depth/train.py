@@ -28,6 +28,8 @@ class Trainer(object):
 
         model_input_shape = (self.config['Train']['batch_size'],
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
+        # model_input_shape = (self.config['Train']['batch_size'],
+        #                      None, None, 3)
         self.model.build(model_input_shape)
         self.model.summary()
 
@@ -41,7 +43,8 @@ class Trainer(object):
                                                                               power=0.9)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
-                                                  ) # weight_decay=self.config['Train']['weight_decay']
+                                                  weight_decay=self.config['Train']['weight_decay']
+                                                  )
 
         # 4. Learner
         self.learner = DepthLearner(model=self.model, optimizer=self.optimizer)
