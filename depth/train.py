@@ -15,8 +15,9 @@ import yaml
 np.set_printoptions(suppress=True)
 
 class Trainer(object):
-    def __init__(self, config) -> None:
+    def __init__(self, config, strategy: tf.distribute.Strategy) -> None:
         self.config = config
+        self.strategy = strategy
         self.configure_train_ops()
         print('initialize')
 
@@ -38,7 +39,14 @@ class Trainer(object):
 
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
+        self.train_dataset = self.data_loader.train_dataset
+        self.train_dataset = self.strategy.experimental_distribute_dataset(self.train_dataset)
+        self.train_samples = self.data_loader.num_train_samples
 
+        self.valid_dataset = self.data_loader.valid_dataset
+        self.valid_dataset = self.strategy.experimental_distribute_dataset(self.valid_dataset)
+        self.valid_samples = self.data_loader.num_valid_samples
+        
         # 3. Optimizer
         self.warmup_scheduler = tf.keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
@@ -88,23 +96,53 @@ class Trainer(object):
             total_loss = sum(loss_dict.values())
             scaled_loss = self.optimizer.get_scaled_loss(total_loss)
 
-        # gradients = tape.gradient(total_loss, self.model.trainable_variables)
-        # self.optimizer.apply_gradients(
-        #     zip(gradients, self.model.trainable_variables))
-        
-        # 그래디언트 계산 및 손실 스케일 복원
         scaled_gradients = tape.gradient(scaled_loss, self.model.trainable_variables)
         gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
-
-        # 옵티마이저 적용
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss_dict, pred_depths
-
+    
     @tf.function()
     def validation_step(self, rgb, depth):
         loss_dict, pred_depths = self.learner.forward_step(
             rgb, depth, training=False)
         return loss_dict, pred_depths
+    
+    @tf.function()
+    def distributed_train_step(self, rgb, depth):
+        loss_dict, pred_depths = self.strategy.run(self.train_step, args=(rgb, depth,))
+        
+        reduced_loss_dict = {
+            key: self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value, axis=None)
+            for key, value in loss_dict.items()
+            }
+        return reduced_loss_dict, pred_depths
+    
+    @tf.function()
+    def distributed_valid_step(self, rgb, depth):
+        loss_dict, pred_depths = self.strategy.run(self.validation_step, args=(rgb, depth,))
+        
+        reduced_loss_dict = {
+            key: self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value, axis=None)
+            for key, value in loss_dict.items()
+            }
+        return reduced_loss_dict, pred_depths
+    
+    @tf.function()
+    def update_train_metric(self, loss_dict):
+        total_loss = tf.reduce_sum(list(loss_dict.values()))
+        self.train_total_loss.update_state(total_loss)
+        self.train_smooth_loss.update_state(loss_dict['smooth_loss'])
+        self.train_log_loss.update_state(loss_dict['log_loss'])
+        self.train_l1_loss.update_state(loss_dict['l1_loss'])
+
+    @tf.function()
+    def update_valid_metric(self, loss_dict, pred_depth, gt_depth):
+        total_loss = tf.reduce_sum(list(loss_dict.values()))
+        self.valid_total_loss.update_state(total_loss)
+        self.valid_smooth_loss.update_state(loss_dict['smooth_loss'])
+        self.valid_log_loss.update_state(loss_dict['log_loss'])
+        self.valid_l1_loss.update_state(loss_dict['l1_loss'])
+        self.valid_depth_metrics.update_state(gt_depth, pred_depth)
 
     def train(self) -> None:
         for epoch in range(self.config['Train']['epoch']):
@@ -113,22 +151,19 @@ class Trainer(object):
             # Set learning rate
             self.optimizer.learning_rate = lr
 
-            train_tqdm = tqdm(self.data_loader.train_dataset,
-                              total=self.data_loader.num_train_samples)
+            train_tqdm = tqdm(self.train_dataset,
+                              total=self.train_samples)
             print(' LR : {0}'.format(self.optimizer.learning_rate))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
             for idx, (rgb, depth) in enumerate(train_tqdm):
-                train_loss_result, pred_train_depths = self.train_step(rgb, depth)
+                train_loss_result, pred_train_depths = self.distributed_train_step(rgb, depth)
 
                 # Update train metrics
-                self.train_total_loss.update_state(sum(train_loss_result.values()))
-                self.train_smooth_loss.update_state(train_loss_result['smooth_loss'])
-                self.train_log_loss.update_state(train_loss_result['log_loss'])
-                self.train_l1_loss.update_state(train_loss_result['l1_loss'])
+                self.strategy.run(self.update_train_metric, args=(train_loss_result,))
 
                 if idx % self.config['Train']['train_log_interval'] == 0:
-                    current_step = self.data_loader.num_train_samples * epoch + idx
+                    current_step = self.train_samples * epoch + idx
 
                     with self.train_summary_writer.as_default():
                         # Logging train total, pixel, smooth loss
@@ -143,10 +178,15 @@ class Trainer(object):
 
                 if idx % self.config['Train']['train_plot_interval'] == 0:
                     # Draw depth plot
-                    target_image = self.data_loader.denormalize_image(rgb)
+                    local_rgb = self.strategy.experimental_local_results(rgb)[0]
+                    local_depth = self.strategy.experimental_local_results(depth)[0]
+                    local_pred_depth = self.strategy.experimental_local_results(pred_train_depths)[0]
+
+                    target_image = self.data_loader.denormalize_image(local_rgb)
+
                     train_depth_plot = plot_images(image=target_image,
-                                                   pred_depths=pred_train_depths,
-                                                   gt_depth=depth)
+                                                   pred_depths=local_pred_depth,
+                                                   gt_depth=local_depth)
 
                     with self.train_summary_writer.as_default():
                         # Logging train images
@@ -157,21 +197,17 @@ class Trainer(object):
                     total_loss=self.train_total_loss.result().numpy())
 
             # Validation
-            valid_tqdm = tqdm(self.data_loader.valid_dataset,
-                              total=self.data_loader.num_valid_samples)
+            valid_tqdm = tqdm(self.valid_dataset,
+                              total=self.valid_samples)
             valid_tqdm.set_description('Validation || ')
             for idx, (rgb, depth) in enumerate(valid_tqdm):
-                valid_loss_result, pred_valid_depths = self.validation_step(rgb, depth)
+                valid_loss_result, pred_valid_depths = self.distributed_valid_step(rgb, depth)
 
                 # Update valid metrics
-                self.valid_total_loss.update_state(sum(valid_loss_result.values()))
-                self.valid_smooth_loss.update_state(valid_loss_result['smooth_loss'])
-                self.valid_log_loss.update_state(valid_loss_result['log_loss'])
-                self.valid_l1_loss.update_state(valid_loss_result['l1_loss'])
-                self.valid_depth_metrics.update_state(depth, pred_valid_depths[0])
+                self.strategy.run(self.update_valid_metric, args=(valid_loss_result, pred_valid_depths[0], depth))
 
                 if idx % self.config['Train']['valid_log_interval'] == 0:
-                    self.data_loader.num_valid_samples * epoch + idx
+                    self.valid_samples * epoch + idx
 
                     with self.valid_summary_writer.as_default():
                         # Logging valid total, pixel, smooth loss
@@ -186,10 +222,14 @@ class Trainer(object):
                     
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     # Draw depth plot
-                    target_image = self.data_loader.denormalize_image(rgb)
+                    local_rgb = self.strategy.experimental_local_results(rgb)[0]
+                    local_depth = self.strategy.experimental_local_results(pred_valid_depths)[0]
+                    local_pred_depth = self.strategy.experimental_local_results(pred_valid_depths)[0]
+
+                    target_image = self.data_loader.denormalize_image(local_rgb)
                     valid_depth_plot = plot_images(image=target_image,
-                                                   pred_depths=pred_valid_depths,
-                                                   gt_depth=depth)
+                                                   pred_depths=local_pred_depth,
+                                                   gt_depth=local_depth)
 
                     with self.valid_summary_writer.as_default():
                         # Logging valid images
@@ -226,19 +266,23 @@ if __name__ == '__main__':
     with open('./depth/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
-    with tf.device('/device:GPU:1'):
-        # args = parser.parse_args()
-
-        # Set random seed
-        SEED = 42
-        # os.environ['PYTHONHASHSEED'] = str(SEED)
-        # os.environ['TF_DETERMINISTIC_OPS'] = '0'
-        # tf.random.set_seed(SEED)
-        # np.random.seed(SEED)
-        # tf.keras.utils.set_random_seed(SEED)
-        # tf.config.experimental.enable_op_determinism()
-        # np.random.seed(SEED)
-
-        trainer = Trainer(config=config)
-
+    # GPU 장치 확인
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_virtual_device_configuration(
+                    gpu,
+                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=24000 * 0.8)]
+                )
+        except RuntimeError as e:
+            print(e)
+    else:
+        print('No GPU devices found')
+        raise SystemExit
+        
+    # with tf.device('/device:GPU:1'):
+    strategy = tf.distribute.MirroredStrategy()
+    with strategy.scope():
+        trainer = Trainer(config=config, strategy=strategy)
         trainer.train()
