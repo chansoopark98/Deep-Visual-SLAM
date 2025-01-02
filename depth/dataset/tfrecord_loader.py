@@ -1,6 +1,5 @@
 import tensorflow as tf
 import json
-import matplotlib.pyplot as plt
 
 class TFRecordLoader(object):
     def __init__(self, root_dir: str,
@@ -50,6 +49,7 @@ class TFRecordLoader(object):
         return rgb, depth
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
     diode_path = './depth/data/diode_tfrecord'
     diode_dataset = TFRecordLoader(diode_path,
                                    is_train=True,
