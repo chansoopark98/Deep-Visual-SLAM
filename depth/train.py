@@ -54,8 +54,7 @@ class Trainer(object):
                                                                               power=0.9)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
-                                                  weight_decay=self.config['Train']['weight_decay']
-                                                  )
+                                                  ) # weight_decay=self.config['Train']['weight_decay']
         self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Learner
@@ -192,6 +191,7 @@ class Trainer(object):
                         # Logging train images
                         tf.summary.image('Train/Depth Result',
                                          train_depth_plot, step=current_step)
+                        del train_depth_plot
 
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy())
@@ -223,7 +223,7 @@ class Trainer(object):
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     # Draw depth plot
                     local_rgb = self.strategy.experimental_local_results(rgb)[0]
-                    local_depth = self.strategy.experimental_local_results(pred_valid_depths)[0]
+                    local_depth = self.strategy.experimental_local_results(depth)[0]
                     local_pred_depth = self.strategy.experimental_local_results(pred_valid_depths)[0]
 
                     target_image = self.data_loader.denormalize_image(local_rgb)
@@ -235,6 +235,7 @@ class Trainer(object):
                         # Logging valid images
                         tf.summary.image('Valid/Depth Result',
                                          valid_depth_plot, step=current_step)
+                        del valid_depth_plot
 
                 valid_tqdm.set_postfix(
                     total_loss=self.valid_total_loss.result().numpy(),

@@ -1,5 +1,4 @@
 import tensorflow as tf
-import matplotlib.pyplot as plt
 
 class NyuHandler(object):
     def __init__(self, image_size: tuple) -> None:
@@ -102,6 +101,7 @@ class NyuHandler(object):
     #     return tf.cast(cropped_image, tf.uint8), tf.cast(cropped_depth, tf.float32)
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
     dummy = tf.ones((480, 640, 3))
     dummy_depth = tf.ones((480, 640, 1))
     handler = NyuHandler(image_size=(792, 1408))

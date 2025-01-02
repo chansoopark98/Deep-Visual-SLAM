@@ -1,5 +1,5 @@
 Directory:
-  exp_name: nyu_480x720_metric
+  exp_name: nyu_480x640_mixed_distributed
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -20,6 +20,6 @@ Train:
   img_w: 640 # 720
   img_h: 480
   weight_decay: 0.00001
-  batch_size: 16 # 1
+  batch_size: 32 # 1
   epoch: 31
   init_lr: 0.0004

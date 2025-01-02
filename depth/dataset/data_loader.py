@@ -1,6 +1,5 @@
 import os
 import tensorflow as tf
-import matplotlib.pyplot as plt
 try:
     from .tfrecord_loader import TFRecordLoader
     from .nyu_handler import NyuHandler
@@ -226,6 +225,7 @@ class DataLoader(object):
         return combined_dataset
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
     root_dir = './depth/data/'
     config = {
         'Directory': {

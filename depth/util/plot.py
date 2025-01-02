@@ -1,4 +1,6 @@
 import io
+import matplotlib
+matplotlib.use('Agg')  # GUI 독립적인 백엔드
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
