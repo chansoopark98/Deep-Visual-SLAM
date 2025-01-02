@@ -21,6 +21,9 @@ class Trainer(object):
         print('initialize')
 
     def configure_train_ops(self) -> None:
+        policy = tf.keras.mixed_precision.Policy('mixed_float16')
+        tf.keras.mixed_precision.set_global_policy(policy)
+
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
         self.model = DispNet(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
@@ -45,6 +48,7 @@ class Trainer(object):
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
                                                   weight_decay=self.config['Train']['weight_decay']
                                                   )
+        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Learner
         self.learner = DepthLearner(model=self.model, optimizer=self.optimizer)
@@ -82,10 +86,18 @@ class Trainer(object):
             loss_dict, pred_depths = self.learner.forward_step(
                 rgb, depth, training=True)
             total_loss = sum(loss_dict.values())
+            scaled_loss = self.optimizer.get_scaled_loss(total_loss)
 
-        gradients = tape.gradient(total_loss, self.model.trainable_variables)
-        self.optimizer.apply_gradients(
-            zip(gradients, self.model.trainable_variables))
+        # gradients = tape.gradient(total_loss, self.model.trainable_variables)
+        # self.optimizer.apply_gradients(
+        #     zip(gradients, self.model.trainable_variables))
+        
+        # 그래디언트 계산 및 손실 스케일 복원
+        scaled_gradients = tape.gradient(scaled_loss, self.model.trainable_variables)
+        gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
+
+        # 옵티마이저 적용
+        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss_dict, pred_depths
 
     @tf.function()
