@@ -13,19 +13,20 @@ class DepthLearner(object):
         self.num_scales = 4
         self.min_depth = 0.1
         self.max_depth = 10.
+    
+    def depth_to_disparity(self, depth, eps=1e-4):
+        # Compute disparity
+        disparity = tf.where(depth >= eps, 1.0 / depth, tf.zeros_like(depth))
+        depth = tf.cast(depth, tf.float32)
+        return disparity
 
-    def disp_to_depth(self, disp, min_depth, max_depth):
-        """
-        Disparity -> Depth 변환
-        disp: [B, H, W, 1] (sigmoid 출력을 가정)
-        min_depth, max_depth: 예측할 수 있는 깊이 범위
-        """
-        # min_disp, max_disp를 이용해 disp를 [min_disp, max_disp] 범위로 스케일링
-        min_disp = 1.0 / max_depth
-        max_disp = 1.0 / min_depth
-        scaled_disp = tf.cast(min_disp, tf.float32) + \
-                      tf.cast(max_disp - min_disp, tf.float32) * tf.cast(disp, tf.float32)
-        depth = 1.0 / scaled_disp
+    def disparity_to_depth(self, disparity, eps=1e-4):
+        # Compute absolute disparity
+        abs_disp = tf.abs(disparity)
+
+        # Compute depth
+        depth = tf.where(abs_disp >= eps, 1.0 / abs_disp, tf.zeros_like(abs_disp))
+        depth = tf.cast(depth, tf.float32)
         return depth
     
     def get_smooth_loss(self, disp, img):
@@ -117,7 +118,7 @@ class DepthLearner(object):
 
         return loss_val
     
-    def multi_scale_loss(self, pred_depths, gt_depth, rgb) -> dict:
+    def multi_scale_loss(self, pred_depths, gt_depth, rgb, valid_mask) -> dict:
         alpha = [1/2, 1/4, 1/8, 1/16] 
         smooth_losses = 0.0
         log_losses = 0.0
@@ -128,10 +129,6 @@ class DepthLearner(object):
         l1_loss_factor = 1.0
 
         original_shape = gt_depth.shape[1:3]  # (H, W)
-
-        # valid mask
-        gt_depth = tf.where(gt_depth >= self.max_depth, 0., gt_depth)
-        valid_mask = gt_depth > 0
 
         for i in range(self.num_scales):
             # i-th 스케일 depth
@@ -166,14 +163,20 @@ class DepthLearner(object):
         # 1. Forward pass (Disparity 예측)
         pred_disps = self.model(rgb, training=training)
         # pred_disps: list [disp1, disp2, disp3, disp4]
-
+        
         # 2. Disps -> Depths
+        depth = tf.where(depth >= self.max_depth, 0., depth)
+        valid_mask = depth > 0
+
         pred_depths = [
-            self.disp_to_depth(disp, self.min_depth, self.max_depth) 
+            self.disparity_to_depth(disp)
             for disp in pred_disps
         ]
 
         # 3. multi-scale loss 계산
-        loss_dict = self.multi_scale_loss(pred_depths=pred_depths, gt_depth=depth, rgb=rgb)
+        loss_dict = self.multi_scale_loss(pred_depths=pred_depths,
+                                          gt_depth=depth,
+                                          rgb=rgb,
+                                          valid_mask=valid_mask)
 
         return loss_dict, pred_depths
