@@ -1,5 +1,5 @@
 Directory:
-  exp_name: nyu_480x640_mixed_distributed
+  exp_name: nyu_diml_480x720_mixed_multi_newLoss_v4
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -8,7 +8,7 @@ Directory:
 Dataset:
   Nyu_depth_v2: True
   Diode: False
-  DIML: False
+  DIML: True
 
 Train:
   use_shuffle: True
@@ -17,9 +17,14 @@ Train:
   train_plot_interval: 100
   valid_plot_interval: 100
   max_depth: 10.0
-  img_w: 640 # 720
+  img_w: 720 # 720
   img_h: 480
   weight_decay: 0.00001
-  batch_size: 32 # 1
+  batch_size: 16 # 1
   epoch: 31
   init_lr: 0.0004
+
+Experiment:
+  gpus: [0, 1] # [0, 1]
+  gpu_vram: 24000
+  gpu_vram_factor: 0.8

@@ -54,7 +54,8 @@ class Trainer(object):
                                                                               power=0.9)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
-                                                  ) # weight_decay=self.config['Train']['weight_decay']
+                                                  weight_decay=self.config['Train']['weight_decay']
+                                                  ) # 
         self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Learner
@@ -163,7 +164,7 @@ class Trainer(object):
 
                 if idx % self.config['Train']['train_log_interval'] == 0:
                     current_step = self.train_samples * epoch + idx
-
+                    
                     with self.train_summary_writer.as_default():
                         # Logging train total, pixel, smooth loss
                         tf.summary.scalar(f'Train/{self.train_total_loss.name}' ,
@@ -244,7 +245,7 @@ class Trainer(object):
             with self.valid_summary_writer.as_default():
                 metrics_dict = self.valid_depth_metrics.get_all_metrics()
                 for metric_name, metric_value in metrics_dict.items():
-                    tf.summary.scalar(f"Valid/{metric_name}", metric_value, step=current_step)
+                    tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=current_step)
 
             if epoch % 5 == 0:
                 self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
@@ -267,23 +268,39 @@ if __name__ == '__main__':
     with open('./depth/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
-    # GPU 장치 확인
+    # Get GPU configuration and set visible GPUs
+    gpu_config = config.get('Experiment', {})
+    visible_gpus = gpu_config.get('gpus', [])
+    gpu_vram = gpu_config.get('gpu_vram', None)
+    gpu_vram_factor = gpu_config.get('gpu_vram_factor', None)
+
     gpus = tf.config.list_physical_devices('GPU')
+
     if gpus:
         try:
-            for gpu in gpus:
-                tf.config.experimental.set_virtual_device_configuration(
-                    gpu,
-                    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=24000 * 0.8)]
-                )
+            if visible_gpus:
+                selected_gpus = [gpus[i] for i in visible_gpus]
+                tf.config.set_visible_devices(selected_gpus, 'GPU')
+            else:
+                print("No GPUs specified in config. Using all available GPUs.")
+                selected_gpus = gpus
+            
+            if gpu_vram and gpu_vram_factor:
+                for gpu in selected_gpus:
+                    tf.config.experimental.set_virtual_device_configuration(
+                        gpu,
+                        [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=gpu_vram * gpu_vram_factor)]
+                    )
+            
+            print(f"Using GPUs: {selected_gpus}")
         except RuntimeError as e:
-            print(e)
+            print(f"Error during GPU configuration: {e}")
     else:
         print('No GPU devices found')
         raise SystemExit
-        
-    # with tf.device('/device:GPU:1'):
+
     strategy = tf.distribute.MirroredStrategy()
+
     with strategy.scope():
         trainer = Trainer(config=config, strategy=strategy)
         trainer.train()

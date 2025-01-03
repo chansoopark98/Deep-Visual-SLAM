@@ -60,11 +60,12 @@ class DataLoader(object):
         if self.config['Dataset']['DIML']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diml_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
-                                     is_valid=False, image_size=(None, None), depth_dtype=tf.float16)
+                                     is_valid=True, image_size=(None, None), depth_dtype=tf.float16)
             train_datasets.append(dataset.train_dataset)
-        
-            train_samples += dataset.train_samples
+            # valid_datasets.append(dataset.valid_dataset)
 
+            train_samples += dataset.train_samples
+            # valid_samples += dataset.valid_samples
         return train_datasets, valid_datasets, train_samples, valid_samples
 
     @tf.function(jit_compile=True)
@@ -82,7 +83,7 @@ class DataLoader(object):
         depth = tf.image.resize(depth,
                                 self.image_size,
                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        depth = tf.where(depth > self.max_depth, 0., depth)
+        depth = tf.clip_by_value(depth, 0., self.max_depth)
         return depth
         
     @tf.function(jit_compile=True)
@@ -104,73 +105,10 @@ class DataLoader(object):
         # 1. Augmentation
         rgb, depth = self.augment(rgb, depth)
 
-        # 2. Resize
-        rgb = tf.image.resize(rgb, self.image_size,
-                              method=tf.image.ResizeMethod.BILINEAR)
-        depth = tf.image.resize(depth, self.image_size,
-                                method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        # 3. Normalize
-        rgb = self.normalize_image(rgb)
-
+        rgb = self.preprocess_image(rgb)
+        depth = self.preprocess_depth(depth)
         return rgb, depth
-    
 
-    @tf.function(jit_compile=True)
-    def crop_and_resize(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
-        # random crop
-        rgb_shape = tf.shape(rgb)
-        depth_shape = tf.shape(depth)
-
-        # 혹시라도 두 이미지의 height, width가 동일하지 않은 경우를 대비
-        tf.debugging.assert_equal(
-            rgb_shape[0], depth_shape[0],
-            message="RGB와 Depth의 height가 다릅니다."
-        )
-        tf.debugging.assert_equal(
-            rgb_shape[1], depth_shape[1],
-            message="RGB와 Depth의 width가 다릅니다."
-        )
-
-        height = rgb_shape[0]
-        width  = rgb_shape[1]
-
-        crop_height = tf.minimum(height, self.image_size[0])
-        crop_width  = tf.minimum(width, self.image_size[1])
-
-        # 무작위 크롭 영역 offset 결정
-        # offset은 [0, height - crop_height] 사이, [0, width - crop_width] 사이
-        offset_height = tf.random.uniform(
-            shape=[], minval=0, maxval=height - crop_height + 1, dtype=tf.int32
-        )
-        offset_width = tf.random.uniform(
-            shape=[], minval=0, maxval=width - crop_width + 1, dtype=tf.int32
-        )
-
-        # 동일한 영역 크롭
-        rgb_cropped = tf.image.crop_to_bounding_box(
-            rgb, offset_height, offset_width, crop_height, crop_width
-        )
-        depth_cropped = tf.image.crop_to_bounding_box(
-            depth, offset_height, offset_width, crop_height, crop_width
-        )
-
-        # RGB는 bilinear (또는 bicubic 등) 사용
-        resized_rgb = tf.image.resize(
-            rgb_cropped,
-            self.image_size,
-            method=tf.image.ResizeMethod.BILINEAR
-        )
-        # Depth는 nearest(혹은 area)로 resizing
-        resized_depth = tf.image.resize(
-            depth_cropped,
-            self.image_size,
-            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR
-        )
-
-        return resized_rgb, resized_depth
-        
-        
-    
     @tf.function(jit_compile=True)
     def augment(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         """
@@ -212,15 +150,18 @@ class DataLoader(object):
         
 
     def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool) -> tf.data.Dataset:
-        combined_dataset: tf.data.Dataset = datasets[0]
-        
-        for ds in datasets[1:]:
-            combined_dataset = combined_dataset.concatenate(ds)
+        # combined_dataset: tf.data.Dataset = datasets[0]
+        # weights = []
+        # for _ in range(len(datasets)):
+        #     weights.append(1.0)
+            
+
+        combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
             
         if use_shuffle:
-            combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 128, reshuffle_each_iteration=True)
+            combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 256, reshuffle_each_iteration=True)
         combined_dataset = combined_dataset.map(self.preprocess, num_parallel_calls=self.auto_opt)
-        combined_dataset = combined_dataset.batch(batch_size, drop_remainder=True)
+        combined_dataset = combined_dataset.batch(batch_size, drop_remainder=True, num_parallel_calls=self.auto_opt)
         combined_dataset = combined_dataset.prefetch(self.auto_opt)
         return combined_dataset
 
@@ -232,25 +173,42 @@ if __name__ == '__main__':
             'data_dir': root_dir
         },
         'Dataset':{
-            'Nyu_depth_v2': False,
+            'Nyu_depth_v2': True,
             'Diode': False,
             'DIML': True,
         },
         'Train': {
-            'batch_size': 1,
+            'batch_size': 128,
             'max_depth': 10.,
             'use_shuffle': True,
-            'img_h': 360, # 480
-            'img_w': 640 # 720
+            'img_h': 480, # 480
+            'img_w': 720 # 720
         }
     }
     data_loader = DataLoader(config)
     
-    for rgb, depth in data_loader.train_dataset.take(100):
-        print(rgb.shape)
-        print(depth.shape)
-        rgb = data_loader.denormalize_image(rgb)
-        plt.imshow(rgb[0])
-        plt.show()
-        plt.imshow(depth[0], cmap='plasma')
-        plt.show()
+    min_depth = 0
+    max_depth = 0
+    for idx, samples in enumerate(data_loader.train_dataset.take(data_loader.num_train_samples)):
+        rgb, depth = samples
+        # print(rgb.shape)
+        # print(depth.shape)
+        # rgb = data_loader.denormalize_image(rgb)
+        # plt.imshow(rgb[0])
+        # plt.show()
+        # plt.imshow(depth[0], cmap='plasma')
+        # plt.show()
+
+        # all dataset min max depth
+        print(idx)
+        current_min_depth = tf.reduce_min(depth)
+        current_max_depth = tf.reduce_max(depth)
+
+        if current_min_depth < min_depth:
+            min_depth = current_min_depth
+        if current_max_depth > max_depth:
+            max_depth = current_max_depth
+    print(min_depth, max_depth)
+
+
+        
