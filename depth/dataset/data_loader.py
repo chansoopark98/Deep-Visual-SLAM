@@ -186,29 +186,30 @@ if __name__ == '__main__':
         }
     }
     data_loader = DataLoader(config)
-    
-    min_depth = 0
-    max_depth = 0
+    import os, sys
+    sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+    from depth_learner import DepthLearner
+    learner = DepthLearner(None, None)
+
     for idx, samples in enumerate(data_loader.train_dataset.take(data_loader.num_train_samples)):
         rgb, depth = samples
-        # print(rgb.shape)
-        # print(depth.shape)
-        # rgb = data_loader.denormalize_image(rgb)
-        # plt.imshow(rgb[0])
-        # plt.show()
-        # plt.imshow(depth[0], cmap='plasma')
-        # plt.show()
+        print(rgb.shape)
+        print(depth.shape)
+        rgb = data_loader.denormalize_image(rgb)
+        plt.imshow(rgb[0])
+        plt.show()
+        plt.imshow(depth[0], cmap='plasma')
+        plt.show()
 
-        # all dataset min max depth
-        print(idx)
-        current_min_depth = tf.reduce_min(depth)
-        current_max_depth = tf.reduce_max(depth)
+        mask = depth > 0
+        disp, mask = learner.depth_to_disparity(depth[0], mask=mask)
 
-        if current_min_depth < min_depth:
-            min_depth = current_min_depth
-        if current_max_depth > max_depth:
-            max_depth = current_max_depth
-    print(min_depth, max_depth)
+        plt.imshow(disp, cmap='plasma')
+        plt.show()
+        
+
+        
+
 
 
         

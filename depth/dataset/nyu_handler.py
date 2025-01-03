@@ -20,29 +20,29 @@ class NyuHandler(object):
         cropped_depth = depth[bound_top:bound_bottom, bound_left:bound_right, :]
 
         # 2. resize_with_pad을 이용해 16:9 사이즈 만들기
-        target_h, target_w = self.image_size  # 예: (360, 640)
-        padded_image = tf.image.resize_with_pad(
-            cropped_image,
-            target_height=target_h,
-            target_width=target_w,
-            method=tf.image.ResizeMethod.BILINEAR,
-        )
-        padded_depth = tf.image.resize_with_pad(
-            cropped_depth,
-            target_height=target_h,
-            target_width=target_w,
-            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
-        )
+        # target_h, target_w = self.image_size  # 예: (360, 640)
+        # cropped_image = tf.image.resize_with_pad(
+        #     cropped_image,
+        #     target_height=target_h,
+        #     target_width=target_w,
+        #     method=tf.image.ResizeMethod.BILINEAR,
+        # )
+        # cropped_depth = tf.image.resize_with_pad(
+        #     cropped_depth,
+        #     target_height=target_h,
+        #     target_width=target_w,
+        #     method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+        # )
 
         # 타입 변환
-        padded_image = tf.cast(padded_image, tf.uint8)
-        padded_depth = tf.cast(padded_depth, tf.float32)
+        cropped_image = tf.cast(cropped_image, tf.uint8)
+        cropped_depth = tf.cast(cropped_depth, tf.float32)
 
         # shape 보장
-        padded_image = tf.ensure_shape(padded_image, [None, None, 3])
-        padded_depth = tf.ensure_shape(padded_depth, [None, None, 1])
+        cropped_image = tf.ensure_shape(cropped_image, [None, None, 3])
+        cropped_depth = tf.ensure_shape(cropped_depth, [None, None, 1])
         
-        return padded_image, padded_depth
+        return cropped_image, cropped_depth
 
     # @tf.function
     # def manual_letterbox(self, image, target_h, target_w, resize_method=tf.image.ResizeMethod.BILINEAR):
