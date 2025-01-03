@@ -28,101 +28,6 @@ class DepthLearner(object):
         depth = 1.0 / scaled_disp
         return depth
     
-    def compute_scale_and_shift(self, y_true, y_pred, mask=None):
-        """
-        ZoeDepth 등에서 사용하는 방식으로,
-        예측값 y_pred를 ground truth y_true에 가장 가깝게 맞추기 위한
-        scale(s)과 shift(t)를 폐쇄형 해(Closed-form)로 계산합니다.
-
-        Args:
-            y_true (tf.Tensor): [B, H, W] 혹은 [B, H, W, 1] 형태의 실제 깊이값
-            y_pred (tf.Tensor): [B, H, W] 혹은 [B, H, W, 1] 형태의 예측 깊이값
-            mask (tf.Tensor, optional): [B, H, W] 형태의 유효 픽셀(boolean) 마스크.
-                                        유효 픽셀만을 대상으로 scale과 shift를 계산.
-
-        Returns:
-            s (tf.Tensor): y_pred에 곱할 스케일
-            t (tf.Tensor): y_pred에 더할 쉬프트
-        """
-        if mask is not None:
-            y_true = tf.boolean_mask(y_true, mask)
-            y_pred = tf.boolean_mask(y_pred, mask)
-
-        # 평균
-        mean_y_true = tf.reduce_mean(y_true)
-        mean_y_pred = tf.reduce_mean(y_pred)
-        
-        # 분산, 공분산
-        var_y_pred = tf.reduce_mean((y_pred - mean_y_pred) ** 2)
-        cov = tf.reduce_mean((y_pred - mean_y_pred) * (y_true - mean_y_true))
-        
-        # s, t를 폐쇄형 해로 구함
-        s = cov / (var_y_pred + 1e-9)
-        t = mean_y_true - s * mean_y_pred
-
-        return s, t
-    
-    def zoedepth_metric_loss(self, y_true, y_pred, mask=None):
-        """
-        ZoeDepth 스타일의 Scale & Shift Alignment 후,
-        MSE(L2) 손실을 계산하는 예시 함수입니다.
-
-        - y_pred를 s, t로 정규화하여(y_pred_aligned = s * y_pred + t) ground truth와
-        최대한 근접하도록 만든 뒤, MSE를 계산합니다.
-
-        Args:
-            y_true (tf.Tensor): [B, H, W] 혹은 [B, H, W, 1] 형태의 실제 깊이
-            y_pred (tf.Tensor): [B, H, W] 혹은 [B, H, W, 1] 형태의 예측 깊이
-            mask (tf.Tensor, optional): [B, H, W] 형태(boolean)의 유효 픽셀 마스크
-
-        Returns:
-            loss (tf.Tensor): 스칼라 형태의 MSE 손실값
-        """
-        s, t = self.compute_scale_and_shift(y_true, y_pred, mask)
-        y_pred_aligned = s * y_pred + t
-
-        if mask is not None:
-            y_true = tf.boolean_mask(y_true, mask)
-            y_pred_aligned = tf.boolean_mask(y_pred_aligned, mask)
-
-        # MSE (L2) 손실
-        loss = tf.reduce_mean((y_true - y_pred_aligned) ** 2)
-        return loss
-    
-    def depthanything_metric_loss(self, y_true, y_pred, mask=None):
-        """
-        DepthAnything 스타일의 Scale-Invariant(Lambda) Loss 예시.
-        (Log 공간에서의 scale-invariant loss)
-
-        - log(y_true + eps), log(y_pred + eps)의 차이를 통해 
-        깊이의 스케일에 대해 비교적 불변한 형태의 손실을 얻을 수 있습니다.
-        - 흔히 NYU, KITTI 등에서 단안 깊이 추정 시 자주 쓰이는 방식으로,
-        아래는 log-scale에서의 scale-invariant loss의 한 예시입니다.
-
-        수식:
-            d_i = log(y_pred_i) - log(y_true_i)
-            loss = 1/N * Σ(d_i^2) - (1/N * Σ(d_i))^2
-
-        Args:
-            y_true (tf.Tensor): [B, H, W] 혹은 [B, H, W, 1]
-            y_pred (tf.Tensor): [B, H, W] 혹은 [B, H, W, 1]
-            mask (tf.Tensor, optional): [B, H, W] 형태(boolean)의 유효 픽셀 마스크
-
-        Returns:
-            loss (tf.Tensor): 스칼라 형태의 scale-invariant log 손실
-        """
-        if mask is not None:
-            y_true = tf.boolean_mask(y_true, mask)
-            y_pred = tf.boolean_mask(y_pred, mask)
-
-        eps = 1e-9  # log 안정성을 위한 작은 상수
-        d = tf.math.log(y_pred + eps) - tf.math.log(y_true + eps)
-
-        # scale-invariant loss
-        d_mean = tf.reduce_mean(d)
-        loss = tf.reduce_mean(d ** 2) - d_mean ** 2
-        return loss
-    
     def get_smooth_loss(self, disp, img):
         """
         Edge-aware smoothness: disp gradients * exp(-|img grads|)
@@ -144,22 +49,13 @@ class DepthLearner(object):
 
         return tf.reduce_mean(smoothness_x) + tf.reduce_mean(smoothness_y)
     
-    def l1_loss(self, pred, gt):
-        valid_mask = tf.cast(gt > 0., tf.float32)
-        valid_count = tf.reduce_sum(valid_mask) + 1e-8
-
+    def l1_loss(self, pred, gt, valid_mask):
         abs_diff = tf.abs(pred - gt)
-        masked_abs_diff = abs_diff * valid_mask
-
-        return tf.reduce_sum(masked_abs_diff) / valid_count
+        masked_abs_diff = tf.boolean_mask(abs_diff, valid_mask)
+    
+        return tf.reduce_mean(masked_abs_diff)
 
     def scale_invariant_log_loss(self, pred, gt):
-        """
-        Eigen et al. (2014)의 Scale-invariant log loss 에
-        'gt_depth == 0' 픽셀 마스킹 로직 추가
-        pred, gt: shape [B, H, W] 또는 [B, H, W, 1]
-        """
-        # 만약 채널이 4차원 (B,H,W,1)이라면 squeeze해서 [B,H,W]로 맞춰줌
         if len(pred.shape) == 4 and pred.shape[-1] == 1:
             pred = tf.squeeze(pred, axis=-1)
         if len(gt.shape) == 4 and gt.shape[-1] == 1:
@@ -169,8 +65,8 @@ class DepthLearner(object):
         valid_mask = tf.cast(gt > 0, tf.float32)
         valid_count = tf.reduce_sum(valid_mask) + 1e-8  # 분모가 0이 되지 않도록
         
-        pred = tf.clip_by_value(pred, 0.1, 10.)
-        gt = tf.clip_by_value(gt, 0.1, 10.)
+        # pred = tf.clip_by_value(pred, 0.1, 10.)
+        # gt = tf.clip_by_value(gt, 0.1, 10.)
 
         # (3) 로그 차이 계산 + 유효 픽셀에만 적용
         log_diff = (tf.math.log(pred) - tf.math.log(gt)) * valid_mask
@@ -178,44 +74,82 @@ class DepthLearner(object):
         diff_sq  = tf.reduce_sum(tf.square(log_diff)) / valid_count
         diff_sum = tf.square(tf.reduce_sum(log_diff) / valid_count)
 
-        loss = diff_sq - 0.5 * diff_sum
+        # loss = diff_sq - 0.5 * diff_sum
+        loss = diff_sq * diff_sum
         return loss
+    
+    def silog_loss(self,
+                prediction: tf.Tensor,
+                target: tf.Tensor,
+                valid_mask: tf.Tensor,
+                variance_focus: float = 0.5) -> tf.Tensor:
+        """
+        Compute SILog loss (scale-invariant log loss) in TensorFlow,
+        WITH valid_mask. (즉, target > 0인 픽셀에 대해서만 손실 계산)
 
+        Args:
+            prediction (tf.Tensor): 예측 값 (B,H,W) 혹은 (B,H,W,1) 형태 가정
+            target (tf.Tensor): 정답 값 (B,H,W) 혹은 (B,H,W,1) 형태 가정
+            variance_focus (float): SILog 분산 항에 곱해질 스칼라 (기본값 0.85)
+
+        Returns:
+            tf.Tensor: 스칼라 형태의 SILog loss.
+        """
+
+        # 0 이하인 prediction은 log()에서 문제가 되므로 eps로 치환(또는 max 사용)
+        eps = 1e-6
+        prediction = tf.maximum(prediction, eps)
+
+        # valid_mask가 True인 위치만 골라서 계산 (boolean_mask)
+        valid_prediction = tf.boolean_mask(prediction, valid_mask)
+        valid_target = tf.boolean_mask(target, valid_mask)
+
+        # 로그 차이 계산: log(pred) - log(gt)
+        d = tf.math.log(valid_prediction) - tf.math.log(valid_target)
+
+        # SILog 식: E[d^2] - variance_focus * (E[d])^2
+        d2_mean = tf.reduce_mean(tf.square(d))  # E[d^2]
+        d_mean = tf.reduce_mean(d)              # E[d]
+        silog_expr = d2_mean - variance_focus * tf.square(d_mean)
+
+        # 최종 스케일링
+        loss_val = tf.sqrt(silog_expr)
+
+        return loss_val
+    
     def multi_scale_loss(self, pred_depths, gt_depth, rgb) -> dict:
         alpha = [1/2, 1/4, 1/8, 1/16] 
         smooth_losses = 0.0
-        log_losses = 1.0
+        log_losses = 0.0
         l1_losses = 0.0
 
-        smooth_loss_factor = 0.9
-        log_loss_factor = 0.9
-        l1_loss_factor = 0.1
+        smooth_loss_factor = 1.0
+        log_loss_factor = 1.0
+        l1_loss_factor = 1.0
 
         original_shape = gt_depth.shape[1:3]  # (H, W)
+
+        # valid mask
+        gt_depth = tf.where(gt_depth >= self.max_depth, 0., gt_depth)
+        valid_mask = gt_depth > 0
 
         for i in range(self.num_scales):
             # i-th 스케일 depth
             pred_depth = pred_depths[i]
 
-            # GT와 크기가 다를 수 있으므로, GT 크기로 resize
-            # (batch, origH, origW, 1) 형태로 맞추기
             pred_depth_resized = tf.image.resize(
                 pred_depth,
                 original_shape,
                 method=tf.image.ResizeMethod.BILINEAR
             )
-
             # smoothness loss
             smooth_losses += self.get_smooth_loss(pred_depth_resized, rgb) * alpha[i]
-
-            # l1_losses = self.zoedepth_metric_loss(pred_depth_resized, gt_depth, mask=valid_mask) * alpha[i]
-
+            
             # scale-invariant log loss
-            log_losses += self.scale_invariant_log_loss(pred_depth_resized, gt_depth) * alpha[i]
-            # log_losses += self.depthanything_metric_loss(pred_depth_resized, gt_depth, mask=valid_mask) * alpha[i]
+            log_losses += self.silog_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
 
             # l1 loss
-            l1_losses += self.l1_loss(pred_depth_resized, gt_depth) * alpha[i]
+            l1_losses += self.l1_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
         
         loss_dict = {
             'smooth_loss': smooth_losses * smooth_loss_factor,

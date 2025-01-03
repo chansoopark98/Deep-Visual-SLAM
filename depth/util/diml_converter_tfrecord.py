@@ -6,26 +6,38 @@ import numpy as np
 import tensorflow as tf
 from PIL import Image
 import json
-import matplotlib.pyplot as plt
 
 class DimlConverterTFRecord(object):
     def __init__(self, root_dir, save_dir):
         self.root_dir = root_dir
         self.save_dir = save_dir
         self.target_shape = (480, 720)
-        self.raw_dir = os.path.join(self.root_dir, 'diml_raw')
+
+        self.raw_train_dir = os.path.join(self.root_dir, 'train')
+        self.raw_valid_dir = os.path.join(self.root_dir, 'valid')
 
         self.save_dir = os.path.join(self.save_dir, 'diml_tfrecord')
         self.train_tfrecord_path = os.path.join(self.save_dir, 'train.tfrecord')
+        self.valid_tfrecord_path = os.path.join(self.save_dir, 'valid.tfrecord')
 
         os.makedirs(self.save_dir, exist_ok=True)
 
-        self.unzip_files(self.root_dir, self.raw_dir)
-        self.train_count = self.convert(raw_file_dir=self.raw_dir, tfrecord_path=self.train_tfrecord_path)
+        train_unzip_dir = os.path.join(self.root_dir, 'train_raw')
+        valid_unzip_dir = os.path.join(self.root_dir, 'valid_raw')
+
+        # self.unzip_files(self.raw_train_dir, train_unzip_dir)
+        self.unzip_files(self.raw_valid_dir, valid_unzip_dir)
+
+        # self.train_count = self.convert(raw_file_dir=train_unzip_dir, 
+        #                                 tfrecord_path=self.train_tfrecord_path)
+        self.train_count = 110599
+        self.valid_count = self.convert(raw_file_dir=valid_unzip_dir, 
+                                        tfrecord_path=self.valid_tfrecord_path)
 
         # Save metadata with sample counts
         metadata = {
             "train_count": self.train_count,
+            "valid_count": self.valid_count
         }
         with open(os.path.join(self.save_dir, 'metadata.json'), 'w') as f:
             json.dump(metadata, f)
@@ -37,11 +49,11 @@ class DimlConverterTFRecord(object):
         for zip_file in tqdm(zip_files, desc="Unzipping files"):
             zip_file_name = os.path.basename(zip_file).replace('.zip', '')
             save_zip_dir = os.path.join(save_dir, zip_file_name)
-            
-            if not os.path.exists(save_zip_dir):
-                print(f"Skipping {zip_file}, already extracted.")
-                os.makedirs(save_zip_dir, exist_ok=True)
 
+            is_path = os.path.exists(save_zip_dir)
+            if  is_path == False:
+                os.makedirs(save_zip_dir, exist_ok=True)
+                os.system(f'cd {save_zip_dir} && ls ')
                 command = (
                     f"unzip -l {zip_file} | awk '{{print $NF}}' | "
                     "tail -n +4 | head -n -2 | "
@@ -50,20 +62,6 @@ class DimlConverterTFRecord(object):
 
                 # Suppress stdout and stderr
                 subprocess.run(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            else:
-                current_folds = glob.glob(os.path.join(save_zip_dir, '*'))
-
-                for current_fold in tqdm(current_folds, desc="Removing non-use files"):
-                    current_scenes = glob.glob(os.path.join(current_fold, '*'))
-                    for current_scene in current_scenes:
-                        scene_folders = glob.glob(os.path.join(current_scene, '*'))
-
-                        for scene_folder in scene_folders:
-                            scene_folder_name = scene_folder.split('/')[-1]
-                            if scene_folder_name in ['raw_png', 'warp_png']:
-                                print(f"Removing {scene_folder}")
-                                subprocess.run(f"rm -rf {scene_folder}", shell=True)
 
     def convert(self, raw_file_dir, tfrecord_path):
         count = 0
@@ -88,23 +86,14 @@ class DimlConverterTFRecord(object):
                             # depth 파일 존재 확인
                             if not os.path.exists(depth_name):
                                 continue
-                    
+
                             rgb = np.array(Image.open(rgb_name))
                             depth = np.array(Image.open(depth_name)) * 0.001
 
                             serialized_example = self.serialize_example(rgb, depth)
                             writer.write(serialized_example)
-                        
+
                             count += 1
-                        
-                        # 샘플링 되지 않은 rgb, depth 파일 삭제
-                        for file in rgb_files:
-                            if file not in rgb_files[idx:idx+3]:
-                                depth_file = file.replace('col', 'up_png').replace('c.png', 'ud.png')
-                                if os.path.exists(file):
-                                    os.remove(file)
-                                if os.path.exists(depth_file):
-                                    os.remove(depth_file)
         return count
 
     def serialize_example(self, rgb, depth):
@@ -134,5 +123,5 @@ class DimlConverterTFRecord(object):
 
 if __name__ == '__main__':
     root_dir = '/media/park-ubuntu/park_file/depth_data/'
-    save_dir = './depth/data/new/'
+    save_dir = './depth/data/'
     converter = DimlConverterTFRecord(root_dir, save_dir=save_dir)
