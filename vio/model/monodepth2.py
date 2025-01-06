@@ -235,11 +235,13 @@ class PoseNet(tf.keras.Model):
         self.batch_size = batch_size
 
         # 1) ResNet-18 인코더 (채널=6)
-        self.encoder = ResNet18Encoder(
-            image_shape=(self.image_height, self.image_width, 6),
-            batch_size=batch_size,
-            prefix=prefix
-        )
+        # self.encoder = ResNet18Encoder(
+        #     image_shape=(self.image_height, self.image_width, 6),
+        #     batch_size=batch_size,
+        #     prefix=prefix
+        # )
+
+        self.encoder = resnet_18()
 
         # 2) 이후 pose 계산용 Conv 레이어들
         #    (질문 코드: std_conv(1,256)->std_conv(3,256)->std_conv(3,256)->Conv2D(6))

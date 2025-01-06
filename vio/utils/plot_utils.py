@@ -34,6 +34,69 @@ def plot_images(image: tf.Tensor, pred_depths: tf.Tensor):
 
     return tf.expand_dims(image, 0)
 
+def plot_warp_images(target_image: tf.Tensor,
+                     left_image: tf.Tensor,
+                     right_image: tf.Tensor,
+                     warped_images: list,
+                     warped_losses: list,
+                     masks: list,
+                     denrom_func):
+    
+    left_image = denrom_func(left_image[0])
+    target_image = denrom_func(target_image[0])
+    right_image = denrom_func(right_image[0])
+
+    warped_images = [denrom_func(warped_image[0]) for warped_image in warped_images]
+    
+    # left_to_target / target / right_to_target
+    # left_to_target loss / right_to_target loss / mask
+    fig, axes = plt.subplots(2, 5, figsize=(20, 10))
+    
+    axes[0, 0].imshow(left_image, vmin=0, vmax=255)
+    axes[0, 0].set_title('Left Image')
+    axes[0, 0].axis('off')
+    
+    axes[0, 1].imshow(warped_images[0], vmin=0, vmax=255)
+    axes[0, 1].set_title('Left to Target')
+    axes[0, 1].axis('off')
+
+    axes[0, 2].imshow(target_image, vmin=0, vmax=255)
+    axes[0, 2].set_title('Target Image')
+    axes[0, 2].axis('off')
+
+    axes[0, 3].imshow(warped_images[1], vmin=0, vmax=255)
+    axes[0, 3].set_title('Right to Target')
+    axes[0, 3].axis('off')
+
+    axes[0, 4].imshow(right_image, vmin=0, vmax=255)
+    axes[0, 4].set_title('Right Image')
+    axes[0, 4].axis('off')
+
+
+    axes[1, 1].imshow(warped_losses[0][0])
+    axes[1, 1].set_title('Left to Target Loss')
+    axes[1, 1].axis('off')
+
+    axes[1, 2].imshow(warped_losses[1][0])
+    axes[1, 2].set_title('Right to Target Loss')
+    axes[1, 2].axis('off')
+
+    axes[1, 3].imshow(masks[0][0])
+    axes[1, 3].set_title('Mask')
+    axes[1, 3].axis('off')
+    fig.tight_layout()
+
+    # 이미지를 Tensorboard에 로깅하기 위해 버퍼에 저장
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+
+    plt.close()
+    image = tf.image.decode_png(buf.getvalue(), channels=4)
+
+    return tf.expand_dims(image, 0)
+
+
 # def plot_line_tensorboard(imgs: np.ndarray, pred: np.ndarray, gt: np.ndarray, decision: np.ndarray):
 #     # 그림 및 gridspec 생성
 #     fig = plt.figure(figsize=(15, 15))  # 크기 조정
