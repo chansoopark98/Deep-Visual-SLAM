@@ -364,6 +364,7 @@ def projective_inverse_warp(img, depth, pose, intrinsics, invert=False, euler=Fa
   output_img = bilinear_sampler(img, src_pixel_coords)
   return output_img
 
+
 def bilinear_sampler(imgs, coords):
   """Construct a new image by bilinear sampling from the input image.
   Points falling outside the source image boundary have value 0.

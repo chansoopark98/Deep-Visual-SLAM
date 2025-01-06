@@ -19,7 +19,7 @@ class MonoDepth2Learner(object):
         self.auto_mask = True
 
         # depth 범위, etc. 필요시
-        self.min_depth = 0.1
+        self.min_depth = 0.3
         self.max_depth = 10.
 
     def disp_to_depth(self, disp, min_depth, max_depth):
@@ -36,7 +36,7 @@ class MonoDepth2Learner(object):
         l1_loss = tf.reduce_mean(tf.abs(reproj_image - tgt_image), axis=3, keepdims=True)
         ssim_loss = tf.reduce_mean(self.ssim(reproj_image, tgt_image), axis=3, keepdims=True)
 
-        loss = self.ssim_ratio * ssim_loss + (1. - self.ssim_ratio)*l1_loss
+        loss = self.ssim_ratio * ssim_loss + (1. - self.ssim_ratio) * l1_loss
         return loss
 
     def ssim(self, x, y):
@@ -133,8 +133,10 @@ class MonoDepth2Learner(object):
         pred_disps, pred_poses = self.model(images, training=training)
         
         # 2. Parse input images
+        left_image = images[..., :3]
         tgt_image = images[..., 3:6]
-        src_image_stack = tf.concat([images[..., :3], images[..., 6:9]], axis=3)
+        right_image = images[..., 6:9]
+        src_image_stack = tf.concat([left_image, right_image], axis=3)
 
         # 3. Multi-scale photometric + auto-mask + smoothness
         H = tf.shape(tgt_image)[1]
@@ -145,7 +147,10 @@ class MonoDepth2Learner(object):
         total_loss = 0.
 
         pred_depths = []
-        
+        pred_auto_masks = []
+        warped_images = [] # [[B, H, W, 3], [B, H, W, 3]] # left to target, right to target
+        warped_losses = [] # [[B, H, W, 1], [B, H, W, 1]] # left to target, right to target
+
         for s in range(self.num_scales):
             # disp_s shape => [B, H/(2^s), W/(2^s), 1]
             disp_s = pred_disps[s]
@@ -172,15 +177,24 @@ class MonoDepth2Learner(object):
                 # warp
                 # intrinsics_simplified = ...
                 resized_intrinsics = self.rescale_intrinsics(intrinsic, H, W, H // (2**s), W // (2**s))
+
                 curr_proj_image = projective_inverse_warp(
                     curr_src,
                     tf.squeeze(depth_s, axis=3),
                     curr_pose,
                     intrinsics=resized_intrinsics,
-                    invert=(i==0)
+                    invert=(i==0),
+                    
                 )
                 # photometric
                 curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, tgt_scaled)
+
+                # for visualization
+                if s == 0:
+                    warped_images.append(curr_proj_image)
+                    warped_losses.append(curr_reproj_loss)
+
+                # for loss
                 reprojection_list.append(curr_reproj_loss)
 
             # shape => [B, H/(2^s), W/(2^s), num_source]
@@ -201,7 +215,10 @@ class MonoDepth2Learner(object):
                 identity_losses += tf.random.normal(tf.shape(identity_losses), stddev=1e-5)
 
                 combined = tf.concat([identity_losses, reprojection_losses], axis=3)
-                # => shape [B, H/(2^s), W/(2^s), 2*num_source]
+
+                # For visualization
+                if s == 0:
+                    pred_auto_masks.append(tf.expand_dims(tf.cast(tf.argmin(combined, axis=3) > 1,tf.float32) * 255, -1))
 
             # min across channel => pick best
             reprojection_loss = tf.reduce_mean(tf.reduce_min(combined, axis=3))
@@ -217,10 +234,20 @@ class MonoDepth2Learner(object):
             pixel_losses += reprojection_loss
             smooth_losses += smooth_loss
 
+        # visualizations output
+        vis_outputs = {
+            'warped_image': warped_images,
+            'warped_loss': warped_losses,
+            'target': tgt_image,
+            'left_image': left_image,
+            'right_image': right_image,
+            'mask': pred_auto_masks,
+        }
+            
         # 평균 내기
         num_scales_f = tf.cast(self.num_scales, tf.float32)
         total_loss = total_loss / num_scales_f
         pixel_losses = pixel_losses / num_scales_f
         smooth_losses = smooth_losses / num_scales_f
 
-        return total_loss, pixel_losses, smooth_losses, pred_depths
+        return total_loss, pixel_losses, smooth_losses, pred_depths, vis_outputs
