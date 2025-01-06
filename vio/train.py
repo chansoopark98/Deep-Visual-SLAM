@@ -51,8 +51,8 @@ class Trainer(object):
 
         # 6. Logger
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-        tensorboard_path = self.config['Directory']['log_dir'] + \
-            '/' + current_time + '_'
+        tensorboard_path = os.path.join('vio', self.config['Directory']['log_dir'] + \
+            '/' + current_time + '_')
         self.train_summary_writer = tf.summary.create_file_writer(
             tensorboard_path + self.config['Directory']['exp_name'] + '/train')
         self.valid_summary_writer = tf.summary.create_file_writer(

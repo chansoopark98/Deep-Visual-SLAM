@@ -18,7 +18,7 @@ class DataLoader(object):
         self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
         self.std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
         self.num_train_samples = 0
-        self.num_train_samples = 0
+        self.num_valid_samples = 0
 
         self.train_datasets, self.valid_datasets = self._load_dataset()
         

@@ -2,9 +2,11 @@ import tensorflow as tf
 try:
     from .model_utils import *
     from .efficientnetv2 import EfficientNetV2Encoder
+    from .resnet import resnet_18
 except:
     from model_utils import *
     from efficientnetv2 import EfficientNetV2Encoder
+    from resnet import resnet_18
 
 class ResNet18Encoder(tf.keras.Model):
     def __init__(self,
@@ -111,6 +113,8 @@ class DispNet(tf.keras.Model):
         self.encoder = EfficientNetV2Encoder(image_shape=image_shape,
                                              batch_size=batch_size,
                                              prefix=prefix)
+        
+        # self.encoder = resnet_18()
 
         # 2) 디코더 (Depth Decoder)
         print('Building Depth Decoder Model')
@@ -289,8 +293,11 @@ class MonoDepth2Model(tf.keras.Model):
         self.min_depth = 0.1
         self.max_depth = 10.
 
-        self.depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='Mono_DispNet')
-        self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='Mono_PoseNet')
+        self.depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='disp_resnet')
+        self.depth_net(tf.random.normal((1, *image_shape, 3)))
+        self.depth_net.load_weights('./pre_trained_weights/dispnet/dispnet_resnet.h5')
+
+        self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
 
     def call(self, inputs, training=False):
         src_left = inputs[..., :3]
