@@ -1,5 +1,5 @@
 Directory:
-  exp_name: nyu_diode_diml_480x720_effnetv2s
+  exp_name: nyu_diode_diml_480x720_resnet18New
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights

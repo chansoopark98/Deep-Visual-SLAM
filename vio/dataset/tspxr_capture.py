@@ -97,12 +97,12 @@ class TspxrCapture(object):
     def __init__(self, config):
         self.config = config
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
-        self.root_dir = self.config['Directory']['data_dir']
+        self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'tspxr_capture')
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
-        self.train_data = self.generate_datasets(scene_dirs=self.train_dir, shuffle=True, test=False)
-        self.valid_data = self.generate_datasets(scene_dirs=self.valid_dir, shuffle=False, test=False)
-        self.test_data = self.generate_datasets(scene_dirs=self.valid_dir, shuffle=False, test=True)
+        self.train_data = self.generate_datasets(scene_dirs=self.train_dir, shuffle=True)
+        self.valid_data = self.generate_datasets(scene_dirs=self.valid_dir, shuffle=False)
+        self.test_data = self.generate_datasets(scene_dirs=self.valid_dir, shuffle=False)
     
     def _load_files(self, dir):
         if type(dir) == bytes:
@@ -238,7 +238,7 @@ class TspxrCapture(object):
 
             return new_intrinsic
 
-    def generate_datasets(self, scene_dirs, shuffle: False, test=False):
+    def generate_datasets(self, scene_dirs, shuffle: False):
         scene_dirs = self._load_files(dir=scene_dirs)
         datasets = []
         for scene_dir in scene_dirs:

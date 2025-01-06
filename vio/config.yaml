@@ -1,9 +1,13 @@
 Directory:
-  exp_name: 241113_newsample_V2
+  exp_name: pretrain_disp_vio_test_mars_logger
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
   results: ./results
+
+Dataset:
+  tspxr_capture: False
+  mars_logger: True
 
 Train:
   use_shuffle: True
@@ -11,8 +15,8 @@ Train:
   valid_log_interval: 10
   train_plot_interval: 100
   valid_plot_interval: 100
-  img_w: 1280
-  img_h: 720
+  img_w: 720
+  img_h: 480
   weight_decay: 0.00001
   batch_size: 8 # 1
   epoch: 101
