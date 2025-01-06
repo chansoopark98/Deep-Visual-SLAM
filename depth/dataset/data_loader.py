@@ -17,23 +17,22 @@ class DataLoader(object):
         self.auto_opt = tf.data.AUTOTUNE
         self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
         self.std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
+        self.num_train_samples = 0
+        self.num_train_samples = 0
 
-        self.train_datasets, self.valid_datasets,\
-              self.num_train_samples, self.num_valid_samples = self._load_dataset()
+        self.train_datasets, self.valid_datasets = self._load_dataset()
         
         self.num_train_samples = self.num_train_samples // self.batch_size
         self.num_valid_samples = self.num_valid_samples // self.batch_size
 
-        self.train_dataset = self._compile_dataset(self.train_datasets, batch_size=self.batch_size, use_shuffle=True)
+        self.train_dataset = self._compile_dataset(self.train_datasets, batch_size=self.batch_size, use_shuffle=True, is_train=True)
         if self.valid_datasets:
-            self.valid_dataset = self._compile_dataset(self.valid_datasets, batch_size=self.batch_size, use_shuffle=False)
+            self.valid_dataset = self._compile_dataset(self.valid_datasets, batch_size=self.batch_size, use_shuffle=False, is_train=False)
         
     def _load_dataset(self) -> list:
         train_datasets = []
         valid_datasets = []
-        train_samples = 0
-        valid_samples = 0
-
+        
         if self.config['Dataset']['Nyu_depth_v2']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'nyu_depth_v2_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
@@ -44,18 +43,18 @@ class DataLoader(object):
             train_datasets.append(dataset.train_dataset)
             valid_datasets.append(dataset.valid_dataset)
 
-            train_samples += dataset.train_samples
-            valid_samples += dataset.valid_samples
+            self.num_train_samples += dataset.train_samples
+            self.num_valid_samples += dataset.valid_samples
 
         if self.config['Dataset']['Diode']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diode_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
             train_datasets.append(dataset.train_dataset)
-            valid_datasets.append(dataset.valid_dataset)
+            # valid_datasets.append(dataset.valid_dataset)
 
-            train_samples += dataset.train_samples
-            valid_samples += dataset.valid_samples
+            self.num_train_samples += dataset.train_samples
+            # self.num_valid_samples += dataset.valid_samples
         
         if self.config['Dataset']['DIML']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diml_tfrecord')
@@ -64,9 +63,9 @@ class DataLoader(object):
             train_datasets.append(dataset.train_dataset)
             # valid_datasets.append(dataset.valid_dataset)
 
-            train_samples += dataset.train_samples
-            # valid_samples += dataset.valid_samples
-        return train_datasets, valid_datasets, train_samples, valid_samples
+            self.num_train_samples += dataset.train_samples
+            # self.num_valid_samples += dataset.valid_samples
+        return train_datasets, valid_datasets
 
     @tf.function(jit_compile=True)
     def preprocess_image(self, rgb: tf.Tensor):
@@ -89,22 +88,29 @@ class DataLoader(object):
     @tf.function(jit_compile=True)
     def normalize_image(self, image: tf.Tensor) -> tf.Tensor:
         image = tf.cast(image, tf.float32)
-        image /= 255.0
-        image = (image - self.mean) / self.std
+        # image /= 255.0
+        # image = (image - self.mean) / self.std
+        image = image * (1.0 / 128.0) - 1.0
         return image
     
     @tf.function(jit_compile=True)
     def denormalize_image(self, image):
-        image = (image * self.std) + self.mean
-        image *= 255.0
+        # image = (image * self.std) + self.mean
+        # image *= 255.0
+        image = (image + 1.0) * 128.0
         image = tf.cast(image, tf.uint8)
         return image
     
     @tf.function(jit_compile=True)
-    def preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
-        # 1. Augmentation
+    def train_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         rgb, depth = self.augment(rgb, depth)
 
+        rgb = self.preprocess_image(rgb)
+        depth = self.preprocess_depth(depth)
+        return rgb, depth
+
+    @tf.function(jit_compile=True)
+    def valid_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
         return rgb, depth
@@ -116,26 +122,23 @@ class DataLoader(object):
         depth: Depth image tensor (H, W, 1) [0, max_depth]
         """
         # rgb augmentations
-        # rgb = tf.cast(rgb, tf.float32) / 255.0
+        rgb = tf.cast(rgb, tf.float32) / 255.0
 
-        # if tf.random.uniform([]) > 0.5:
-        #     delta_brightness = tf.random.uniform([], -0.2, 0.2)
-        #     rgb = tf.image.adjust_brightness(rgb, delta_brightness)
+        if tf.random.uniform([]) > 0.5:
+            delta_brightness = tf.random.uniform([], -0.2, 0.2)
+            rgb = tf.image.adjust_brightness(rgb, delta_brightness)
         
-        # if tf.random.uniform([]) > 0.5:
-        #     contrast_factor = tf.random.uniform([], 0.7, 1.3)
-        #     rgb = tf.image.adjust_contrast(rgb, contrast_factor)
+        if tf.random.uniform([]) > 0.5:
+            contrast_factor = tf.random.uniform([], 0.7, 1.3)
+            rgb = tf.image.adjust_contrast(rgb, contrast_factor)
         
-        # if tf.random.uniform([]) > 0.5:
-        #     gamma = tf.random.uniform([], 0.8, 1.2)
-        #     rgb = tf.image.adjust_gamma(rgb, gamma)
+        if tf.random.uniform([]) > 0.5:
+            gamma = tf.random.uniform([], 0.8, 1.2)
+            rgb = tf.image.adjust_gamma(rgb, gamma)
         
-        # if tf.random.uniform([]) > 0.5:
-        #     max_delta = 0.1
-        #     rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
-        
-        # random crop and resize
-        # rgb, depth = self.crop_and_resize(rgb, depth)
+        if tf.random.uniform([]) > 0.5:
+            max_delta = 0.1
+            rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
 
         # flip left-right
         if tf.random.uniform([]) > 0.5:
@@ -143,24 +146,19 @@ class DataLoader(object):
             depth = tf.image.flip_left_right(depth)
 
         # back to [0, 255]
-        # rgb = tf.clip_by_value(rgb, 0., 255.)
-        # rgb = tf.cast(rgb * 255.0, tf.uint8)
-
+        rgb = tf.clip_by_value(rgb, 0., 255.)
+        rgb = tf.cast(rgb * 255.0, tf.uint8)
         return rgb, depth
-        
 
-    def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool) -> tf.data.Dataset:
-        # combined_dataset: tf.data.Dataset = datasets[0]
-        # weights = []
-        # for _ in range(len(datasets)):
-        #     weights.append(1.0)
-            
-
+    def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool, is_train: bool = True) -> tf.data.Dataset:
         combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
             
         if use_shuffle:
             combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 256, reshuffle_each_iteration=True)
-        combined_dataset = combined_dataset.map(self.preprocess, num_parallel_calls=self.auto_opt)
+        if is_train:
+            combined_dataset = combined_dataset.map(self.train_preprocess, num_parallel_calls=self.auto_opt)
+        else:
+            combined_dataset = combined_dataset.map(self.valid_preprocess, num_parallel_calls=self.auto_opt)
         combined_dataset = combined_dataset.batch(batch_size, drop_remainder=True, num_parallel_calls=self.auto_opt)
         combined_dataset = combined_dataset.prefetch(self.auto_opt)
         return combined_dataset

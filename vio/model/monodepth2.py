@@ -1,8 +1,10 @@
 import tensorflow as tf
 try:
     from .model_utils import *
+    from .efficientnetv2 import EfficientNetV2Encoder
 except:
     from model_utils import *
+    from efficientnetv2 import EfficientNetV2Encoder
 
 class ResNet18Encoder(tf.keras.Model):
     def __init__(self,
@@ -85,7 +87,7 @@ class ResNet18Encoder(tf.keras.Model):
 
 class DispNet(tf.keras.Model):
     """
-    ResNet18Encoder + Disp Decoder
+    Encoder + Disp Decoder
     """
     def __init__(self,
                  image_shape: tuple,
@@ -98,15 +100,17 @@ class DispNet(tf.keras.Model):
         self.image_width = image_shape[1]
         self.batch_size = batch_size
         self.prefix_str = prefix
-        self.alpha = 9.9
-        self.beta = 0.1
 
         # 1) 인코더(ResNet18Encoder)
-        self.encoder = ResNet18Encoder(
-            image_shape=image_shape,
-            batch_size=batch_size,
-            prefix=prefix
-        )
+        # self.encoder = ResNet18Encoder(
+        #     image_shape=image_shape,
+        #     batch_size=batch_size,
+        #     prefix=prefix
+        # )
+
+        self.encoder = EfficientNetV2Encoder(image_shape=image_shape,
+                                             batch_size=batch_size,
+                                             prefix=prefix)
 
         # 2) 디코더 (Depth Decoder)
         print('Building Depth Decoder Model')
@@ -185,31 +189,27 @@ class DispNet(tf.keras.Model):
         iconv4_upsample = self.iconv4_resize(iconv4)
         iconv4_concat = tf.concat([iconv4_upsample, skips[1]], axis=3)
         upconv4 = self.upconv4(iconv4_concat, training=training)
-        # disp4 = self.disp4(upconv4, training=training)
-        disp4 = self.alpha * self.disp4(upconv4, training=training) + self.beta
+        disp4 = self.disp4(upconv4, training=training)
 
         # disp3
         iconv3 = self.iconv3(upconv4, training=training)
         iconv3_upsample = self.iconv3_resize(iconv3)
         iconv3_concat = tf.concat([iconv3_upsample, skips[2]], axis=3)
         upconv3 = self.upconv3(iconv3_concat, training=training)
-        # disp3 = self.disp3(upconv3, training=training)
-        disp3 = self.alpha * self.disp3(upconv3, training=training) + self.beta
+        disp3 = self.disp3(upconv3, training=training)
 
         # disp2
         iconv2 = self.iconv2(upconv3, training=training)
         iconv2_upsample = self.iconv2_resize(iconv2)
         iconv2_concat = tf.concat([iconv2_upsample, skips[3]], axis=3)
         upconv2 = self.upconv2(iconv2_concat, training=training)
-        # disp2 = self.disp2(upconv2, training=training)
-        disp2 = self.alpha * self.disp2(upconv2, training=training) + self.beta
+        disp2 = self.disp2(upconv2, training=training)
 
         # disp1
         iconv1 = self.iconv1(upconv2, training=training)
         iconv1_upsample = self.iconv1_resize(iconv1)
         upconv1 = self.upconv1(iconv1_upsample, training=training)
-        # disp1 = self.disp1(upconv1, training=training)
-        disp1 = self.alpha * self.disp1(upconv1, training=training) + self.beta
+        disp1 = self.disp1(upconv1, training=training)
 
         return disp1, disp2, disp3, disp4
 

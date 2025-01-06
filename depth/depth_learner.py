@@ -11,24 +11,16 @@ class DepthLearner(object):
         self.optimizer = optimizer
 
         self.num_scales = 4
-        self.min_depth = 0.1
+        self.min_depth = 0.3
         self.max_depth = 10.
-    
-    def depth_to_disparity(self, depth, eps=1e-4):
-        # Compute disparity
-        disparity = tf.where(depth >= eps, 1.0 / depth, tf.zeros_like(depth))
-        depth = tf.cast(depth, tf.float32)
-        return disparity
 
-    def disparity_to_depth(self, disparity, eps=1e-4):
-        # Compute absolute disparity
-        abs_disp = tf.abs(disparity)
-
-        # Compute depth
-        depth = tf.where(abs_disp >= eps, 1.0 / abs_disp, tf.zeros_like(abs_disp))
-        depth = tf.cast(depth, tf.float32)
+    def disp_to_depth(self, disp):
+        min_disp = 1. / self.max_depth
+        max_disp = 1. / self.min_depth
+        scaled_disp = tf.cast(min_disp, tf.float32) + tf.cast(max_disp - min_disp, tf.float32) * tf.cast(disp, tf.float32)
+        depth = tf.cast(1., tf.float32) / scaled_disp
         return depth
-    
+        
     def get_smooth_loss(self, disp, img):
         """
         Edge-aware smoothness: disp gradients * exp(-|img grads|)
@@ -47,13 +39,11 @@ class DepthLearner(object):
 
         smoothness_x = disp_dx * weight_x
         smoothness_y = disp_dy * weight_y
-
         return tf.reduce_mean(smoothness_x) + tf.reduce_mean(smoothness_y)
     
     def l1_loss(self, pred, gt, valid_mask):
         abs_diff = tf.abs(pred - gt)
         masked_abs_diff = tf.boolean_mask(abs_diff, valid_mask)
-    
         return tf.reduce_mean(masked_abs_diff)
 
     def scale_invariant_log_loss(self, pred, gt):
@@ -126,7 +116,7 @@ class DepthLearner(object):
 
         smooth_loss_factor = 1.0
         log_loss_factor = 1.0
-        l1_loss_factor = 1.0
+        l1_loss_factor = 0.1
 
         original_shape = gt_depth.shape[1:3]  # (H, W)
 
@@ -140,13 +130,13 @@ class DepthLearner(object):
                 method=tf.image.ResizeMethod.BILINEAR
             )
             # smoothness loss
-            smooth_losses += self.get_smooth_loss(pred_depth_resized, rgb) * alpha[i]
+            # smooth_losses += self.get_smooth_loss(pred_depth_resized, rgb) * alpha[i]
             
             # scale-invariant log loss
             log_losses += self.silog_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
 
             # l1 loss
-            l1_losses += self.l1_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
+            # l1_losses += self.l1_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
         
         loss_dict = {
             'smooth_loss': smooth_losses * smooth_loss_factor,
@@ -165,11 +155,13 @@ class DepthLearner(object):
         # pred_disps: list [disp1, disp2, disp3, disp4]
         
         # 2. Disps -> Depths
-        depth = tf.where(depth >= self.max_depth, 0., depth)
+        # 깊이가 self.max_depth보다 크거나 self.min_depth보다 작은 경우 0으로 치환
+
+        depth = tf.where((depth >= self.max_depth) | (depth <= self.min_depth), 0., depth)
         valid_mask = depth > 0
 
         pred_depths = [
-            self.disparity_to_depth(disp)
+            self.disp_to_depth(disp)
             for disp in pred_disps
         ]
 
