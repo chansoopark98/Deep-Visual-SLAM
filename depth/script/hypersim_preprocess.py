@@ -5,8 +5,6 @@ import h5py
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-
-# 병렬 처리 라이브러리
 from joblib import Parallel, delayed
 
 IMG_WIDTH = 1024
