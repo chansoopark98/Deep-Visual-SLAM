@@ -80,10 +80,10 @@ if "__main__" == __name__:
     parser.add_argument(
         "--split_csv",
         type=str,
-        default="data/Hypersim/metadata_images_split_scene_v1.csv",
+        default="./depth/util/metadata_images_split_scene_v1.csv",
     )
-    parser.add_argument("--dataset_dir", type=str, default="data/Hypersim/raw_data")
-    parser.add_argument("--output_dir", type=str, default="data/Hypersim/processed")
+    parser.add_argument("--dataset_dir", type=str, default='/media/park-ubuntu/park_cs/hypersim/')
+    parser.add_argument("--output_dir", type=str, default="/media/park-ubuntu/park_cs/hypersim_output/")
 
     args = parser.parse_args()
 
@@ -91,11 +91,9 @@ if "__main__" == __name__:
     dataset_dir = args.dataset_dir
     output_dir = args.output_dir
 
-    # %%
     raw_meta_df = pd.read_csv(split_csv)
     meta_df = raw_meta_df[raw_meta_df.included_in_public_release].copy()
 
-    # %%
     for split in ["train", "val", "test"]:
         split_output_dir = os.path.join(output_dir, split)
         os.makedirs(split_output_dir)
@@ -175,6 +173,7 @@ if "__main__" == __name__:
             plane_depth = plane_depth.astype(np.uint16)
             depth_name = f"depth_plane_{row.camera_name}_fr{row.frame_id:04d}.png"
             depth_path = os.path.join(scene_path, depth_name)
+            
             cv2.imwrite(os.path.join(split_output_dir, depth_path), plane_depth)
 
             # Meta data
