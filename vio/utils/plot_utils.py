@@ -84,6 +84,11 @@ def plot_warp_images(target_image: tf.Tensor,
     axes[1, 3].imshow(masks[0][0])
     axes[1, 3].set_title('Mask')
     axes[1, 3].axis('off')
+
+    # non-used plot
+    axes[1, 0].axis('off')
+    axes[1, 4].axis('off')
+    
     fig.tight_layout()
 
     # 이미지를 Tensorboard에 로깅하기 위해 버퍼에 저장

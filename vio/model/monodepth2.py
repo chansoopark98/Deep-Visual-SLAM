@@ -2,10 +2,12 @@ import tensorflow as tf
 try:
     from .model_utils import *
     from .efficientnetv2 import EfficientNetV2Encoder
+    from .mobilenetv3 import MobilenetV3Large
     from .resnet import resnet_18
 except:
     from model_utils import *
     from efficientnetv2 import EfficientNetV2Encoder
+    from mobilenetv3 import MobilenetV3Large
     from resnet import resnet_18
 
 class ResNet18Encoder(tf.keras.Model):
@@ -94,7 +96,7 @@ class DispNet(tf.keras.Model):
     def __init__(self,
                  image_shape: tuple,
                  batch_size: int,
-                 prefix: str = 'disp_resnet',
+                 prefix: str = 'Dispnet',
                  **kwargs):
         super(DispNet, self).__init__(**kwargs)
 
@@ -110,11 +112,15 @@ class DispNet(tf.keras.Model):
         #     prefix=prefix
         # )
 
-        self.encoder = EfficientNetV2Encoder(image_shape=image_shape,
-                                             batch_size=batch_size,
-                                             prefix=prefix)
+        # self.encoder = EfficientNetV2Encoder(image_shape=image_shape,
+        #                                      batch_size=batch_size,
+        #                                      prefix=prefix)
         
         # self.encoder = resnet_18()
+
+        self.encoder = MobilenetV3Large(image_shape=(*image_shape, 3),
+                                        batch_size=batch_size,
+                                        prefix=prefix + '_mobilenetv3large').build_model()
 
         # 2) 디코더 (Depth Decoder)
         print('Building Depth Decoder Model')
