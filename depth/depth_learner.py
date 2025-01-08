@@ -1,18 +1,11 @@
 import tensorflow as tf
 
 class DepthLearner(object):
-    def __init__(self, model, optimizer, **config):
-        """
-        model: 이미 build된 tf.keras.Model
-        optimizer: tf.keras.optimizers.Optimizer
-        config: hyperparams, etc.
-        """
+    def __init__(self, model, config) -> None:
         self.model = model
-        self.optimizer = optimizer
-
+        self.min_depth = config['Train']['min_depth'] # 0.001
+        self.max_depth = config['Train']['max_depth'] # 10.0
         self.num_scales = 4
-        self.min_depth = 0.3
-        self.max_depth = 10.
 
     def disp_to_depth(self, disp):
         min_disp = 1. / self.max_depth
@@ -45,29 +38,6 @@ class DepthLearner(object):
         abs_diff = tf.abs(pred - gt)
         masked_abs_diff = tf.boolean_mask(abs_diff, valid_mask)
         return tf.reduce_mean(masked_abs_diff)
-
-    def scale_invariant_log_loss(self, pred, gt):
-        if len(pred.shape) == 4 and pred.shape[-1] == 1:
-            pred = tf.squeeze(pred, axis=-1)
-        if len(gt.shape) == 4 and gt.shape[-1] == 1:
-            gt = tf.squeeze(gt, axis=-1)
-
-        # (1) 유효 깊이 마스크(gt>0) 생성
-        valid_mask = tf.cast(gt > 0, tf.float32)
-        valid_count = tf.reduce_sum(valid_mask) + 1e-8  # 분모가 0이 되지 않도록
-        
-        # pred = tf.clip_by_value(pred, 0.1, 10.)
-        # gt = tf.clip_by_value(gt, 0.1, 10.)
-
-        # (3) 로그 차이 계산 + 유효 픽셀에만 적용
-        log_diff = (tf.math.log(pred) - tf.math.log(gt)) * valid_mask
-
-        diff_sq  = tf.reduce_sum(tf.square(log_diff)) / valid_count
-        diff_sum = tf.square(tf.reduce_sum(log_diff) / valid_count)
-
-        # loss = diff_sq - 0.5 * diff_sum
-        loss = diff_sq * diff_sum
-        return loss
     
     def silog_loss(self,
                 prediction: tf.Tensor,
@@ -156,7 +126,6 @@ class DepthLearner(object):
         
         # 2. Disps -> Depths
         # 깊이가 self.max_depth보다 크거나 self.min_depth보다 작은 경우 0으로 치환
-
         depth = tf.where((depth >= self.max_depth) | (depth <= self.min_depth), 0., depth)
         valid_mask = depth > 0
 

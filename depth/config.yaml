@@ -17,10 +17,12 @@ Train:
   valid_log_interval: 50
   train_plot_interval: 100
   valid_plot_interval: 100
+  min_depth: 0.1
   max_depth: 10.0
   img_w: 640 # 720
   img_h: 480
-  weight_decay: 0.0001
+  beta1: 0.9
+  weight_decay: 0 # 0.0001
   batch_size: 16 # 1
   epoch: 31
   init_lr: 0.0004

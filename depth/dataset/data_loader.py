@@ -3,9 +3,13 @@ import tensorflow as tf
 try:
     from .tfrecord_loader import TFRecordLoader
     from .nyu_handler import NyuHandler
+    from .diode_handler import DiodeHandler
+    from .diml_handler import DimlHandler
 except:
     from tfrecord_loader import TFRecordLoader
     from nyu_handler import NyuHandler
+    from diode_handler import DiodeHandler
+    from diml_handler import DimlHandler
 
 class DataLoader(object):
     def __init__(self, config) -> None:
@@ -13,10 +17,11 @@ class DataLoader(object):
         self.batch_size = self.config['Train']['batch_size']
         self.use_shuffle = self.config['Train']['use_shuffle']
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
-        self.max_depth = self.config['Train']['max_depth']
         self.auto_opt = tf.data.AUTOTUNE
         self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
         self.std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
+        self.min_depth = self.config['Train']['min_depth']
+        self.max_depth = self.config['Train']['max_depth']
         self.num_train_samples = 0
         self.num_valid_samples = 0
 
@@ -37,7 +42,7 @@ class DataLoader(object):
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'nyu_depth_v2_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
-            handler = NyuHandler(image_size=self.image_size)
+            handler = NyuHandler(target_size=self.image_size)
             dataset.train_dataset = dataset.train_dataset.map(handler.nyu_crop_resize,
                                                               num_parallel_calls=self.auto_opt)
             train_datasets.append(dataset.train_dataset)
@@ -50,6 +55,9 @@ class DataLoader(object):
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diode_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
+            # handler = DiodeHandler(target_size=self.image_size)
+            # dataset.train_dataset = dataset.train_dataset.map(handler.preprocess,
+            #                                                   num_parallel_calls=self.auto_opt)
             train_datasets.append(dataset.train_dataset)
             # valid_datasets.append(dataset.valid_dataset)
 
@@ -60,6 +68,9 @@ class DataLoader(object):
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diml_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float16)
+            # handler = DimlHandler(image_size=self.image_size)
+            # dataset.train_dataset = dataset.train_dataset.map(handler.preprocess,
+            #                                                     num_parallel_calls=self.auto_opt)
             train_datasets.append(dataset.train_dataset)
             # valid_datasets.append(dataset.valid_dataset)
 
@@ -79,10 +90,10 @@ class DataLoader(object):
     @tf.function(jit_compile=True)
     def preprocess_depth(self, depth: tf.Tensor):
         depth = tf.cast(depth, tf.float32)
+        depth = tf.clip_by_value(depth, 0., self.max_depth)
         depth = tf.image.resize(depth,
                                 self.image_size,
                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        depth = tf.clip_by_value(depth, 0., self.max_depth)
         return depth
         
     @tf.function(jit_compile=True)
@@ -90,14 +101,17 @@ class DataLoader(object):
         image = tf.cast(image, tf.float32)
         # image /= 255.0
         # image = (image - self.mean) / self.std
-        image = image * (1.0 / 128.0) - 1.0
+        # image = image * (1.0 / 128.0) - 1.0
+        # x = layers.Rescaling(scale=1.0 / 127.5, offset=-1.0)(x)
+        image = (image * (1.0 / 127.5)) - 1.0
         return image
     
     @tf.function(jit_compile=True)
     def denormalize_image(self, image):
         # image = (image * self.std) + self.mean
         # image *= 255.0
-        image = (image + 1.0) * 128.0
+        # image = (image + 1.0) * 128.0
+        image = (image + 1.0) * 127.5
         image = tf.cast(image, tf.uint8)
         return image
     
@@ -172,12 +186,13 @@ if __name__ == '__main__':
         },
         'Dataset':{
             'Nyu_depth_v2': True,
-            'Diode': False,
+            'Diode': True,
             'DIML': True,
         },
         'Train': {
             'batch_size': 128,
             'max_depth': 10.,
+            'min_depth': 0.1,
             'use_shuffle': True,
             'img_h': 480, # 480
             'img_w': 720 # 720
@@ -190,15 +205,17 @@ if __name__ == '__main__':
     learner = DepthLearner(None, None)
 
     for idx, samples in enumerate(data_loader.train_dataset.take(data_loader.num_train_samples)):
-        rgb, depth = samples
+        rgb, depth, intrinsic = samples
         print(rgb.shape)
         print(depth.shape)
+        print(intrinsic)
         rgb = data_loader.denormalize_image(rgb)
         plt.imshow(rgb[0])
         plt.show()
         plt.imshow(depth[0], cmap='plasma')
         plt.show()
 
+    
         mask = depth > 0
         disp, mask = learner.depth_to_disparity(depth[0], mask=mask)
 

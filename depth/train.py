@@ -32,8 +32,6 @@ class Trainer(object):
 
         model_input_shape = (self.config['Train']['batch_size'],
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
-        # model_input_shape = (self.config['Train']['batch_size'],
-        #                      None, None, 3)
         self.model.build(model_input_shape)
         self.model.summary()
 
@@ -52,14 +50,16 @@ class Trainer(object):
                                                                               self.config['Train']['epoch'],
                                                                               self.config['Train']['init_lr'] * 0.1,
                                                                               power=0.9)
-
+        
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
-                                                  weight_decay=self.config['Train']['weight_decay']
+                                                  beta_1=self.config['Train']['beta1'],
+                                                  weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None
                                                   ) # 
+        
         self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Learner
-        self.learner = DepthLearner(model=self.model, optimizer=self.optimizer)
+        self.learner = DepthLearner(model=self.model, config=self.config)
 
         # 5. Metrics
         self.train_total_loss = tf.keras.metrics.Mean(name='train_total_loss')
@@ -91,8 +91,7 @@ class Trainer(object):
     @tf.function()
     def train_step(self, rgb, depth):
         with tf.GradientTape() as tape:
-            loss_dict, pred_depths = self.learner.forward_step(
-                rgb, depth, training=True)
+            loss_dict, pred_depths = self.learner.forward_step(rgb, depth, training=True)
             total_loss = sum(loss_dict.values())
             scaled_loss = self.optimizer.get_scaled_loss(total_loss)
 
@@ -103,8 +102,7 @@ class Trainer(object):
     
     @tf.function()
     def validation_step(self, rgb, depth):
-        loss_dict, pred_depths = self.learner.forward_step(
-            rgb, depth, training=False)
+        loss_dict, pred_depths = self.learner.forward_step(rgb, depth, training=False)
         return loss_dict, pred_depths
     
     @tf.function()

@@ -1,40 +1,47 @@
-import os
-import glob
-import numpy as np
+import tensorflow as tf
 
 class DiodeHandler(object):
-    def __init__(self, root_dir):
-        self.root_dir = root_dir
-        self.train_dir = os.path.join(self.root_dir, 'train')
-        self.valid_dir = os.path.join(self.root_dir, 'valid')
-        self.train_data = self.generate_datasets(root_dir=self.train_dir, shuffle=True)
-        self.valid_data = self.generate_datasets(root_dir=self.valid_dir, shuffle=False)
-
-    def generate_datasets(self, root_dir, shuffle: False):
-        rgb_files = sorted(glob.glob(os.path.join(root_dir, 'rgb', '*.jpg')))
-        depth_files = sorted(glob.glob(os.path.join(root_dir, 'depth', '*.png')))
+    def __init__(self, target_size: tuple) -> None:
+        self.target_size = target_size
         
-        # check the number of files
-        assert len(rgb_files) == len(depth_files), 'The number of rgb and depth files are not matched.'
+        self.original_size = (768, 1024)
+        self.original_intrinsic_matrix = tf.constant([[886.81, 0., 512.],
+                                             [0., 927.06, 384.],
+                                             [0., 0., 1.]], dtype=tf.float32)
 
-        samples = []
+    @tf.function(jit_compile=True)
+    def preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
+        rgb = tf.image.resize(rgb, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
+        depth = tf.image.resize(depth, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
-        for idx in range(len(rgb_files)):
-            sample = {
-                'rgb': rgb_files[idx],
-                'depth': depth_files[idx]
-            }
-            samples.append(sample)
-
-        samples = np.array(samples)
+        # Compute scaling factors
+        # TODO
+        scale_x = tf.cast(self.target_size[1] / self.original_size[1], tf.float32)  # target_width / original_width
+        scale_y = tf.cast(self.target_size[0] / self.original_size[0], tf.float32)  # target_height / original_height
+        new_fx = tf.cast(self.original_intrinsic_matrix[0, 0] * scale_x, tf.float32)
+        new_fy = tf.cast(self.original_intrinsic_matrix[1, 1] * scale_y, tf.float32)
+        new_cx = tf.cast(self.original_intrinsic_matrix[0, 2] * scale_x, tf.float32)
+        new_cy = tf.cast(self.original_intrinsic_matrix[1, 2] * scale_y, tf.float32)
+        adjusted_intrinsic_matrix = tf.constant([[new_fx, 0, new_cx],
+												 [0, new_fy, new_cy],
+												 [0, 0, 1]], dtype=tf.float32)
         
-        if shuffle:
-            np.random.shuffle(samples)
-        return samples
+        
+        # Adjust intrinsic matrix
+        # adjusted_intrinsic_matrix = tf.constant([[self.original_intrinsic_matrix[0, 0] * scale_x, 0, self.original_intrinsic_matrix[0, 2] * scale_x],
+        #                                          [0, self.original_intrinsic_matrix[1, 1] * scale_y, self.original_intrinsic_matrix[1, 2] * scale_y],
+        #                                          [0, 0, 1]], dtype=tf.float32)
+
+        return rgb, depth, adjusted_intrinsic_matrix
 
 if __name__ == '__main__':
-    root_dir = './depth/data/diode_converted'
-    tspxr_capture = DiodeHandler(root_dir)
-    
-    for idx in range(tspxr_capture.train_data.shape[0]):
-        print(idx)
+    import matplotlib.pyplot as plt
+    dummy = tf.ones((480, 640, 3))
+    dummy_depth = tf.ones((480, 640, 1))
+    handler = DiodeHandler(target_size=(792, 1408))
+    a, b, c = handler.preprocess(dummy, dummy_depth)
+    print(a.shape, b.shape)
+    plt.imshow(a)
+    plt.show()
+    plt.imshow(b[:, :, 0], cmap='plasma')
+    plt.show()
