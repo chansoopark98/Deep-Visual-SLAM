@@ -1,5 +1,5 @@
 Directory:
-  exp_name: nyu_diode_diml_480x720_resnet18New
+  exp_name: mobilenetv3Large_nyu_diode_diml_test_480x640
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -9,6 +9,7 @@ Dataset:
   Nyu_depth_v2: True
   Diode: True
   DIML: True
+  Hypersim: False
 
 Train:
   use_shuffle: True
@@ -17,7 +18,7 @@ Train:
   train_plot_interval: 100
   valid_plot_interval: 100
   max_depth: 10.0
-  img_w: 720 # 720
+  img_w: 640 # 720
   img_h: 480
   weight_decay: 0.0001
   batch_size: 16 # 1

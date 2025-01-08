@@ -25,12 +25,11 @@ class DimlConverterTFRecord(object):
         train_unzip_dir = os.path.join(self.root_dir, 'train_raw')
         valid_unzip_dir = os.path.join(self.root_dir, 'valid_raw')
 
-        # self.unzip_files(self.raw_train_dir, train_unzip_dir)
+        self.unzip_files(self.raw_train_dir, train_unzip_dir)
         self.unzip_files(self.raw_valid_dir, valid_unzip_dir)
 
-        # self.train_count = self.convert(raw_file_dir=train_unzip_dir, 
-        #                                 tfrecord_path=self.train_tfrecord_path)
-        self.train_count = 110599
+        self.train_count = self.convert(raw_file_dir=train_unzip_dir, 
+                                        tfrecord_path=self.train_tfrecord_path) # 110599
         self.valid_count = self.convert(raw_file_dir=valid_unzip_dir, 
                                         tfrecord_path=self.valid_tfrecord_path)
 

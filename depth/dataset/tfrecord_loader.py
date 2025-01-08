@@ -1,24 +1,29 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 import json
 
 class TFRecordLoader(object):
     def __init__(self, root_dir: str,
                  is_train: bool = True,
-                 is_valid: bool = False,
-                 image_size: tuple = (480, 640),
+                 is_valid: bool = True,
+                 is_test: bool = False,
+                 image_size: tuple = (None, None),
                  depth_dtype: tf.dtypes.DType = tf.float32) -> None:
         self.root_dir = root_dir
         self.is_train = is_train
         self.is_valid = is_valid
+        self.is_test = is_test
         self.image_size = image_size
         self.depth_dtype = depth_dtype
         if self.is_train:
-            self.train_samples, self.valid_samples = self._load_metadata(f'{self.root_dir}/metadata.json')
+            self.train_samples, self.valid_samples, self.test_samples = self._load_metadata(f'{self.root_dir}/metadata.json')
             self.train_dataset = tf.data.TFRecordDataset(f'{self.root_dir}/train.tfrecord')
             self.train_dataset = self.train_dataset.map(self._parse_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         if self.is_valid:
             self.valid_dataset = tf.data.TFRecordDataset(f'{self.root_dir}/valid.tfrecord')
             self.valid_dataset = self.valid_dataset.map(self._parse_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        if self.is_test:
+            self.test_dataset = tf.data.TFRecordDataset(f'{self.root_dir}/test.tfrecord')
+            self.test_dataset = self.test_dataset.map(self._parse_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     
     def _load_metadata(self, metadata_path):
         with open(metadata_path, 'r') as f:
@@ -29,7 +34,11 @@ class TFRecordLoader(object):
             valid_samples = metadata.get('valid_count', None)
         else:
             valid_samples = 0
-        return train_samples, valid_samples
+        if self.is_test:
+            test_samples = metadata.get('test_count', None)
+        else:
+            test_samples = 0
+        return train_samples, valid_samples, test_samples
 
     def _parse_data(self, example_proto):
         feature_description = {
