@@ -1,4 +1,5 @@
 import tensorflow as tf
+from dataset.dataset_utils import rescale_camera_intrinsic
 
 class NyuHandler(object):
     def __init__(self, target_size: tuple) -> None:
@@ -13,9 +14,11 @@ class NyuHandler(object):
         new_cx = original_cx - bound_left
         new_cy = original_cy - bound_top
 
-        self.intrinsic_matrix = tf.constant([[5.1885790117450188e+02, 0., new_cx],
+        self.original_size = (480, 640)
+        self.original_intrinsic_matrix = tf.constant([[5.1885790117450188e+02, 0., new_cx],
                                              [0., 5.1946961112127485e+02, new_cy],
                                              [0., 0., 1.]], dtype=tf.float32)
+        
 
     @tf.function(jit_compile=True)
     def nyu_crop_resize(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
@@ -32,7 +35,13 @@ class NyuHandler(object):
         cropped_image = rgb[bound_top:bound_bottom, bound_left:bound_right, :]
         cropped_depth = depth[bound_top:bound_bottom, bound_left:bound_right, :]
 
+        # Resize
+        cropped_image = tf.image.resize(cropped_image, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
+        cropped_depth = tf.image.resize(cropped_depth, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
+        intrinsic = rescale_camera_intrinsic(self.original_intrinsic_matrix,
+                                             self.original_size,
+                                             self.target_size)
         # 타입 변환
         cropped_image = tf.cast(cropped_image, tf.uint8)
         cropped_depth = tf.cast(cropped_depth, tf.float32)
@@ -41,7 +50,7 @@ class NyuHandler(object):
         cropped_image = tf.ensure_shape(cropped_image, [None, None, 3])
         cropped_depth = tf.ensure_shape(cropped_depth, [None, None, 1])
         
-        return cropped_image, cropped_depth
+        return cropped_image, cropped_depth, intrinsic
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt

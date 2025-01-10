@@ -2,3 +2,6 @@ tensorflow==2.12.1
 tqdm
 pyyaml
 matplotlib
+pandas
+pydot
+graphviz

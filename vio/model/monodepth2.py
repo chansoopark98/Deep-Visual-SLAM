@@ -4,11 +4,13 @@ try:
     from .efficientnetv2 import EfficientNetV2Encoder
     from .mobilenetv3 import MobilenetV3Large
     from .resnet import resnet_18
+    from .resnet_tf import Resnet
 except:
     from model_utils import *
     from efficientnetv2 import EfficientNetV2Encoder
     from mobilenetv3 import MobilenetV3Large
     from resnet import resnet_18
+    from resnet_tf import Resnet
 
 class ResNet18Encoder(tf.keras.Model):
     def __init__(self,
@@ -112,13 +114,17 @@ class DispNet(tf.keras.Model):
         #     prefix=prefix
         # )
 
-        # self.encoder = EfficientNetV2Encoder(image_shape=image_shape,
+        # self.encoder = EfficientNetV2Encoder(image_shape=(*image_shape, 3),
         #                                      batch_size=batch_size,
-        #                                      prefix=prefix)
+        #                                      prefix=prefix).build_model()
         
         # self.encoder = resnet_18()
 
-        self.encoder = MobilenetV3Large(image_shape=(*image_shape, 3),
+        # self.encoder = MobilenetV3Large(image_shape=(*image_shape, 3),
+        #                                 batch_size=batch_size,
+        #                                 prefix=prefix + '_mobilenetv3large').build_model()
+
+        self.encoder = Resnet(image_shape=(*image_shape, 3),
                                         batch_size=batch_size,
                                         prefix=prefix + '_mobilenetv3large').build_model()
 
