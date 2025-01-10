@@ -1,5 +1,7 @@
 import tensorflow as tf
-import vio.model.resnet_original as resnet
+import os, sys
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+import model.resnet_original as resnet
 import torchvision.models as models
 import torch
 import numpy as np
