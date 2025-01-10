@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from depth_learner import DepthLearner
-from vio.model.monodepth2 import DispNet
+from model.monodepth2 import DispNet
 from util.plot import plot_images
 from util.metrics import DepthMetrics
 from dataset.data_loader import DataLoader
