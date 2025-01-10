@@ -126,7 +126,6 @@ class DepthLearner(object):
         
         # 2. Disps -> Depths
         # 깊이가 self.max_depth보다 크거나 self.min_depth보다 작은 경우 0으로 치환
-        depth = tf.where((depth >= self.max_depth) | (depth <= self.min_depth), 0., depth)
         valid_mask = depth > 0
 
         pred_depths = [

@@ -1,4 +1,5 @@
 import tensorflow as tf
+from dataset.dataset_utils import rescale_camera_intrinsic
 
 class DiodeHandler(object):
     def __init__(self, target_size: tuple) -> None:
@@ -15,24 +16,16 @@ class DiodeHandler(object):
         depth = tf.image.resize(depth, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
         # Compute scaling factors
-        # TODO
-        scale_x = tf.cast(self.target_size[1] / self.original_size[1], tf.float32)  # target_width / original_width
-        scale_y = tf.cast(self.target_size[0] / self.original_size[0], tf.float32)  # target_height / original_height
-        new_fx = tf.cast(self.original_intrinsic_matrix[0, 0] * scale_x, tf.float32)
-        new_fy = tf.cast(self.original_intrinsic_matrix[1, 1] * scale_y, tf.float32)
-        new_cx = tf.cast(self.original_intrinsic_matrix[0, 2] * scale_x, tf.float32)
-        new_cy = tf.cast(self.original_intrinsic_matrix[1, 2] * scale_y, tf.float32)
-        adjusted_intrinsic_matrix = tf.constant([[new_fx, 0, new_cx],
-												 [0, new_fy, new_cy],
-												 [0, 0, 1]], dtype=tf.float32)
+        intrinsic = rescale_camera_intrinsic(self.original_intrinsic_matrix,
+                                             self.original_size,
+												self.target_size)
+        rgb = tf.cast(rgb, tf.uint8)
+        depth = tf.cast(depth, tf.float32)
         
-        
-        # Adjust intrinsic matrix
-        # adjusted_intrinsic_matrix = tf.constant([[self.original_intrinsic_matrix[0, 0] * scale_x, 0, self.original_intrinsic_matrix[0, 2] * scale_x],
-        #                                          [0, self.original_intrinsic_matrix[1, 1] * scale_y, self.original_intrinsic_matrix[1, 2] * scale_y],
-        #                                          [0, 0, 1]], dtype=tf.float32)
+        rgb = tf.ensure_shape(rgb, [*self.target_size, 3])
+        depth = tf.ensure_shape(depth, [*self.target_size, 1])
 
-        return rgb, depth, adjusted_intrinsic_matrix
+        return rgb, depth, intrinsic
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt

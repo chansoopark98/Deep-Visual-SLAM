@@ -1,4 +1,5 @@
 import tensorflow as tf
+from dataset.dataset_utils import rescale_camera_intrinsic
 
 class DimlHandler(object):
     def __init__(self, image_size: tuple) -> None:
@@ -14,16 +15,17 @@ class DimlHandler(object):
         rgb = tf.image.resize(rgb, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
         depth = tf.image.resize(depth, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
-        # Compute scaling factors
-        scale_x = self.target_size[1] / self.original_size[1]  # target_width / original_width
-        scale_y = self.target_size[0] / self.original_size[0]  # target_height / original_height
+        intrinsic = rescale_camera_intrinsic(self.original_intrinsic_matrix,
+                                             self.original_size,
+                                             self.target_size)
+        
+        rgb = tf.cast(rgb, tf.uint8)
+        depth = tf.cast(depth, tf.float32)
+        
+        rgb = tf.ensure_shape(rgb, [*self.target_size, 3])
+        depth = tf.ensure_shape(depth, [*self.target_size, 1])
 
-        # Adjust intrinsic matrix
-        adjusted_intrinsic_matrix = tf.constant([[self.original_intrinsic_matrix[0, 0] * scale_x, 0, self.original_intrinsic_matrix[0, 2] * scale_x],
-                                                 [0, self.original_intrinsic_matrix[1, 1] * scale_y, self.original_intrinsic_matrix[1, 2] * scale_y],
-                                                 [0, 0, 1]], dtype=tf.float32)
-
-        return rgb, depth, adjusted_intrinsic_matrix
+        return rgb, depth, intrinsic
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt

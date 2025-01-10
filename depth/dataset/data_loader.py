@@ -55,9 +55,7 @@ class DataLoader(object):
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diode_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
-            # handler = DiodeHandler(target_size=self.image_size)
-            # dataset.train_dataset = dataset.train_dataset.map(handler.preprocess,
-            #                                                   num_parallel_calls=self.auto_opt)
+            handler = DiodeHandler(target_size=self.image_size)
             train_datasets.append(dataset.train_dataset)
             # valid_datasets.append(dataset.valid_dataset)
 
@@ -68,14 +66,23 @@ class DataLoader(object):
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diml_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float16)
-            # handler = DimlHandler(image_size=self.image_size)
-            # dataset.train_dataset = dataset.train_dataset.map(handler.preprocess,
-            #                                                     num_parallel_calls=self.auto_opt)
+            handler = DimlHandler(image_size=self.image_size)
             train_datasets.append(dataset.train_dataset)
             # valid_datasets.append(dataset.valid_dataset)
 
             self.num_train_samples += dataset.train_samples
             # self.num_valid_samples += dataset.valid_samples
+
+        if self.config['Dataset']['Hypersim']:
+            dataset_name = os.path.join(self.config['Directory']['data_dir'], 'hypersim_tfrecord')
+            dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
+                                     is_valid=True, image_size=(None, None), depth_dtype=tf.float16)
+            
+            train_datasets.append(dataset.train_dataset)
+            valid_datasets.append(dataset.valid_dataset)
+
+            self.num_train_samples += dataset.train_samples
+            self.num_valid_samples += dataset.valid_samples
         return train_datasets, valid_datasets
 
     @tf.function(jit_compile=True)
@@ -90,28 +97,29 @@ class DataLoader(object):
     @tf.function(jit_compile=True)
     def preprocess_depth(self, depth: tf.Tensor):
         depth = tf.cast(depth, tf.float32)
-        depth = tf.clip_by_value(depth, 0., self.max_depth)
         depth = tf.image.resize(depth,
                                 self.image_size,
                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        depth = tf.clip_by_value(depth, 0., self.max_depth)
+        depth = tf.where(depth > self.max_depth, 0., depth)
         return depth
         
     @tf.function(jit_compile=True)
     def normalize_image(self, image: tf.Tensor) -> tf.Tensor:
         image = tf.cast(image, tf.float32)
-        # image /= 255.0
-        # image = (image - self.mean) / self.std
-        # image = image * (1.0 / 128.0) - 1.0
-        # x = layers.Rescaling(scale=1.0 / 127.5, offset=-1.0)(x)
-        image = (image * (1.0 / 127.5)) - 1.0
+        image /= 255.0
+        image = (image - self.mean) / self.std
+        # image = image * (1.0 / 127.5) - 1.0
+        
+        
         return image
     
     @tf.function(jit_compile=True)
     def denormalize_image(self, image):
-        # image = (image * self.std) + self.mean
-        # image *= 255.0
-        # image = (image + 1.0) * 128.0
-        image = (image + 1.0) * 127.5
+        image = (image * self.std) + self.mean
+        image *= 255.0
+        # image = (image + 1.0) * 127.5
+        
         image = tf.cast(image, tf.uint8)
         return image
     

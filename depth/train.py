@@ -160,21 +160,9 @@ class Trainer(object):
                 # Update train metrics
                 self.strategy.run(self.update_train_metric, args=(train_loss_result,))
 
-                if idx % self.config['Train']['train_log_interval'] == 0:
-                    current_step = self.train_samples * epoch + idx
-                    
-                    with self.train_summary_writer.as_default():
-                        # Logging train total, pixel, smooth loss
-                        tf.summary.scalar(f'Train/{self.train_total_loss.name}' ,
-                                          self.train_total_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Train/{self.train_smooth_loss.name}',
-                                            self.train_smooth_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Train/{self.train_log_loss.name}',
-                                            self.train_log_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Train/{self.train_l1_loss.name}',
-                                            self.train_l1_loss.result(), step=current_step)
+                current_step = self.train_samples * epoch + idx
 
-                if idx % self.config['Train']['train_plot_interval'] == 0:
+                if current_step % self.config['Train']['train_plot_interval'] == 0:
                     # Draw depth plot
                     local_rgb = self.strategy.experimental_local_results(rgb)[0]
                     local_depth = self.strategy.experimental_local_results(depth)[0]
@@ -184,7 +172,8 @@ class Trainer(object):
 
                     train_depth_plot = plot_images(image=target_image,
                                                    pred_depths=local_pred_depth,
-                                                   gt_depth=local_depth)
+                                                   gt_depth=local_depth,
+                                                   depth_max=self.config['Train']['max_depth'])
 
                     with self.train_summary_writer.as_default():
                         # Logging train images
@@ -194,6 +183,18 @@ class Trainer(object):
 
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy())
+                
+            # End train session
+            with self.train_summary_writer.as_default():
+                # Logging train total, pixel, smooth loss
+                tf.summary.scalar(f'Train/{self.train_total_loss.name}' ,
+                                    self.train_total_loss.result(), step=current_step)
+                tf.summary.scalar(f'Train/{self.train_smooth_loss.name}',
+                                    self.train_smooth_loss.result(), step=current_step)
+                tf.summary.scalar(f'Train/{self.train_log_loss.name}',
+                                    self.train_log_loss.result(), step=current_step)
+                tf.summary.scalar(f'Train/{self.train_l1_loss.name}',
+                                    self.train_l1_loss.result(), step=current_step)
 
             # Validation
             valid_tqdm = tqdm(self.valid_dataset,
@@ -205,19 +206,7 @@ class Trainer(object):
                 # Update valid metrics
                 self.strategy.run(self.update_valid_metric, args=(valid_loss_result, pred_valid_depths[0], depth))
 
-                if idx % self.config['Train']['valid_log_interval'] == 0:
-                    self.valid_samples * epoch + idx
-
-                    with self.valid_summary_writer.as_default():
-                        # Logging valid total, pixel, smooth loss
-                        tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
-                                          self.valid_total_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
-                                            self.valid_smooth_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Valid/{self.valid_log_loss.name}',
-                                            self.valid_log_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Valid/{self.valid_l1_loss.name}',
-                                            self.valid_l1_loss.result(), step=current_step)            
+                current_step = self.valid_samples * epoch + idx
                     
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     # Draw depth plot
@@ -228,7 +217,8 @@ class Trainer(object):
                     target_image = self.data_loader.denormalize_image(local_rgb)
                     valid_depth_plot = plot_images(image=target_image,
                                                    pred_depths=local_pred_depth,
-                                                   gt_depth=local_depth)
+                                                   gt_depth=local_depth,
+                                                   depth_max=self.config['Train']['max_depth'])
 
                     with self.valid_summary_writer.as_default():
                         # Logging valid images
@@ -240,6 +230,18 @@ class Trainer(object):
                     total_loss=self.valid_total_loss.result().numpy(),
                 )
             
+            # End valid session
+            with self.valid_summary_writer.as_default():
+                        # Logging valid total, pixel, smooth loss
+                        tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
+                                          self.valid_total_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
+                                            self.valid_smooth_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Valid/{self.valid_log_loss.name}',
+                                            self.valid_log_loss.result(), step=current_step)
+                        tf.summary.scalar(f'Valid/{self.valid_l1_loss.name}',
+                                            self.valid_l1_loss.result(), step=current_step)            
+                        
             with self.valid_summary_writer.as_default():
                 metrics_dict = self.valid_depth_metrics.get_all_metrics()
                 for metric_name, metric_value in metrics_dict.items():
