@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
 from PIL import Image
+import matplotlib.pyplot as plt
 
 class HypersimTFRecord(object):
     def __init__(self, root_dir, save_dir):
@@ -13,6 +14,9 @@ class HypersimTFRecord(object):
         """
         self.root_dir = root_dir
         self.save_dir = save_dir
+        self.max_depth = 20.0
+        self.zero_depth_threshold = 0.2
+        self.max_depth_threshold = 0.1
 
         self.raw_train_dir = os.path.join(self.root_dir, 'train')
         self.raw_valid_dir = os.path.join(self.root_dir, 'val')
@@ -24,19 +28,20 @@ class HypersimTFRecord(object):
         self.test_tfrecord_path = os.path.join(self.save_dir, 'test.tfrecord')
 
         os.makedirs(self.save_dir, exist_ok=True)
-
+        self.removed_count = 0
         self.train_count = self.convert(raw_file_dir=self.raw_train_dir, 
                                         tfrecord_path=self.train_tfrecord_path)
         self.valid_count = self.convert(raw_file_dir=self.raw_valid_dir, 
                                         tfrecord_path=self.valid_tfrecord_path)
         self.test_count = self.convert(raw_file_dir=self.raw_test_dir,
                                         tfrecord_path=self.test_tfrecord_path)
-
+        
         # Save metadata with sample counts
         metadata = {
             'train_count': self.train_count,
             'valid_count': self.valid_count,
-            'test_count': self.test_count
+            'test_count': self.test_count,
+            'removed_count': self.removed_count
         }
         with open(os.path.join(self.save_dir, 'metadata.json'), 'w') as f:
             json.dump(metadata, f)
@@ -61,6 +66,22 @@ class HypersimTFRecord(object):
                 for rgb_name, depth_name in zip(rgb_files, depth_files):
                     rgb = np.array(Image.open(rgb_name))
                     depth = np.array(Image.open(depth_name)) * 0.001
+
+                    # depth 0 pixel값이 10% 이상이 경우 스킵
+                    if np.sum(depth == 0) / depth.size > self.zero_depth_threshold:
+                        print(f"Skip {rgb_name} and {depth_name}. Becuase of 0 depth pixel ratio is over {int(self.zero_depth_threshold * 100.)}%")
+                        # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
+                        # plt.show()
+                        self.removed_count += 1
+                        continue
+
+                    # max_depth를 초과하는 pixel이 10% 이상인 경우 스킵
+                    if np.sum(depth > self.max_depth) / depth.size > 0.1:
+                        print(f"Skip {rgb_name} and {depth_name}. Becuase of max depth pixel ratio is over {int(self.max_depth_threshold * 100.)}%")
+                        # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
+                        # plt.show()
+                        self.removed_count += 1
+                        continue
 
                     serialized_example = self.serialize_example(rgb, depth)
                     writer.write(serialized_example)
