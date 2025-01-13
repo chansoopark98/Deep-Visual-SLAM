@@ -1,8 +1,11 @@
 import tensorflow as tf
-from .resnet_original import resnet_18
+try:
+    from .resnet_original import resnet_18
+except:
+    from resnet_original import resnet_18
 
 class Resnet:
-    def __init__(self, image_shape, batch_size, prefix='mobilenetv3'):
+    def __init__(self, image_shape, batch_size, pretrained=True, prefix='base'):
         """
         Initializes the MobilenetV3Large class.
 
@@ -16,6 +19,7 @@ class Resnet:
 
         self.image_shape = image_shape
         self.batch_size = batch_size
+        self.pretrained = pretrained
         self.prefix = prefix
 
     def build_model(self) -> tf.keras.Model:
@@ -25,14 +29,14 @@ class Resnet:
         Returns:
             tf.keras.Model: Functional model.
         """
-
-        pretrained_weights = './assets/weights/resnet18.h5'
-
         inputs = tf.keras.Input(shape=self.image_shape)
         outputs = resnet_18(inputs=inputs)
         base_model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        base_model.load_weights(pretrained_weights)
 
+        if self.pretrained:
+            pretrained_weights = './assets/weights/resnet18.h5'
+            base_model.load_weights(pretrained_weights)
+        
         base_model.summary()
 
         layer_names = [
@@ -71,3 +75,7 @@ if __name__ == '__main__':
     model_builder = Resnet(image_shape=image_shape, batch_size=batch_size)
     model = model_builder.build_model()
     model.summary()
+    # model.save(f'./assets/weights/backbone_resnet18.h5')
+    tf.keras.models.save_model(model, 'assets/weigths/backbone_resnet18.h5')
+    encoder = tf.keras.models.load_model('assets/weigths/backbone_resnet18.h5')
+    encoder.summary()

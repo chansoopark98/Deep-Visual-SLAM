@@ -36,12 +36,7 @@ class NyuHandler(object):
         cropped_depth = depth[bound_top:bound_bottom, bound_left:bound_right, :]
 
         # Resize
-        cropped_image = tf.image.resize(cropped_image, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
-        cropped_depth = tf.image.resize(cropped_depth, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
-        intrinsic = rescale_camera_intrinsic(self.original_intrinsic_matrix,
-                                             self.original_size,
-                                             self.target_size)
         # 타입 변환
         cropped_image = tf.cast(cropped_image, tf.uint8)
         cropped_depth = tf.cast(cropped_depth, tf.float32)
@@ -50,7 +45,7 @@ class NyuHandler(object):
         cropped_image = tf.ensure_shape(cropped_image, [None, None, 3])
         cropped_depth = tf.ensure_shape(cropped_depth, [None, None, 1])
         
-        return cropped_image, cropped_depth, intrinsic
+        return cropped_image, cropped_depth
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt

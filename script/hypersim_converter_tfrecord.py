@@ -14,9 +14,7 @@ class HypersimTFRecord(object):
         """
         self.root_dir = root_dir
         self.save_dir = save_dir
-        self.max_depth = 20.0
-        self.zero_depth_threshold = 0.2
-        self.max_depth_threshold = 0.1
+        self.max_depth = 60.0
 
         self.raw_train_dir = os.path.join(self.root_dir, 'train')
         self.raw_valid_dir = os.path.join(self.root_dir, 'val')
@@ -67,21 +65,7 @@ class HypersimTFRecord(object):
                     rgb = np.array(Image.open(rgb_name))
                     depth = np.array(Image.open(depth_name)) * 0.001
 
-                    # # depth 0 pixel값이 10% 이상이 경우 스킵
-                    # if np.sum(depth == 0) / depth.size > self.zero_depth_threshold:
-                    #     print(f"Skip {rgb_name} and {depth_name}. Becuase of 0 depth pixel ratio is over {int(self.zero_depth_threshold * 100.)}%")
-                    #     # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
-                    #     # plt.show()
-                    #     self.removed_count += 1
-                    #     continue
-
-                    # # max_depth를 초과하는 pixel이 10% 이상인 경우 스킵
-                    # if np.sum(depth > self.max_depth) / depth.size > 0.1:
-                    #     print(f"Skip {rgb_name} and {depth_name}. Becuase of max depth pixel ratio is over {int(self.max_depth_threshold * 100.)}%")
-                    #     # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
-                    #     # plt.show()
-                    #     self.removed_count += 1
-                    #     continue
+                    depth = np.where(depth >= self.max_depth, 0., depth)
 
                     serialized_example = self.serialize_example(rgb, depth)
                     writer.write(serialized_example)

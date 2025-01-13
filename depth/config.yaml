@@ -1,28 +1,28 @@
 Directory:
-  exp_name: resnet18_custom_hypersim_480x640_max20_ep30_smooth
+  exp_name: resnet18_nyu_diode_diml_ep11_640x480
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights
   results: ./results
 
 Dataset:
-  Nyu_depth_v2: False
-  Diode: False
-  DIML: False
-  Hypersim: True
+  Nyu_depth_v2: True
+  Diode: True
+  DIML: True
+  Hypersim: False
 
 Train:
   use_shuffle: True
   train_plot_interval: 100
   valid_plot_interval: 100
   min_depth: 0.1
-  max_depth: 20.0
+  max_depth: 10.0
   img_w: 640 # 720
   img_h: 480
   beta1: 0.9
   weight_decay: 0.01
   batch_size: 16 # 1
-  epoch: 51
+  epoch: 11
   init_lr: 0.0001
   final_lr: 0.00001
   power: 0.9
