@@ -3,7 +3,7 @@ from collections import OrderedDict
 
 from .update import BasicUpdateBlock, SmallUpdateBlock
 from .extractor import BasicEncoder, SmallEncoder
-from .corr import CorrBlock, bilinear_sampler, coords_grid, upflow8
+from .corr import CorrBlock, coords_grid, upflow8
 
 class RAFT(tf.keras.Model):
     def __init__(self, drop_rate=0, iters=12, iters_pred=24, **kwargs):
@@ -26,6 +26,7 @@ class RAFT(tf.keras.Model):
                                  norm_type='batch',
                                  drop_rate=drop_rate)
         self.update_block = BasicUpdateBlock(filters=hdim)
+        self.corr_block = CorrBlock(num_levels=self.corr_levels, radius=self.corr_radius)
 
     def initialize_flow(self, image):
         bs, h, w, _ = image.shape
@@ -48,7 +49,6 @@ class RAFT(tf.keras.Model):
         bs, h, w, _ = flow.shape
         mask = tf.reshape(mask, (bs, h, w, 8, 8, 9, 1))
         mask = tf.nn.softmax(mask, axis=5)
-        mask = tf.cast(mask, dtype=flow.dtype)
 
         # flow: (bs, h, w, 2) -> (bs, h, w, 2*9)
         up_flow = tf.image.extract_patches(8*flow,
@@ -64,7 +64,6 @@ class RAFT(tf.keras.Model):
         # (bs, h, w, 8x8x2) -> (bs, 8xh, 8xw, 2)
         return tf.nn.depth_to_space(up_flow, block_size=8)
 
-    @tf.function(jit_compile=True)
     def call(self, inputs, training):
         image1, image2 = inputs
         # image1 = 2*(image1/255.0) - 1.0
@@ -73,16 +72,16 @@ class RAFT(tf.keras.Model):
         # feature extractor -> (bs, h/8, w/8, 256)x2
         fmap1, fmap2 = self.fnet([image1, image2], training=training)
 
-        fmap1 = tf.cast(fmap1, dtype=tf.float32)
-        fmap2 = tf.cast(fmap2, dtype=tf.float32)
+        fmap1 = tf.cast(fmap1, tf.float32)
+        fmap2 = tf.cast(fmap2, tf.float32)
 
         # setup correlation values
-        correlation = CorrBlock(fmap1, fmap2,
-                                num_levels=self.corr_levels,
-                                radius=self.corr_radius)
+        self.corr_block.update(fmap1, fmap2)
 
         # context network -> (bs, h/8, w/8, hdim+cdim)
         cnet = self.cnet(image1, training=training)
+        cnet = tf.cast(cnet, tf.float32)
+
         # split -> (bs, h/8, w/8, hdim), (bs, h/8, w/8, cdim)
         net, inp = tf.split(cnet, [self.hidden_dim, self.context_dim], axis=-1)
         net = tf.tanh(net)
@@ -95,20 +94,17 @@ class RAFT(tf.keras.Model):
         iters = self.iters if training else self.iters_pred
         for i in range(iters):
             # (bs, h, w, 81xnum_levels)
-            corr = correlation.retrieve(coords1)
+            corr = self.corr_block.retrieve(coords1)
 
             flow = coords1 - coords0
             # (bs, h, w, *), net: hdim, up_mask: 64x9, delta_flow: 2
             net, up_mask, delta_flow = self.update_block([net, inp, corr, flow])
-            # net = tf.cast(net, dtype=tf.float32)
-            # up_mask = tf.cast(up_mask, dtype=tf.float32)
-            # delta_flow = tf.cast(delta_flow, dtype=tf.float32)
 
             # F(t+1) = F(t) + df
-            coords1 += tf.cast(delta_flow, dtype=tf.float32)
+            coords1 += tf.cast(delta_flow, coords1.dtype)
 
             # upsample prediction
-            flow_up = self.upsample_flow(coords1 - coords0, up_mask)
+            flow_up = self.upsample_flow(coords1 - coords0, tf.cast(up_mask, tf.float32))
             flow_predictions.append(flow_up)
 
         # flow_predictions[-1] is the finest output
@@ -130,6 +126,7 @@ class SmallRAFT(RAFT):
                                  norm_type=None,
                                  drop_rate=drop_rate)
         self.update_block = SmallUpdateBlock(filters=hdim)
+        self.corr_block = CorrBlock(self.corr_levels, self.corr_radius)
 
     def call(self, inputs, training):
         image1, image2 = inputs
@@ -140,9 +137,7 @@ class SmallRAFT(RAFT):
         fmap1, fmap2 = self.fnet([image1, image2], training=training)
 
         # setup correlation values
-        correlation = CorrBlock(fmap1, fmap2,
-                                num_levels=self.corr_levels,
-                                radius=self.corr_radius)
+        self.corr_block.update(fmap1, fmap2)
 
         # context network
         cnet = self.cnet(image1, training=training)
@@ -155,7 +150,7 @@ class SmallRAFT(RAFT):
         flow_predictions = []
         iters = self.iters if training else self.iters_pred
         for i in range(iters):
-            corr = correlation.retrieve(coords1)
+            corr = self.corr_block.retrieve(coords1)
 
             flow = coords1 - coords0
             net, _, delta_flow = self.update_block([net, inp, corr, flow])

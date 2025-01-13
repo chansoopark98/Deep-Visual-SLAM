@@ -33,6 +33,7 @@ class Trainer(object):
                              (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 3)]
         self.model.build(model_input_shape)
         self.model.summary()
+        self.model.load_weights('./assets/weights/raft/model')
 
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
