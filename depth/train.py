@@ -48,10 +48,10 @@ class Trainer(object):
         # 3. Optimizer
         self.warmup_scheduler = tf.keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
-                                                                              self.config['Train']['init_lr'] * 0.1,
-                                                                              power=0.9)
+                                                                              self.config['Train']['final_lr'],
+                                                                              power=self.config['Train']['power'])
         
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
+        self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
                                                   weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None
                                                   ) # 
@@ -182,7 +182,9 @@ class Trainer(object):
                         del train_depth_plot
 
                 train_tqdm.set_postfix(
-                    total_loss=self.train_total_loss.result().numpy())
+                    total_loss=self.train_total_loss.result().numpy(),
+                    smooth_loss=self.train_smooth_loss.result().numpy()
+                    )
                 
             # End train session
             with self.train_summary_writer.as_default():

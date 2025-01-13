@@ -67,21 +67,21 @@ class HypersimTFRecord(object):
                     rgb = np.array(Image.open(rgb_name))
                     depth = np.array(Image.open(depth_name)) * 0.001
 
-                    # depth 0 pixel값이 10% 이상이 경우 스킵
-                    if np.sum(depth == 0) / depth.size > self.zero_depth_threshold:
-                        print(f"Skip {rgb_name} and {depth_name}. Becuase of 0 depth pixel ratio is over {int(self.zero_depth_threshold * 100.)}%")
-                        # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
-                        # plt.show()
-                        self.removed_count += 1
-                        continue
+                    # # depth 0 pixel값이 10% 이상이 경우 스킵
+                    # if np.sum(depth == 0) / depth.size > self.zero_depth_threshold:
+                    #     print(f"Skip {rgb_name} and {depth_name}. Becuase of 0 depth pixel ratio is over {int(self.zero_depth_threshold * 100.)}%")
+                    #     # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
+                    #     # plt.show()
+                    #     self.removed_count += 1
+                    #     continue
 
-                    # max_depth를 초과하는 pixel이 10% 이상인 경우 스킵
-                    if np.sum(depth > self.max_depth) / depth.size > 0.1:
-                        print(f"Skip {rgb_name} and {depth_name}. Becuase of max depth pixel ratio is over {int(self.max_depth_threshold * 100.)}%")
-                        # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
-                        # plt.show()
-                        self.removed_count += 1
-                        continue
+                    # # max_depth를 초과하는 pixel이 10% 이상인 경우 스킵
+                    # if np.sum(depth > self.max_depth) / depth.size > 0.1:
+                    #     print(f"Skip {rgb_name} and {depth_name}. Becuase of max depth pixel ratio is over {int(self.max_depth_threshold * 100.)}%")
+                    #     # plt.imshow(depth, cmap='plasma', vmin=0., vmax=self.max_depth)
+                    #     # plt.show()
+                    #     self.removed_count += 1
+                    #     continue
 
                     serialized_example = self.serialize_example(rgb, depth)
                     writer.write(serialized_example)
