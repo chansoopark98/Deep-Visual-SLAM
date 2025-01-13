@@ -108,8 +108,12 @@ class DispNet(tf.keras.Model):
         self.prefix_str = prefix
 
         self.encoder = Resnet(image_shape=(*image_shape, 3),
-                                        batch_size=batch_size,
-                                        prefix=prefix + '_resnet18').build_model()
+                              batch_size=batch_size,
+                              pretrained=True,
+                              prefix=prefix + '_resnet18').build_model()
+
+        # self.encoder = tf.keras.models.load_model('./assets/weigths/backbone_resnet18.h5')
+        # self.encoder.build((batch_size, *image_shape, 3))
 
         # Depth Decoder
         print('Building Depth Decoder Model')
@@ -290,9 +294,9 @@ class PoseNet(tf.keras.Model):
         self.batch_size = batch_size
 
         # self.encoder = resnet_18()
-        self.encoder = Resnet(image_shape=(*image_shape, 3),
+        self.encoder = Resnet(image_shape=(*image_shape, 6),
                                         batch_size=batch_size,
-                                        prefix=prefix + '_resnet18').build_model()
+                                        prefix=prefix + '_resnet18').build_model(pretrained=False)
 
         # 2) 이후 pose 계산용 Conv 레이어들
         #    (질문 코드: std_conv(1,256)->std_conv(3,256)->std_conv(3,256)->Conv2D(6))

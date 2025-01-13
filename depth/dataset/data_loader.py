@@ -79,10 +79,10 @@ class DataLoader(object):
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float16)
             
             train_datasets.append(dataset.train_dataset)
-            valid_datasets.append(dataset.valid_dataset)
+            # valid_datasets.append(dataset.valid_dataset)
 
             self.num_train_samples += dataset.train_samples
-            self.num_valid_samples += dataset.valid_samples
+            # self.num_valid_samples += dataset.valid_samples
         return train_datasets, valid_datasets
 
     @tf.function(jit_compile=True)
@@ -110,8 +110,6 @@ class DataLoader(object):
         image /= 255.0
         image = (image - self.mean) / self.std
         # image = image * (1.0 / 127.5) - 1.0
-        
-        
         return image
     
     @tf.function(jit_compile=True)
