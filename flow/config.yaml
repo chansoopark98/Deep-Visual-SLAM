@@ -1,0 +1,30 @@
+Directory:
+  exp_name: relative_test
+  data_dir: ./flow/data/
+  log_dir: ./tensorboard
+  weights: ./weights
+  results: ./results
+
+Dataset:
+  FlyingChairs: True
+
+Train:
+  use_shuffle: True
+  train_plot_interval: 100
+  valid_plot_interval: 100
+  img_w: 496 # 720
+  img_h: 368
+  max_flow: 400
+  clip_norm: 1.0
+  beta1: 0.9
+  weight_decay: 0.0001
+  batch_size: 4 # 1
+  epoch: 11
+  init_lr: 0.0001
+  final_lr: 0.00001
+  power: 0.9
+
+Experiment:
+  gpus: [0] # [0, 1]
+  gpu_vram: 24000
+  gpu_vram_factor: 0.8

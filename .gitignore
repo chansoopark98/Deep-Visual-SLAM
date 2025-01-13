@@ -10,9 +10,13 @@ __pycache__/
 /depth/data/*
 /depth/weights/
 /depth/tensorboard/
+/flow/data/*
+/flow/weights/
+/flow/tensorboard/
 /vio/data/
 /vio/weights/
 /vio/tensorboard/
+/assets/weights/
 
 # Distribution / packaging
 .Python
