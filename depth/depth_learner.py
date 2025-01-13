@@ -3,6 +3,7 @@ import tensorflow as tf
 class DepthLearner(object):
     def __init__(self, model, config) -> None:
         self.model = model
+        self.train_mode = config['Train']['mode']
         self.min_depth = config['Train']['min_depth'] # 0.001
         self.max_depth = config['Train']['max_depth'] # 10.0
         self.num_scales = 4
@@ -143,7 +144,10 @@ class DepthLearner(object):
         depth = tf.clip_by_value(depth, 0., self.max_depth)
         depth = tf.where(depth > self.max_depth, 0., depth)
         """
-        valid_mask = tf.logical_and((depth > 0.), (depth < self.max_depth))
+        if self.train_mode == 'relative':
+            valid_mask = tf.logical_and((depth > 0.), (depth < 1.))
+        else:
+            valid_mask = tf.logical_and((depth > 0.), (depth < self.max_depth))
 
         pred_depths = [
             self.disp_to_depth(disp)

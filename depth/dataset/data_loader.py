@@ -14,6 +14,7 @@ except:
 class DataLoader(object):
     def __init__(self, config) -> None:
         self.config = config
+        self.train_mode = self.config['Train']['mode']
         self.batch_size = self.config['Train']['batch_size']
         self.use_shuffle = self.config['Train']['use_shuffle']
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
@@ -120,7 +121,14 @@ class DataLoader(object):
         
         image = tf.cast(image, tf.uint8)
         return image
-    
+
+    @tf.function(jit_compile=True)
+    def get_relative_depth(self, rgb, depth):
+        # min-max norm (0~1)
+        normalized_depth = (depth - self.min_depth) / (self.max_depth - self.min_depth)
+        normalized_depth = tf.clip_by_value(normalized_depth, 0., 1.0)
+        return rgb, normalized_depth
+
     @tf.function(jit_compile=True)
     def train_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         rgb, depth = self.augment(rgb, depth)
@@ -179,6 +187,10 @@ class DataLoader(object):
             combined_dataset = combined_dataset.map(self.train_preprocess, num_parallel_calls=self.auto_opt)
         else:
             combined_dataset = combined_dataset.map(self.valid_preprocess, num_parallel_calls=self.auto_opt)
+        
+        if self.train_mode == 'relative':
+            combined_dataset = combined_dataset.map(self.get_relative_depth, num_parallel_calls=self.auto_opt)
+
         combined_dataset = combined_dataset.batch(batch_size, drop_remainder=True, num_parallel_calls=self.auto_opt)
         combined_dataset = combined_dataset.prefetch(self.auto_opt)
         return combined_dataset

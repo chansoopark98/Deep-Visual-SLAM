@@ -1,8 +1,11 @@
 import tensorflow as tf
 
 class DepthMetrics(tf.keras.metrics.Metric):
-    def __init__(self, name='depth_metrics', **kwargs):
+    def __init__(self, mode, min_depth, max_depth,  name='depth_metrics', **kwargs):
         super().__init__(name=name, **kwargs)
+        self.mode = mode
+        self.min_depth = min_depth
+        self.max_depth = max_depth
 
         # 누적을 위한 변수들 (float32 형태)
         self.sum_abs_diff = self.add_weight(name='sum_abs_diff', initializer='zeros', dtype=tf.float32)
@@ -26,6 +29,14 @@ class DepthMetrics(tf.keras.metrics.Metric):
         y_pred: Pred depth, shape (B, ...)
         둘 다 tf.float32라고 가정
         """
+        # Relative depth (min-max norm) to metric depth
+        if self.mode == 'relative':
+            y_true = y_true * (self.max_depth - self.min_depth) + self.min_depth
+            y_pred = y_pred * (self.max_depth - self.min_depth) + self.min_depth
+            
+            y_true = tf.clip_by_value(y_true, self.min_depth, self.max_depth)
+            y_pred = tf.clip_by_value(y_pred, self.min_depth, self.max_depth)
+
         # Flatten해서 계산 (배치 전체)
         y_true = tf.reshape(y_true, [-1])
         y_pred = tf.reshape(y_pred, [-1])
