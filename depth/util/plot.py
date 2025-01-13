@@ -7,7 +7,13 @@ import tensorflow as tf
 def plot_images(image: tf.Tensor,
                 pred_depths: tf.Tensor,
                 gt_depth: tf.Tensor,
+                mode: str,
                 depth_max: float) -> tf.Tensor:
+    if mode == 'relative':
+        prefix = 'Relative GT Depth'
+        depth_max = 1.0
+    else:
+        prefix = 'Metric GT Depth'
     image = image[0]
     # Plot 설정
     depth_len = len(pred_depths)
@@ -19,7 +25,7 @@ def plot_images(image: tf.Tensor,
     axes[0].axis('off')
 
     axes[1].imshow(gt_depth[0].numpy(), vmin=0., vmax=depth_max, cmap='plasma')
-    axes[1].set_title(f'GT Depth ({depth_max})')
+    axes[1].set_title(f'{prefix} ({depth_max})')
     axes[1].axis('off')
 
     for idx in range(depth_len):

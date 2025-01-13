@@ -352,7 +352,7 @@ class MonoDepth2Model(tf.keras.Model):
 
         self.depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        # self.depth_net.load_weights('./pre_trained_weights/dispnet/dispnet_resnet.h5')
+        self.depth_net.load_weights('./weights/relative_test/epoch_0_.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
 

@@ -19,7 +19,7 @@ class MonoDepth2Learner(object):
         self.auto_mask = True
 
         # depth 범위, etc. 필요시
-        self.min_depth = 0.3
+        self.min_depth = 0.1
         self.max_depth = 10.
 
     def disp_to_depth(self, disp, min_depth, max_depth):

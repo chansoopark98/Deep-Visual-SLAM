@@ -72,9 +72,12 @@ class Trainer(object):
         self.valid_log_loss = tf.keras.metrics.Mean(name='valid_log_loss')
         self.valid_l1_loss = tf.keras.metrics.Mean(name='valid_l1_loss')
 
-        self.valid_depth_metrics = DepthMetrics('valid_depth_metrics')
+        self.valid_depth_metrics = DepthMetrics(mode=self.config['Train']['mode'],
+                                                min_depth=self.config['Train']['min_depth'],
+                                                max_depth=self.config['Train']['max_depth'],
+                                                name='valid_depth_metrics')
 
-        # 6. Logger
+        # 7. Logger
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
         tensorboard_path = os.path.join('depth', self.config['Directory']['log_dir'] + \
             '/' + current_time + '_')
@@ -173,6 +176,7 @@ class Trainer(object):
                     train_depth_plot = plot_images(image=target_image,
                                                    pred_depths=local_pred_depth,
                                                    gt_depth=local_depth,
+                                                   mode=self.config['Train']['mode'],
                                                    depth_max=self.config['Train']['max_depth'])
 
                     with self.train_summary_writer.as_default():
@@ -220,6 +224,7 @@ class Trainer(object):
                     valid_depth_plot = plot_images(image=target_image,
                                                    pred_depths=local_pred_depth,
                                                    gt_depth=local_depth,
+                                                   mode=self.config['Train']['mode'],
                                                    depth_max=self.config['Train']['max_depth'])
 
                     with self.valid_summary_writer.as_default():
