@@ -13,7 +13,14 @@ class DepthLearner(object):
         scaled_disp = tf.cast(min_disp, tf.float32) + tf.cast(max_disp - min_disp, tf.float32) * tf.cast(disp, tf.float32)
         depth = tf.cast(1., tf.float32) / scaled_disp
         return depth
-        
+
+    def scaled_depth_to_disp(self, depth):
+        min_disp = 1. / self.max_depth
+        max_disp = 1. / self.min_depth
+        scaled_disp = tf.cast(1., tf.float32) / tf.cast(depth, tf.float32)
+        disp = (scaled_disp - min_disp) / (max_disp - min_disp)
+        return disp
+    
     def get_smooth_loss(self, disp, img):
         """
         Edge-aware smoothness: disp gradients * exp(-|img grads|)
@@ -78,7 +85,7 @@ class DepthLearner(object):
 
         return loss_val
     
-    def multi_scale_loss(self, pred_depths, gt_depth, rgb, valid_mask) -> dict:
+    def multi_scale_loss(self, pred_depths, pred_disps,  gt_depth, rgb, valid_mask) -> dict:
         alpha = [1/2, 1/4, 1/8, 1/16] 
         smooth_losses = 0.0
         log_losses = 0.0
@@ -99,8 +106,13 @@ class DepthLearner(object):
                 original_shape,
                 method=tf.image.ResizeMethod.BILINEAR
             )
+
+            resized_disp = self.scaled_depth_to_disp(pred_depth_resized)
+
+            # disp -> depth
+
             # smoothness loss
-            # smooth_losses += self.get_smooth_loss(pred_depth_resized, rgb) * alpha[i]
+            smooth_losses += self.get_smooth_loss(resized_disp, rgb) * alpha[i]
             
             # scale-invariant log loss
             log_losses += self.silog_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
@@ -127,7 +139,11 @@ class DepthLearner(object):
         # 2. Disps -> Depths
         # 깊이가 self.max_depth보다 크거나 self.min_depth보다 작은 경우 0으로 치환
         # valid_mask = depth > 0
-        valid_mask = tf.logical_and((depth > self.min_depth), (depth < self.max_depth))
+        """
+        depth = tf.clip_by_value(depth, 0., self.max_depth)
+        depth = tf.where(depth > self.max_depth, 0., depth)
+        """
+        valid_mask = tf.logical_and((depth > 0.), (depth < self.max_depth))
 
         pred_depths = [
             self.disp_to_depth(disp)
@@ -136,6 +152,7 @@ class DepthLearner(object):
 
         # 3. multi-scale loss 계산
         loss_dict = self.multi_scale_loss(pred_depths=pred_depths,
+                                          pred_disps=pred_disps,
                                           gt_depth=depth,
                                           rgb=rgb,
                                           valid_mask=valid_mask)

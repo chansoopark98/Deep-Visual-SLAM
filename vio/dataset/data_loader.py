@@ -4,8 +4,8 @@ try:
     from .tspxr_capture import TspxrCapture
     from .mars_logger import MarsLoggerHandler
 except:
-    from dataset.tspxr_capture import TspxrCapture
-    from dataset.mars_logger import MarsLoggerHandler
+    from tspxr_capture import TspxrCapture
+    from mars_logger import MarsLoggerHandler
 
 class DataLoader(object):
     def __init__(self, config) -> None:
@@ -170,8 +170,20 @@ if __name__ == '__main__':
         }
     }
     data_loader = DataLoader(config)
-    
+    import matplotlib.pyplot as plt
+
     for image, imu, intrinsic in data_loader.train_dataset.take(10):
+        left = data_loader.denormalize_image(image[0, :, :, 0:3]) / 255
+        tgt = data_loader.denormalize_image(image[0, :, :, 3:6]) / 255
+        right = data_loader.denormalize_image(image[0, :, :, 6:9]) / 255
+
+        left_tgt_residual = tf.abs(left - tgt)
+        tgt_right_residual = tf.abs(tgt - right)
+
+        plt.imshow(left_tgt_residual)
+        plt.show()
+        plt.imshow(tgt_right_residual)
+        plt.show()
         print(image.shape, imu.shape, intrinsic.shape)
         print(intrinsic)
 

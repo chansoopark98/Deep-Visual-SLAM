@@ -17,29 +17,79 @@ class MarsLoggerHandler(object):
         self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
         self.valid_data = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
 
-    def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray) -> int:
+    # def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray) -> int:
+    #     video_file = os.path.join(scene_dir, 'movie.mp4')
+    #     rgb_save_path = os.path.join(scene_dir, 'rgb')
+        
+    #     resized_intrinsic = self._rescale_intrinsic(current_intrinsic, self.save_image_size, self.original_image_size)
+        
+    #     if not os.path.exists(rgb_save_path):
+    #         print(f'Extracting video file: {video_file}')
+    #         os.makedirs(rgb_save_path, exist_ok=True)
+    #         idx = 0
+    #         cap = cv2.VideoCapture(video_file)    
+
+    #         while cap.isOpened():
+    #             ret, frame = cap.read()
+    #             if not ret:
+    #                 break
+    #             rgb_name = os.path.join(rgb_save_path, f'rgb_{str(idx).zfill(6)}.jpg')
+    #             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    #             frame = cv2.resize(frame, (self.save_image_size[1], self.save_image_size[0]))
+    #             cv2.imwrite(rgb_name, frame)
+    #             idx += 1
+    #         cap.release()
+    #         cv2.destroyAllWindows()
+    #     return len(glob.glob(os.path.join(rgb_save_path, '*.jpg'))), resized_intrinsic
+    
+    def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray, camera_data: pd.DataFrame) -> int:
         video_file = os.path.join(scene_dir, 'movie.mp4')
+        metadata_file = os.path.join(scene_dir, 'movie_metadata.csv')
         rgb_save_path = os.path.join(scene_dir, 'rgb')
-        
+
+        # Rescale intrinsic matrix
         resized_intrinsic = self._rescale_intrinsic(current_intrinsic, self.save_image_size, self.original_image_size)
-        
+
+        # Read metadata
+        timestamps_ns = camera_data['Timestamp[nanosec]'].values  # Extract timestamps in nanoseconds
+        timestamps_s = timestamps_ns / 1e9  # Convert to seconds
+
+        # Ensure output directory exists
         if not os.path.exists(rgb_save_path):
             print(f'Extracting video file: {video_file}')
             os.makedirs(rgb_save_path, exist_ok=True)
-            idx = 0
-            cap = cv2.VideoCapture(video_file)    
 
-            while cap.isOpened():
+            cap = cv2.VideoCapture(video_file)
+            if not cap.isOpened():
+                raise ValueError(f"Failed to open video file: {video_file}")
+
+            # Get video properties
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            video_start_time = timestamps_s[0]  # Assume the first timestamp aligns with the video's start
+
+            for idx, timestamp in enumerate(timestamps_s):
+                # Calculate frame number for the timestamp
+                relative_time = timestamp - video_start_time
+                frame_number = int(relative_time * fps)
+
+                # Set the video to the calculated frame number
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
                 ret, frame = cap.read()
+
                 if not ret:
-                    break
+                    print(f"Error: Unable to read frame for timestamp {timestamp}")
+                    continue
+
+                # Process and save the frame
                 rgb_name = os.path.join(rgb_save_path, f'rgb_{str(idx).zfill(6)}.jpg')
                 frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 frame = cv2.resize(frame, (self.save_image_size[1], self.save_image_size[0]))
                 cv2.imwrite(rgb_name, frame)
-                idx += 1
+
             cap.release()
             cv2.destroyAllWindows()
+
+        # Count and return the number of saved frames
         return len(glob.glob(os.path.join(rgb_save_path, '*.jpg'))), resized_intrinsic
 
     def _rescale_intrinsic(self, intrinsic: np.ndarray, target_size: tuple, current_size: tuple) -> np.ndarray:
@@ -66,7 +116,7 @@ class MarsLoggerHandler(object):
         raw_intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
     
         # load video .mp4
-        length, resized_intrinsic = self._extract_video(scene_dir, raw_intrinsic)
+        length, resized_intrinsic = self._extract_video(scene_dir, raw_intrinsic, camera_data)
 
         intrinsic = self._rescale_intrinsic(resized_intrinsic, self.image_size, self.save_image_size)
         step = 1

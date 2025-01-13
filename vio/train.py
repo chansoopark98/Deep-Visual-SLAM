@@ -1,3 +1,6 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import tensorflow as tf
 from dataset.data_loader import DataLoader
 from utils.plot_utils import plot_images, plot_warp_images
@@ -7,7 +10,6 @@ from tqdm import tqdm
 import numpy as np
 from datetime import datetime
 import yaml
-import os
 
 np.set_printoptions(suppress=True)
 

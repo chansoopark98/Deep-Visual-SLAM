@@ -1,5 +1,5 @@
 Directory:
-  exp_name: pretrain_disp_vio_test_mars_logger
+  exp_name: raw_newResnet18
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -15,7 +15,7 @@ Train:
   valid_log_interval: 10
   train_plot_interval: 100 # 100
   valid_plot_interval: 100
-  img_w: 720
+  img_w: 640
   img_h: 480
   weight_decay: 0.00001
   beta1: 0.9

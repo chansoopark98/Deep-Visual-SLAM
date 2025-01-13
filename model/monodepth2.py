@@ -107,28 +107,11 @@ class DispNet(tf.keras.Model):
         self.batch_size = batch_size
         self.prefix_str = prefix
 
-        # 1) 인코더(ResNet18Encoder)
-        # self.encoder = ResNet18Encoder(
-        #     image_shape=image_shape,
-        #     batch_size=batch_size,
-        #     prefix=prefix
-        # )
-
-        # self.encoder = EfficientNetV2Encoder(image_shape=(*image_shape, 3),
-        #                                      batch_size=batch_size,
-        #                                      prefix=prefix).build_model()
-        
-        # self.encoder = resnet_18()
-
-        # self.encoder = MobilenetV3Large(image_shape=(*image_shape, 3),
-        #                                 batch_size=batch_size,
-        #                                 prefix=prefix + '_mobilenetv3large').build_model()
-
         self.encoder = Resnet(image_shape=(*image_shape, 3),
                                         batch_size=batch_size,
-                                        prefix=prefix + '_mobilenetv3large').build_model()
+                                        prefix=prefix + '_resnet18').build_model()
 
-        # 2) 디코더 (Depth Decoder)
+        # Depth Decoder
         print('Building Depth Decoder Model')
         filters = [16, 32, 64, 128, 256]
 
@@ -229,6 +212,66 @@ class DispNet(tf.keras.Model):
 
         return disp1, disp2, disp3, disp4
 
+class ImuNet(tf.keras.Model):
+    def __init__(self,
+                 imu_shape: tuple,
+                 batch_size: int,
+                 prefix='imunet',
+                 **kwargs):
+        super(ImuNet, self).__init__(**kwargs)
+        
+        self.imu_shape = imu_shape
+        self.batch_size = batch_size
+
+        self.encoder_conv = tf.keras.Sequential([
+            # Layer1
+            tf.keras.layers.Conv1D(64, kernel_size=3, padding='same',
+                                   use_bias=False,
+                                   name='IMU_ENCODER_conv1'),
+            tf.keras.layers.BatchNormalization(
+                                               name='IMU_ENCODER_bn1'),
+            tf.keras.layers.LeakyReLU(alpha=0.1,
+                                      name='IMU_ENCODER_leaky_relu1'),\
+
+            # Layer 2
+            tf.keras.layers.Conv1D(128, kernel_size=3, padding='same',
+                                   use_bias=False,
+                                   name='IMU_ENCODER_conv2'),
+            tf.keras.layers.BatchNormalization(
+                                               name='IMU_ENCODER_bn2'),
+            tf.keras.layers.LeakyReLU(alpha=0.1, name='IMU_ENCODER_leaky_relu2'),
+
+            # Layer 3
+            tf.keras.layers.Conv1D(256, kernel_size=3, padding='same',
+                                   use_bias=False,              
+                                   name='IMU_ENCODER_conv3'),
+            tf.keras.layers.BatchNormalization(
+                                               name='IMU_ENCODER_bn3'),
+            tf.keras.layers.LeakyReLU(alpha=0.1, name='IMU_ENCODER_leaky_relu3'),
+        ])
+
+        cells = [tf.keras.layers.LSTMCell(256,
+                                          name='Pose_lstm_1'),
+                tf.keras.layers.LSTMCell(256,
+                                          name='Pose_lstm_2')
+                                          ]
+        stacked_lstm_cells = tf.keras.layers.StackedRNNCells(cells, name='Pose_stacked_lstm_cells')
+        
+        self.rnn = tf.keras.layers.RNN(stacked_lstm_cells, return_sequences=True, return_state=True, name='Pose_rnn')
+        self.reduce_mean = tf.keras.layers.GlobalAveragePooling1D(name='Pose_reduce_mean')
+    
+    def call(self, inputs, training=False):
+        """
+        inputs: [B, T, 6]
+        return: [B, 256]
+        """
+        x = self.encoder_conv(inputs, training=training) # [B, T, 256]
+        x = self.rnn(x, training=training) # [B, T, 256]
+        x = self.reduce_mean(x) # [B, 256]
+        return x
+
+
+
 class PoseNet(tf.keras.Model):
     """
     - 입력: (B, H, W, 6)  (ex: 소스+타겟 concat)
@@ -246,14 +289,10 @@ class PoseNet(tf.keras.Model):
         self.image_width = image_shape[1]
         self.batch_size = batch_size
 
-        # 1) ResNet-18 인코더 (채널=6)
-        # self.encoder = ResNet18Encoder(
-        #     image_shape=(self.image_height, self.image_width, 6),
-        #     batch_size=batch_size,
-        #     prefix=prefix
-        # )
-
-        self.encoder = resnet_18()
+        # self.encoder = resnet_18()
+        self.encoder = Resnet(image_shape=(*image_shape, 3),
+                                        batch_size=batch_size,
+                                        prefix=prefix + '_resnet18').build_model()
 
         # 2) 이후 pose 계산용 Conv 레이어들
         #    (질문 코드: std_conv(1,256)->std_conv(3,256)->std_conv(3,256)->Conv2D(6))
@@ -309,7 +348,7 @@ class MonoDepth2Model(tf.keras.Model):
 
         self.depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        self.depth_net.load_weights('./pre_trained_weights/dispnet/dispnet_resnet.h5')
+        # self.depth_net.load_weights('./pre_trained_weights/dispnet/dispnet_resnet.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
 

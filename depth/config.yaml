@@ -1,5 +1,5 @@
 Directory:
-  exp_name: resnet18_custom_hypersim_480x640_max65_ep30
+  exp_name: resnet18_custom_hypersim_480x640_max20_ep30_smooth
   data_dir: ./depth/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -15,15 +15,17 @@ Train:
   use_shuffle: True
   train_plot_interval: 100
   valid_plot_interval: 100
-  min_depth: 0.01
-  max_depth: 65.0
+  min_depth: 0.1
+  max_depth: 20.0
   img_w: 640 # 720
   img_h: 480
   beta1: 0.9
-  weight_decay: 0 # 0.0001
+  weight_decay: 0.01
   batch_size: 16 # 1
-  epoch: 31
-  init_lr: 0.0004
+  epoch: 51
+  init_lr: 0.0001
+  final_lr: 0.00001
+  power: 0.9
 
 Experiment:
   gpus: [1] # [0, 1]
