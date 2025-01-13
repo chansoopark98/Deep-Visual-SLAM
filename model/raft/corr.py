@@ -61,6 +61,7 @@ def coords_grid(batch_size, height, width):
     coords = tf.expand_dims(coords, axis=0)
     # -> (batch_size, height, width, 2)
     coords = tf.tile(coords, (batch_size, 1, 1, 1))
+    coords = tf.cast(coords, dtype=tf.float32)
     return coords
 
 
@@ -127,10 +128,11 @@ class CorrBlock:
 
     def correlation(self, fmap1, fmap2):
         batch_size, h, w, nch = fmap1.shape
+        
         fmap1 = tf.reshape(fmap1, (batch_size, h*w, nch))
         fmap2 = tf.reshape(fmap2, (batch_size, h*w, nch))
 
         # shape (batch_size, h*w, h*w)
         corr = tf.matmul(fmap1, fmap2, transpose_b=True)
         corr = tf.reshape(corr, (batch_size, h, w, 1, h, w))
-        return corr / tf.sqrt(tf.cast(nch, dtype=tf.float32))        
+        return corr / tf.sqrt(tf.cast(nch, dtype=fmap1.dtype))        

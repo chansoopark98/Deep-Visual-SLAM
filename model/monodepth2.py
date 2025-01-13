@@ -458,5 +458,3 @@ if __name__ == '__main__':
     for disp in pred_disp_list:
         print(disp.shape)
     print(pred_poses.shape)
-
-

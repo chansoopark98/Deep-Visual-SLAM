@@ -1,5 +1,6 @@
 import tensorflow as tf
 from .instance_norm import InstanceNormalization
+
 def Normalization(norm_type, groups=None):
     if norm_type == 'group':
         return tf.keras.layers.GroupNormalization(groups)
@@ -12,7 +13,6 @@ def Normalization(norm_type, groups=None):
         return tf.keras.layers.Lambda(lambda x: x)
     else:
         raise ValueError(f'Invalid norm_type specified: {norm_type}')
-
 
 
 class ResBlock(tf.keras.layers.Layer):
