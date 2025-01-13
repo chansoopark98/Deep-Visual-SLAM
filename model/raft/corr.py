@@ -1,4 +1,6 @@
 import tensorflow as tf
+from tensorflow.keras import layers
+
 
 def bilinear_sampler(image, coords):
     ''' Value sampler using tf.gather_nd
@@ -43,6 +45,7 @@ def bilinear_sampler(image, coords):
     output = c00 * x00 + c01 * x01 + c10 * x10 + c11 * x11
     return output
 
+
 def coords_grid(batch_size, height, width):
     ''' Generate coordinates (xy-order) from given info
     Args:
@@ -61,7 +64,6 @@ def coords_grid(batch_size, height, width):
     coords = tf.expand_dims(coords, axis=0)
     # -> (batch_size, height, width, 2)
     coords = tf.tile(coords, (batch_size, 1, 1, 1))
-    coords = tf.cast(coords, dtype=tf.float32)
     return coords
 
 
@@ -72,19 +74,18 @@ def upflow8(flow, mode='bilinear'):
 
 
 class CorrBlock:
-    def __init__(self, fmap1, fmap2, num_levels=4, radius=4):
-        self.fmap1 = fmap1
-        self.fmap2 = fmap2
+    def __init__(self, num_levels=4, radius=4):
         self.num_levels = num_levels
         self.radius = radius
 
+    def update(self, fmap1, fmap2):
         corr = self.correlation(fmap1, fmap2)
-        batch_size, h1, w1, _, h2, w2 = corr.shape
-        corr = tf.reshape(corr, (batch_size*h1*w1, h2, w2, 1))
+        b, h1, w1, c, h2, w2 = tf.unstack(tf.shape(corr))
+        corr = tf.reshape(corr, (b * h1 * w1, h2, w2, c))
 
         # (bs*h*w, h, w, 1), (bs*h*w, h/2, w/2, 1), ..., (bs*h*w, h/8, w/8, 1)
-        self.corr_pyramid = [corr] 
-        for _ in range(num_levels - 1):
+        self.corr_pyramid = [corr]
+        for _ in range(self.num_levels - 1):
             corr = tf.nn.avg_pool2d(corr, 2, 2, padding='VALID')
             self.corr_pyramid.append(corr)
 
@@ -128,11 +129,10 @@ class CorrBlock:
 
     def correlation(self, fmap1, fmap2):
         batch_size, h, w, nch = fmap1.shape
-        
         fmap1 = tf.reshape(fmap1, (batch_size, h*w, nch))
         fmap2 = tf.reshape(fmap2, (batch_size, h*w, nch))
 
         # shape (batch_size, h*w, h*w)
         corr = tf.matmul(fmap1, fmap2, transpose_b=True)
         corr = tf.reshape(corr, (batch_size, h, w, 1, h, w))
-        return corr / tf.sqrt(tf.cast(nch, dtype=fmap1.dtype))        
+        return corr / tf.sqrt(tf.cast(nch, dtype=corr.dtype))        

@@ -1,5 +1,6 @@
 import tensorflow as tf
 from .instance_norm import InstanceNormalization
+import tensorflow_addons as tfa
 
 def Normalization(norm_type, groups=None):
     if norm_type == 'group':
@@ -7,8 +8,8 @@ def Normalization(norm_type, groups=None):
     elif norm_type == 'batch':
         return tf.keras.layers.BatchNormalization()
     elif norm_type == 'instance':
-        return InstanceNormalization()
-    
+        # return InstanceNormalization()
+        return tfa.layers.InstanceNormalization()
     elif norm_type is None:
         return tf.keras.layers.Lambda(lambda x: x)
     else:
