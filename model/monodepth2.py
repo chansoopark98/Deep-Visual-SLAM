@@ -5,12 +5,14 @@ try:
     from .mobilenetv3 import MobilenetV3Large
     from .resnet import resnet_18
     from .resnet_tf import Resnet
+    from .raft.raft_backbone import CustomRAFT
 except:
     from model_utils import *
     from efficientnetv2 import EfficientNetV2Encoder
     from mobilenetv3 import MobilenetV3Large
     from resnet import resnet_18
     from resnet_tf import Resnet
+    from raft.raft_backbone import CustomRAFT
 
 class ResNet18Encoder(tf.keras.Model):
     def __init__(self,
@@ -274,8 +276,6 @@ class ImuNet(tf.keras.Model):
         x = self.reduce_mean(x) # [B, 256]
         return x
 
-
-
 class PoseNet(tf.keras.Model):
     """
     - 입력: (B, H, W, 6)  (ex: 소스+타겟 concat)
@@ -297,9 +297,13 @@ class PoseNet(tf.keras.Model):
         self.encoder = Resnet(image_shape=(*image_shape, 6),
                                         batch_size=batch_size,
                                         prefix=prefix + '_resnet18').build_model(pretrained=False)
+        
+        # raft = CustomRAFT(image_shape=(*image_shape, 6),
+        #                           batch_size=batch_size, pretrained=True, prefix=f'{prefix}_raft')
+        # self.encoder = raft.build_model()
 
         # 2) 이후 pose 계산용 Conv 레이어들
-        #    (질문 코드: std_conv(1,256)->std_conv(3,256)->std_conv(3,256)->Conv2D(6))
+        # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3
         self.pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')  # kernel=3
@@ -332,7 +336,6 @@ class PoseNet(tf.keras.Model):
         x = self.reduce_mean_layer(x)  # [B, 1, 1, 6] => keepdims=True
         x = self.reshape_layer(x)      # [B, 6]
         x = x * self.pose_scale        # scale
-
         return x
     
 class MonoDepth2Model(tf.keras.Model):
@@ -352,9 +355,11 @@ class MonoDepth2Model(tf.keras.Model):
 
         self.depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        self.depth_net.load_weights('./weights/relative_test/epoch_0_.h5')
+        self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
+
+        
 
     def call(self, inputs, training=False):
         src_left = inputs[..., :3]
