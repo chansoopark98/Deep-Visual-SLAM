@@ -14,12 +14,16 @@ import yaml
 np.set_printoptions(suppress=True)
 
 class Trainer(object):
-    def __init__(self, config) -> None:
+    def __init__(self, config, ) -> None:
         self.config = config
+        
         self.configure_train_ops()
         print('initialize')
    
     def configure_train_ops(self) -> None:
+        policy = tf.keras.mixed_precision.Policy('mixed_float16')
+        tf.keras.mixed_precision.set_global_policy(policy)
+
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
         self.model = MonoDepth2Model(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
@@ -37,10 +41,11 @@ class Trainer(object):
                                                                               self.config['Train']['init_lr'] * 0.1,
                                                                               power=0.9)
         
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
+        self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
                                                   weight_decay=self.config['Train']['weight_decay'])
-        
+        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+
         # 4. Train Method
         self.learner = MonoDepth2Learner(model=self.model, optimizer=self.optimizer)
 
@@ -72,9 +77,11 @@ class Trainer(object):
     def train_step(self, images, imus, intrinsic) -> tf.Tensor:
         with tf.GradientTape() as tape:
             total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(images, intrinsic, training=True)
-        
-        # 4. loss update
-        gradients = tape.gradient(total_loss, self.model.trainable_variables)
+            scaled_loss = self.optimizer.get_scaled_loss(total_loss)
+
+        # loss update
+        scaled_gradients = tape.gradient(scaled_loss, self.model.trainable_variables)
+        gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs
     
@@ -200,16 +207,39 @@ if __name__ == '__main__':
     with open('./vio/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
-    with tf.device('/device:GPU:1'):
-        # args = parser.parse_args()
+    # Get GPU configuration and set visible GPUs
+    gpu_config = config.get('Experiment', {})
+    visible_gpus = gpu_config.get('gpus', [])
+    gpu_vram = gpu_config.get('gpu_vram', None)
+    gpu_vram_factor = gpu_config.get('gpu_vram_factor', None)
 
-        # Set random seed
-        # SEED = 42
-        # os.environ['PYTHONHASHSEED'] = str(SEED)
-        # os.environ['TF_DETERMINISTIC_OPS'] = '1'
-        # tf.random.set_seed(SEED)
-        # np.random.seed(SEED)
+    gpus = tf.config.list_physical_devices('GPU')
 
-        trainer = Trainer(config=config)
+    if gpus:
+        try:
+            if visible_gpus:
+                selected_gpus = [gpus[i] for i in visible_gpus]
+                tf.config.set_visible_devices(selected_gpus, 'GPU')
+            else:
+                print("No GPUs specified in config. Using all available GPUs.")
+                selected_gpus = gpus
+            
+            if gpu_vram and gpu_vram_factor:
+                for gpu in selected_gpus:
+                    tf.config.experimental.set_virtual_device_configuration(
+                        gpu,
+                        [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=gpu_vram * gpu_vram_factor)]
+                    )
+            
+            print(f"Using GPUs: {selected_gpus}")
+        except RuntimeError as e:
+            print(f"Error during GPU configuration: {e}")
+    else:
+        print('No GPU devices found')
+        raise SystemExit
 
-        trainer.train()
+    # strategy = tf.distribute.MirroredStrategy()
+
+    # with strategy.scope():
+    trainer = Trainer(config=config)
+    trainer.train()
