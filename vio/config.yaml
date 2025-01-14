@@ -1,5 +1,5 @@
 Directory:
-  exp_name: raft_Backbone_test
+  exp_name: resnet_mixedPrecision_Step=2
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -22,3 +22,8 @@ Train:
   batch_size: 8 # 1
   epoch: 101
   init_lr: 0.0001
+
+Experiment:
+  gpus: [1] # [0, 1]
+  gpu_vram: 24000
+  gpu_vram_factor: 0.8

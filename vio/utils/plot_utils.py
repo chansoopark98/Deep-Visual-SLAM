@@ -1,8 +1,8 @@
+import matplotlib
+matplotlib.use('Agg')
 import io
 import matplotlib.pyplot as plt
-import numpy as np
 from utils.utils import *
-import matplotlib.gridspec as gridspec
 import tensorflow as tf
 
 def plot_images(image: tf.Tensor, pred_depths: tf.Tensor):

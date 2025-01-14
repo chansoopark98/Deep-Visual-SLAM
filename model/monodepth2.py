@@ -293,14 +293,17 @@ class PoseNet(tf.keras.Model):
         self.image_width = image_shape[1]
         self.batch_size = batch_size
 
-        # self.encoder = resnet_18()
-        self.encoder = Resnet(image_shape=(*image_shape, 6),
-                                        batch_size=batch_size,
-                                        prefix=prefix + '_resnet18').build_model(pretrained=False)
+        self.encoder = resnet_18()
+        # self.encoder = Resnet(image_shape=(*image_shape, 6),
+        #                                 batch_size=batch_size,
+        #                                 pretrained=False,
+        #                                 prefix=prefix + '_resnet18').build_model()
         
         # raft = CustomRAFT(image_shape=(*image_shape, 6),
         #                           batch_size=batch_size, pretrained=True, prefix=f'{prefix}_raft')
         # self.encoder = raft.build_model()
+
+
 
         # 2) 이후 pose 계산용 Conv 레이어들
         # filter_size, out_channel, stride, pad='same', name='conv'
@@ -315,7 +318,7 @@ class PoseNet(tf.keras.Model):
         # 3) ReduceMeanLayer, Reshape, Scale
         self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
         self.reshape_layer = tf.keras.layers.Reshape((6,), name='pose_reshape')
-        self.pose_scale = tf.constant(0.01, dtype=tf.float32)  # or pose_scale 전역 변수를 사용
+        # self.pose_scale = tf.constant(0.01, dtype=tf.float32)  # or pose_scale 전역 변수를 사용
 
     def call(self, inputs, training=False):
         """
@@ -335,7 +338,7 @@ class PoseNet(tf.keras.Model):
         # 3) reduce_mean -> reshape -> scale
         x = self.reduce_mean_layer(x)  # [B, 1, 1, 6] => keepdims=True
         x = self.reshape_layer(x)      # [B, 6]
-        x = x * self.pose_scale        # scale
+        x = x * 0.01        # scale
         return x
     
 class MonoDepth2Model(tf.keras.Model):
@@ -358,8 +361,6 @@ class MonoDepth2Model(tf.keras.Model):
         self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
-
-        
 
     def call(self, inputs, training=False):
         src_left = inputs[..., :3]

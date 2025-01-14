@@ -132,6 +132,8 @@ class MonoDepth2Learner(object):
         # 1. Forward pass
         pred_disps, pred_poses = self.model(images, training=training)
         
+        pred_poses = tf.cast(pred_poses, tf.float32)
+        
         # 2. Parse input images
         left_image = images[..., :3]
         tgt_image = images[..., 3:6]
@@ -154,6 +156,7 @@ class MonoDepth2Learner(object):
         for s in range(self.num_scales):
             # disp_s shape => [B, H/(2^s), W/(2^s), 1]
             disp_s = pred_disps[s]
+            disp_s = tf.cast(disp_s, tf.float32)
             # target scaled => nearest or bilinear, here nearest
             tgt_scaled = tf.image.resize(tgt_image,
                                          [H // (2**s), W // (2**s)],
