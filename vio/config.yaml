@@ -1,5 +1,5 @@
 Directory:
-  exp_name: raw_newResnet18
+  exp_name: raft_Backbone_test
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -17,7 +17,7 @@ Train:
   valid_plot_interval: 100
   img_w: 640
   img_h: 480
-  weight_decay: 0.00001
+  weight_decay: 0.0001
   beta1: 0.9
   batch_size: 8 # 1
   epoch: 101

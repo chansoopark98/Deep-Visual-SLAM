@@ -1,9 +1,13 @@
 import tensorflow as tf
-from collections import OrderedDict
 
-from .update import BasicUpdateBlock, SmallUpdateBlock
-from .extractor import BasicEncoder, SmallEncoder
-from .corr import CorrBlock, coords_grid, upflow8
+try:
+    from .update import BasicUpdateBlock, SmallUpdateBlock
+    from .extractor import BasicEncoder, SmallEncoder
+    from .corr import CorrBlock, coords_grid, upflow8
+except:
+    from update import BasicUpdateBlock, SmallUpdateBlock
+    from extractor import BasicEncoder, SmallEncoder
+    from corr import CorrBlock, coords_grid, upflow8
 
 class RAFT(tf.keras.Model):
     def __init__(self, drop_rate=0, iters=12, iters_pred=24, **kwargs):

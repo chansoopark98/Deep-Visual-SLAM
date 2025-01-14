@@ -33,6 +33,8 @@ class Trainer(object):
         model_input_shape = (self.config['Train']['batch_size'],
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
         self.model.build(model_input_shape)
+        _ = self.model(tf.random.normal(model_input_shape))
+        self.model.load_weights('./assets/weights/depth/epoch_10_model.h5')
         self.model.summary()
 
         # 2. Dataset

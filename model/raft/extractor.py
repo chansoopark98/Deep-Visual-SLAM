@@ -1,5 +1,4 @@
 import tensorflow as tf
-from .instance_norm import InstanceNormalization
 import tensorflow_addons as tfa
 
 def Normalization(norm_type, groups=None):
