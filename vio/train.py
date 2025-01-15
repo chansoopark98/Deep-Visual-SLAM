@@ -4,8 +4,9 @@ sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import tensorflow as tf
 from dataset.data_loader import DataLoader
 from utils.plot_utils import plot_images, plot_warp_images
+from eval import EvalTrajectory
 from model.monodepth2 import MonoDepth2Model
-from monodepth_learner import MonoDepth2Learner
+from monodepth_learner import Learner
 from tqdm import tqdm
 import numpy as np
 from datetime import datetime
@@ -47,7 +48,9 @@ class Trainer(object):
         self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Train Method
-        self.learner = MonoDepth2Learner(model=self.model, optimizer=self.optimizer)
+        self.learner = Learner(model=self.model, config=self.config)
+
+        self.eval_tool = EvalTrajectory(model=self.model, config=self.config)
 
         # 5. Metrics
         self.train_total_loss = tf.keras.metrics.Mean(name='train_total_loss')
@@ -155,6 +158,7 @@ class Trainer(object):
                 self.valid_total_loss(valid_t_loss)
                 self.valid_pixel_loss(valid_p_loss)
                 self.valid_smooth_loss(valid_s_loss)
+                self.eval_tool.update_state(images, imus, intrinsic)
 
                 if idx % self.config['Train']['valid_log_interval'] == 0:
                     self.data_loader.num_valid_samples * epoch + idx
@@ -191,6 +195,12 @@ class Trainer(object):
                     pixel_loss=self.valid_pixel_loss.result().numpy(),
                     smooth_loss=self.valid_smooth_loss.result().numpy()
                 )
+
+            # Eval
+            eval_plot = self.eval_tool.eval_plot()
+            with self.valid_summary_writer.as_default():
+                # Logging eval images
+                tf.summary.image('Eval/Trajectory', eval_plot, step=epoch)
 
             if epoch % 5 == 0:
                 self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],

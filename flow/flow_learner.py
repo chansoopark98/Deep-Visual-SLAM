@@ -7,6 +7,7 @@ class FlowLearner(object):
         self.max_flow = config['Train']['max_flow']
 
     def sequence_loss(self, y_true, y_pred, gamma=0.8):
+        y_pred = tf.cast(y_pred, tf.float32)
         flow_gt = y_true
         
         valid_cond_1 = tf.abs(flow_gt[:, :, :, 0]) < 1000

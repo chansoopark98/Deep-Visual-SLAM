@@ -1,7 +1,8 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-from model.raft.raft import RAFT
+# from model.raft.raft import RAFT
+from model.flownet import Flownet
 from flow_learner import FlowLearner
 from util.metric import EndPointError
 from util.plot import plot_images
@@ -28,12 +29,16 @@ class Trainer(object):
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
         
-        self.model = RAFT()
+        # self.model = RAFT()
+        self.model = Flownet(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
+                             batch_size=self.config['Train']['batch_size'],
+                             prefix='flownet'
+                             )
         model_input_shape = [(self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
                              (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 3)]
         self.model.build(model_input_shape)
         self.model.summary()
-        self.model.load_weights('./assets/weights/raft/model')
+        # self.model.load_weights('./assets/weights/raft/model')
 
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
@@ -145,7 +150,7 @@ class Trainer(object):
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
             for idx, (left, right, flow) in enumerate(train_tqdm):
                 train_loss_result, pred_train_flow = self.distributed_train_step(left, right, flow)
-
+                
                 # Update train metrics
                 self.strategy.run(self.update_train_metric, args=(train_loss_result,))
 
@@ -215,9 +220,9 @@ class Trainer(object):
             
             # End valid session
             with self.valid_summary_writer.as_default():
-                        # Logging valid total, pixel, smooth loss
-                        tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
-                                          self.valid_total_loss.result(), step=current_step)
+                # Logging valid total, pixel, smooth loss
+                tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
+                                    self.valid_total_loss.result(), step=current_step)
                         
             with self.valid_summary_writer.as_default():
                 metrics_dict = self.valid_flow_metrics.get_all_metrics()
@@ -231,7 +236,6 @@ class Trainer(object):
                 
             # Reset metrics
             self.train_total_loss.reset_states()
-
             self.valid_total_loss.reset_states()
             self.valid_flow_metrics.reset_states()
 

@@ -15,6 +15,11 @@ Train:
   valid_log_interval: 10
   train_plot_interval: 100 # 100
   valid_plot_interval: 100
+  min_depth: 0.1
+  max_depth: 10.0
+  ssim_ratio: 0.85
+  smoothness_ratio: 0.001
+  auto_mask: True
   img_w: 640
   img_h: 480
   weight_decay: 0.0001

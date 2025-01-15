@@ -13,7 +13,7 @@ def reflect_conv(filter_size, out_channel, stride, name='conv', activation_fn=tf
     """
     pad_size = filter_size // 2
     conv_reflect = tf.keras.Sequential([
-        ReflectionPadding2D(padding=(pad_size, pad_size)),
+        ReflectionPadding2D(padding=(pad_size, pad_size), name=name + '_reflect_pad'),
         tf.keras.layers.Conv2D(out_channel,
                                kernel_size=(filter_size, filter_size),
                                strides=(stride, stride),

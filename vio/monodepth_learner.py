@@ -1,26 +1,25 @@
 import tensorflow as tf
 from utils.projection_utils import projective_inverse_warp
 
-class MonoDepth2Learner(object):
-    def __init__(self, model, optimizer, **config):
+class Learner(object):
+    def __init__(self, model, config):
         """
         model: 이미 build된 tf.keras.Model (e.g. MonoDepth2Model)
         optimizer: tf.keras.optimizers.Optimizer
         config: hyperparams, etc.
         """
         self.model = model  # MonoDepth2Model
-        self.optimizer = optimizer
+        self.config = config
 
         # 예시 하이퍼파라미터
         self.num_scales = 4
         self.num_source = 2
-        self.ssim_ratio = 0.85
-        self.smoothness_ratio = 1e-3
-        self.auto_mask = True
-
-        # depth 범위, etc. 필요시
-        self.min_depth = 0.1
-        self.max_depth = 10.
+        
+        self.smoothness_ratio = self.config['Train']['smoothness_ratio'] # 0.001
+        self.auto_mask = self.config['Train']['auto_mask'] # True
+        self.ssim_ratio = self.config['Train']['ssim_ratio'] # 0.85
+        self.min_depth = self.config['Train']['min_depth'] # 0.1
+        self.max_depth = self.config['Train']['max_depth'] # 10.0
 
     def disp_to_depth(self, disp, min_depth, max_depth):
         min_disp = 1. / max_depth

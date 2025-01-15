@@ -6,6 +6,7 @@ try:
     from .resnet import resnet_18
     from .resnet_tf import Resnet
     from .raft.raft_backbone import CustomRAFT
+    from .flownet import CustomFlow
 except:
     from model_utils import *
     from efficientnetv2 import EfficientNetV2Encoder
@@ -13,6 +14,7 @@ except:
     from resnet import resnet_18
     from resnet_tf import Resnet
     from raft.raft_backbone import CustomRAFT
+    from flownet import CustomFlow
 
 class ResNet18Encoder(tf.keras.Model):
     def __init__(self,
@@ -293,19 +295,11 @@ class PoseNet(tf.keras.Model):
         self.image_width = image_shape[1]
         self.batch_size = batch_size
 
-        self.encoder = resnet_18()
-        # self.encoder = Resnet(image_shape=(*image_shape, 6),
-        #                                 batch_size=batch_size,
-        #                                 pretrained=False,
-        #                                 prefix=prefix + '_resnet18').build_model()
-        
-        # raft = CustomRAFT(image_shape=(*image_shape, 6),
-        #                           batch_size=batch_size, pretrained=True, prefix=f'{prefix}_raft')
-        # self.encoder = raft.build_model()
+        # self.encoder = resnet_18()
+        self.encoder = CustomFlow(image_shape=(*image_shape, 6),
+                                  batch_size=batch_size,
+                                  prefix='custom_flow').build_model()
 
-
-
-        # 2) 이후 pose 계산용 Conv 레이어들
         # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3
@@ -315,10 +309,9 @@ class PoseNet(tf.keras.Model):
             activation=None, name='pose_conv3'
         )
 
-        # 3) ReduceMeanLayer, Reshape, Scale
+        # 3) ReduceMeanLayer, Reshape
         self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
         self.reshape_layer = tf.keras.layers.Reshape((6,), name='pose_reshape')
-        # self.pose_scale = tf.constant(0.01, dtype=tf.float32)  # or pose_scale 전역 변수를 사용
 
     def call(self, inputs, training=False):
         """
@@ -338,9 +331,9 @@ class PoseNet(tf.keras.Model):
         # 3) reduce_mean -> reshape -> scale
         x = self.reduce_mean_layer(x)  # [B, 1, 1, 6] => keepdims=True
         x = self.reshape_layer(x)      # [B, 6]
-        x = x * 0.01        # scale
+        x = x * 0.01 # scale
         return x
-    
+
 class MonoDepth2Model(tf.keras.Model):
     def __init__(self,
                  image_shape: tuple,
