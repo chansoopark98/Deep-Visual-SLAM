@@ -16,7 +16,7 @@ class DataLoader(object):
         self.auto_opt = tf.data.AUTOTUNE
         self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
         self.std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
-        self.crop_size = 150
+        self.crop_size = 100
         self.num_train_samples = 0
         self.num_valid_samples = 0
 
@@ -65,11 +65,11 @@ class DataLoader(object):
         flow_cropped = concat[:, :, 6:]
 
         # 4) 리사이즈 (BILINEAR 등 필요에 따라 선택)
-        left_resized = tf.image.resize(left_cropped, size=self.image_size,
+        left_cropped = tf.image.resize(left_cropped, size=self.image_size,
                                        method=tf.image.ResizeMethod.BILINEAR)
-        right_resized = tf.image.resize(right_cropped, size=self.image_size,
+        right_cropped = tf.image.resize(right_cropped, size=self.image_size,
                                         method=tf.image.ResizeMethod.BILINEAR)
-        flow_resized = tf.image.resize(flow_cropped, size=self.image_size,
+        flow_cropped = tf.image.resize(flow_cropped, size=self.image_size,
                                        method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
         # 5) Flow 값 스케일링
@@ -79,13 +79,13 @@ class DataLoader(object):
         scale_y = tf.cast(self.image_size[0], tf.float32) / tf.cast(cropped_shape[0], tf.float32)
 
         # flow_resized는 shape = [H_out, W_out, 2]
-        flow_x, flow_y = tf.split(flow_resized, num_or_size_splits=2, axis=-1)
+        flow_x, flow_y = tf.split(flow_cropped, num_or_size_splits=2, axis=-1)
         flow_x = flow_x * scale_x
         flow_y = flow_y * scale_y
 
         flow_resized = tf.concat([flow_x, flow_y], axis=-1)
 
-        return left_resized, right_resized, flow_resized
+        return left_cropped, right_cropped, flow_resized
     
     @tf.function(jit_compile=True)
     def normalize_image(self, image: tf.Tensor) -> tf.Tensor:
@@ -175,7 +175,7 @@ class DataLoader(object):
             right = tf.image.adjust_hue(right, delta)
 
         # Salt-and-Pepper noise
-        if tf.random.uniform([]) > 0.5:
+        if tf.random.uniform([]) > 0.1:
             left, right, flow = self.salt_and_pepper_noise(left, right, flow)
 
         # random crop

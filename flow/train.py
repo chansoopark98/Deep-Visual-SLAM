@@ -34,8 +34,7 @@ class Trainer(object):
                              batch_size=self.config['Train']['batch_size'],
                              prefix='flownet'
                              )
-        model_input_shape = [(self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
-                             (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 3)]
+        model_input_shape = (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 6)
         self.model.build(model_input_shape)
         self.model.summary()
         # self.model.load_weights('./assets/weights/raft/model')
@@ -175,6 +174,8 @@ class Trainer(object):
                                          train_flow_plot, step=current_step)
                         del train_flow_plot
 
+                del train_loss_result, pred_train_flow
+
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy()
                     )
@@ -200,7 +201,7 @@ class Trainer(object):
                     local_left = self.strategy.experimental_local_results(left)[0]
                     local_right = self.strategy.experimental_local_results(right)[0]
                     local_flow = self.strategy.experimental_local_results(flow)[0]
-                    local_pred_flow = self.strategy.experimental_local_results(pred_train_flow)[0]
+                    local_pred_flow = self.strategy.experimental_local_results(pred_valid_flow)[0]
 
                     valid_flow_plot = plot_images(left=local_left,
                                 right=local_right,

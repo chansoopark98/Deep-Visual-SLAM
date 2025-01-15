@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-batch_norm_decay = 0.95
+batch_norm_decay = 0.9
 batch_norm_epsilon = 1e-5
 
 class BasicBlock(tf.keras.layers.Layer):
