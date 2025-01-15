@@ -115,6 +115,35 @@ class DataLoader(object):
         return left, right, flow
     
     @tf.function(jit_compile=True)
+    def salt_and_pepper_noise(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor, prob: float = 0.05) -> tuple:
+        """
+        Apply identical Salt-and-Pepper noise to left and right images.
+
+        Args:
+            left (tf.Tensor): Left image tensor of shape [H, W, 3], range [0, 1].
+            right (tf.Tensor): Right image tensor of shape [H, W, 3], range [0, 1].
+            flow (tf.Tensor): Flow tensor of shape [H, W, 2].
+            prob (float): Probability of noise (default: 0.05).
+
+        Returns:
+            tuple: (noised_left, noised_right, flow)
+        """
+        # Generate Salt-and-Pepper noise mask
+        noise = tf.random.uniform(shape=(self.image_size[0], self.image_size[1], 1))  # Single channel for consistency
+        salt_mask = tf.cast(noise < (prob / 2), tf.float32)  # Salt: white pixels
+        pepper_mask = tf.cast(noise > (1 - prob / 2), tf.float32)  # Pepper: black pixels
+
+        # Create the noisy image for both left and right
+        noised_left = left * (1 - salt_mask - pepper_mask) + salt_mask + pepper_mask * 0
+        noised_right = right * (1 - salt_mask - pepper_mask) + salt_mask + pepper_mask * 0
+
+        # Clip to valid range [0, 1]
+        noised_left = tf.clip_by_value(noised_left, 0.0, 1.0)
+        noised_right = tf.clip_by_value(noised_right, 0.0, 1.0)
+
+        return noised_left, noised_right, flow
+
+    @tf.function(jit_compile=True)
     def augment(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor) -> tuple:
         """
         rgb: RGB image tensor (H, W, 3) [0, 255]
@@ -144,6 +173,10 @@ class DataLoader(object):
             delta = tf.random.uniform([], -max_delta, max_delta)
             left = tf.image.adjust_hue(left, delta)
             right = tf.image.adjust_hue(right, delta)
+
+        # Salt-and-Pepper noise
+        if tf.random.uniform([]) > 0.5:
+            left, right, flow = self.salt_and_pepper_noise(left, right, flow)
 
         # random crop
         if tf.random.uniform([]) > 0.5:
