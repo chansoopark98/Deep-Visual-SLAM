@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Resnet_flownet_ep300_full
+  exp_name: Resnet_flownet_ep101_full_augment
   data_dir: ./flow/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -19,12 +19,12 @@ Train:
   beta1: 0.9
   weight_decay: 0.0001
   batch_size: 16 # 1
-  epoch: 301
-  init_lr: 0.001
+  epoch: 51
+  init_lr: 0.0001
   final_lr: 0.00001
   power: 0.9
 
 Experiment:
-  gpus: [0] # [0, 1]
+  gpus: [1] # [0, 1]
   gpu_vram: 24000
   gpu_vram_factor: 0.8
