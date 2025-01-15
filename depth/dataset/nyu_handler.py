@@ -1,50 +1,42 @@
 import tensorflow as tf
-from dataset.dataset_utils import rescale_camera_intrinsic
 
-class NyuHandler(object):
-    def __init__(self, target_size: tuple) -> None:
-        self.target_size = target_size
-          # Original intrinsic matrix
-        original_cx = 3.2558244941119034e+02
-        original_cy = 2.5373616633400465e+02
-
-        bound_left = 43
-        bound_top = 45
-
-        new_cx = original_cx - bound_left
-        new_cy = original_cy - bound_top
-
-        self.original_size = (480, 640)
-        self.original_intrinsic_matrix = tf.constant([[5.1885790117450188e+02, 0., new_cx],
-                                             [0., 5.1946961112127485e+02, new_cy],
-                                             [0., 0., 1.]], dtype=tf.float32)
-        
+class NyuHandler:
+    def __init__(self) -> None:
+        """
+        Initializes the NyuHandler class for cropping NYU dataset images.
+        """
+        # Cropping boundaries for NYU dataset
+        self.bound_left = 43
+        self.bound_right = 608
+        self.bound_top = 45
+        self.bound_bottom = 472
 
     @tf.function(jit_compile=True)
     def nyu_crop_resize(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         """
-        1) 유효 영역을 crop
-        2) 16:9 해상도(self.image_size)에 맞춰 letterbox (padding) 적용
+        Crops the valid region of the NYU dataset without resizing.
+
+        Args:
+            rgb (tf.Tensor): Input RGB tensor of shape [480, 640, 3].
+            depth (tf.Tensor): Input depth tensor of shape [480, 640, 1].
+
+        Returns:
+            tuple: Cropped RGB and depth tensors.
         """
-        bound_left = 43
-        bound_right = 608
-        bound_top = 45
-        bound_bottom = 472
+        # Crop the valid region
+        cropped_image = rgb[self.bound_top:self.bound_bottom, self.bound_left:self.bound_right, :]
+        cropped_depth = depth[self.bound_top:self.bound_bottom, self.bound_left:self.bound_right, :]
 
-        # Crop
-        cropped_image = rgb[bound_top:bound_bottom, bound_left:bound_right, :]
-        cropped_depth = depth[bound_top:bound_bottom, bound_left:bound_right, :]
-
-        # Resize
-
-        # 타입 변환
+        # Type casting
         cropped_image = tf.cast(cropped_image, tf.uint8)
         cropped_depth = tf.cast(cropped_depth, tf.float32)
 
-        # shape 보장
-        cropped_image = tf.ensure_shape(cropped_image, [None, None, 3])
-        cropped_depth = tf.ensure_shape(cropped_depth, [None, None, 1])
-        
+        # Ensure shapes for compatibility
+        cropped_image = tf.ensure_shape(cropped_image, [self.bound_bottom - self.bound_top, 
+                                                        self.bound_right - self.bound_left, 3])
+        cropped_depth = tf.ensure_shape(cropped_depth, [self.bound_bottom - self.bound_top, 
+                                                        self.bound_right - self.bound_left, 1])
+
         return cropped_image, cropped_depth
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+from typing import Dict, Any, List, Tuple
 from depth_learner import DepthLearner
 from model.monodepth2 import DispNet
 from util.plot import plot_images
@@ -15,13 +16,36 @@ import yaml
 np.set_printoptions(suppress=True)
 
 class Trainer(object):
-    def __init__(self, config, strategy: tf.distribute.Strategy) -> None:
+    def __init__(self, config: dict, strategy: tf.distribute.Strategy) -> None:
+        """
+        Initializes the Trainer class.
+
+        Args:
+            config (dict): Configuration dictionary containing training parameters and paths.
+            strategy (tf.distribute.Strategy): TensorFlow strategy for distributed training.
+
+        Attributes:
+            config (dict): Stores training configuration.
+            strategy (tf.distribute.Strategy): Manages distributed training.
+        """
         self.config = config
         self.strategy = strategy
         self.configure_train_ops()
         print('initialize')
 
     def configure_train_ops(self) -> None:
+        """
+        Configures training operations including model, dataset, optimizer, metrics, and logger.
+
+        - Sets mixed precision policy.
+        - Builds and initializes the model with predefined shapes.
+        - Loads training and validation datasets.
+        - Configures optimizer with learning rate schedule and loss scaling.
+        - Initializes metrics for training and validation.
+
+        Returns:
+            None
+        """
         policy = tf.keras.mixed_precision.Policy('mixed_float16')
         tf.keras.mixed_precision.set_global_policy(policy)
 
@@ -94,7 +118,19 @@ class Trainer(object):
                     exist_ok=True)
 
     @tf.function()
-    def train_step(self, rgb, depth):
+    def train_step(self, rgb: tf.Tensor, depth: tf.Tensor) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+        """
+        Executes a single training step with backpropagation.
+
+        Args:
+            rgb (tf.Tensor): Input RGB image tensor of shape [B, H, W, 3].
+            depth (tf.Tensor): Ground truth depth tensor of shape [B, H, W] or [B, H, W, 1].
+
+        Returns:
+            Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+                - Dictionary of loss values (e.g., smooth, log, and L1 losses).
+                - List of predicted depth tensors at different scales.
+        """
         with tf.GradientTape() as tape:
             loss_dict, pred_depths = self.learner.forward_step(rgb, depth, training=True)
             total_loss = sum(loss_dict.values())
@@ -106,12 +142,36 @@ class Trainer(object):
         return loss_dict, pred_depths
     
     @tf.function()
-    def validation_step(self, rgb, depth):
+    def validation_step(self, rgb: tf.Tensor, depth: tf.Tensor) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+        """
+        Computes loss and predicted depths for validation data.
+
+        Args:
+            rgb (tf.Tensor): Input RGB tensor of shape [B, H, W, 3].
+            depth (tf.Tensor): Ground truth depth tensor of shape [B, H, W] or [B, H, W, 1].
+
+        Returns:
+            Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+                - Loss dictionary containing smooth, log, and L1 losses.
+                - List of predicted depth tensors at different scales.
+        """
         loss_dict, pred_depths = self.learner.forward_step(rgb, depth, training=False)
         return loss_dict, pred_depths
     
     @tf.function()
-    def distributed_train_step(self, rgb, depth):
+    def distributed_train_step(self, rgb: tf.Tensor, depth: tf.Tensor) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+        """
+        Executes a distributed training step.
+
+        Args:
+            rgb (tf.Tensor): Input RGB tensor of shape [B, H, W, 3].
+            depth (tf.Tensor): Ground truth depth tensor of shape [B, H, W] or [B, H, W, 1].
+
+        Returns:
+            Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+                - Reduced loss dictionary after distributed training.
+                - List of predicted depth tensors at different scales.
+        """
         loss_dict, pred_depths = self.strategy.run(self.train_step, args=(rgb, depth,))
         
         reduced_loss_dict = {
@@ -121,7 +181,19 @@ class Trainer(object):
         return reduced_loss_dict, pred_depths
     
     @tf.function()
-    def distributed_valid_step(self, rgb, depth):
+    def distributed_valid_step(self, rgb: tf.Tensor, depth: tf.Tensor) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+        """
+        Executes a distributed validation step.
+
+        Args:
+            rgb (tf.Tensor): Input RGB tensor of shape [B, H, W, 3].
+            depth (tf.Tensor): Ground truth depth tensor of shape [B, H, W] or [B, H, W, 1].
+
+        Returns:
+            Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+                - Reduced loss dictionary after distributed validation.
+                - List of predicted depth tensors at different scales.
+        """
         loss_dict, pred_depths = self.strategy.run(self.validation_step, args=(rgb, depth,))
         
         reduced_loss_dict = {
@@ -131,7 +203,16 @@ class Trainer(object):
         return reduced_loss_dict, pred_depths
     
     @tf.function()
-    def update_train_metric(self, loss_dict):
+    def update_train_metric(self, loss_dict: Dict[str, tf.Tensor]) -> None:
+        """
+        Updates training metrics with the loss values.
+
+        Args:
+            loss_dict (Dict[str, tf.Tensor]): Dictionary containing smooth, log, and L1 losses.
+
+        Returns:
+            None
+        """
         total_loss = tf.reduce_sum(list(loss_dict.values()))
         self.train_total_loss.update_state(total_loss)
         self.train_smooth_loss.update_state(loss_dict['smooth_loss'])
@@ -139,7 +220,18 @@ class Trainer(object):
         self.train_l1_loss.update_state(loss_dict['l1_loss'])
 
     @tf.function()
-    def update_valid_metric(self, loss_dict, pred_depth, gt_depth):
+    def update_valid_metric(self, loss_dict: Dict[str, tf.Tensor], pred_depth: tf.Tensor, gt_depth: tf.Tensor) -> None:
+        """
+        Updates validation metrics with the loss values and depth predictions.
+
+        Args:
+            loss_dict (Dict[str, tf.Tensor]): Dictionary containing smooth, log, and L1 losses.
+            pred_depth (tf.Tensor): Predicted depth tensor.
+            gt_depth (tf.Tensor): Ground truth depth tensor.
+
+        Returns:
+            None
+        """
         total_loss = tf.reduce_sum(list(loss_dict.values()))
         self.valid_total_loss.update_state(total_loss)
         self.valid_smooth_loss.update_state(loss_dict['smooth_loss'])
@@ -148,6 +240,19 @@ class Trainer(object):
         self.valid_depth_metrics.update_state(gt_depth, pred_depth)
 
     def train(self) -> None:
+        """
+        Trains the model over multiple epochs with distributed data and logging.
+
+        - Executes training and validation for each epoch.
+        - Logs metrics, images, and depth predictions to TensorBoard.
+        - Saves model weights at regular intervals.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         for epoch in range(self.config['Train']['epoch']):
             lr = self.warmup_scheduler(epoch)
 
