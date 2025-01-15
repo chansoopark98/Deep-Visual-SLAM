@@ -1,31 +1,40 @@
 import tensorflow as tf
-from dataset.dataset_utils import rescale_camera_intrinsic
 
-class DiodeHandler(object):
+class DiodeHandler:
     def __init__(self, target_size: tuple) -> None:
+        """
+        Initializes the DiodeHandler class for resizing DIODE dataset images.
+
+        Args:
+            target_size (tuple): Target resolution (height, width) for resized images and depth maps.
+        """
         self.target_size = target_size
-        
-        self.original_size = (768, 1024)
-        self.original_intrinsic_matrix = tf.constant([[886.81, 0., 512.],
-                                             [0., 927.06, 384.],
-                                             [0., 0., 1.]], dtype=tf.float32)
 
     @tf.function(jit_compile=True)
     def preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
-        rgb = tf.image.resize(rgb, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
-        depth = tf.image.resize(depth, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        """
+        Resizes and preprocesses DIODE dataset RGB and depth images.
 
-        # Compute scaling factors
-        intrinsic = rescale_camera_intrinsic(self.original_intrinsic_matrix,
-                                             self.original_size,
-												self.target_size)
-        rgb = tf.cast(rgb, tf.uint8)
-        depth = tf.cast(depth, tf.float32)
-        
-        rgb = tf.ensure_shape(rgb, [*self.target_size, 3])
-        depth = tf.ensure_shape(depth, [*self.target_size, 1])
+        Args:
+            rgb (tf.Tensor): Input RGB tensor of shape [H, W, 3].
+            depth (tf.Tensor): Input depth tensor of shape [H, W, 1].
 
-        return rgb, depth, intrinsic
+        Returns:
+            tuple: Resized RGB and depth tensors with target size.
+        """
+        # Resize
+        resized_rgb = tf.image.resize(rgb, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
+        resized_depth = tf.image.resize(depth, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+
+        # Type casting
+        resized_rgb = tf.cast(resized_rgb, tf.uint8)
+        resized_depth = tf.cast(resized_depth, tf.float32)
+
+        # Ensure shape for stability
+        resized_rgb = tf.ensure_shape(resized_rgb, [*self.target_size, 3])
+        resized_depth = tf.ensure_shape(resized_depth, [*self.target_size, 1])
+
+        return resized_rgb, resized_depth
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt

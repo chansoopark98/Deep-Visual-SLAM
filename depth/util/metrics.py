@@ -1,13 +1,23 @@
 import tensorflow as tf
 
 class DepthMetrics(tf.keras.metrics.Metric):
-    def __init__(self, mode, min_depth, max_depth,  name='depth_metrics', **kwargs):
+    def __init__(self, mode, min_depth, max_depth, name='depth_metrics', **kwargs):
+        """
+        Initializes DepthMetrics to evaluate depth estimation models.
+
+        Args:
+            mode (str): Evaluation mode ('relative' or 'metric').
+            min_depth (float): Minimum valid depth value.
+            max_depth (float): Maximum valid depth value.
+            name (str): Name of the metric (default: 'depth_metrics').
+            **kwargs: Additional arguments for tf.keras.metrics.Metric.
+        """
         super().__init__(name=name, **kwargs)
         self.mode = mode
         self.min_depth = min_depth
         self.max_depth = max_depth
 
-        # 누적을 위한 변수들 (float32 형태)
+        # Variables for accumulation (in float32 format)
         self.sum_abs_diff = self.add_weight(name='sum_abs_diff', initializer='zeros', dtype=tf.float32)
         self.sum_abs_rel = self.add_weight(name='sum_abs_rel', initializer='zeros', dtype=tf.float32)
         self.sum_sq_rel  = self.add_weight(name='sum_sq_rel',  initializer='zeros', dtype=tf.float32)
@@ -23,12 +33,16 @@ class DepthMetrics(tf.keras.metrics.Metric):
         self.total_count = self.add_weight(name='total_count', initializer='zeros', dtype=tf.float32)
 
     @tf.function
-    def update_state(self, y_true, y_pred, sample_weight=None):
+    def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor, sample_weight=None) -> None:
         """
-        y_true: GT depth, shape (B, ...)
-        y_pred: Pred depth, shape (B, ...)
-        둘 다 tf.float32라고 가정
+        Updates the metric states based on ground truth and predictions.
+
+        Args:
+            y_true (tf.Tensor): Ground truth depth tensor.
+            y_pred (tf.Tensor): Predicted depth tensor.
+            sample_weight (optional): Weights for the samples (default: None).
         """
+
         # Relative depth (min-max norm) to metric depth
         if self.mode == 'relative':
             y_true = y_true * (self.max_depth - self.min_depth) + self.min_depth
@@ -37,12 +51,11 @@ class DepthMetrics(tf.keras.metrics.Metric):
             y_true = tf.clip_by_value(y_true, self.min_depth, self.max_depth)
             y_pred = tf.clip_by_value(y_pred, self.min_depth, self.max_depth)
 
-        # Flatten해서 계산 (배치 전체)
+        # Flatten for calculation (entire batch)
         y_true = tf.reshape(y_true, [-1])
         y_pred = tf.reshape(y_pred, [-1])
 
-        # 혹시나 0 값이 있을 수 있으므로, clip
-        # (필요 시, 또는 Masking이 필요한 경우에는 별도 처리)
+        # clip by value (to avoid NaN)
         epsilon = 1e-6
         y_true = tf.clip_by_value(y_true, epsilon, 1e6)
         y_pred = tf.clip_by_value(y_pred, epsilon, 1e6)
@@ -62,15 +75,15 @@ class DepthMetrics(tf.keras.metrics.Metric):
         # sq_rel
         sq_rel = tf.reduce_mean(((y_true - y_pred)**2) / y_true)
 
-        # mse (RMSE 위해)
+        # mse (RMSE)
         mse = tf.reduce_mean((y_true - y_pred)**2)
-        # mse_log (RMSE log 위해)
+        
         # log(gt) - log(pred)
         mse_log = tf.reduce_mean((tf.math.log(y_true) - tf.math.log(y_pred))**2)
         # abs_log
         abs_log = tf.reduce_mean(tf.abs(tf.math.log(y_true) - tf.math.log(y_pred)))
 
-        batch_size = tf.cast(tf.size(y_true), tf.float32)  # 이 배치 내 픽셀(혹은 유효 depth)의 개수
+        batch_size = tf.cast(tf.size(y_true), tf.float32)
 
         # 누적
         self.sum_abs_diff.assign_add(abs_diff * batch_size)
@@ -84,20 +97,26 @@ class DepthMetrics(tf.keras.metrics.Metric):
         self.sum_a3.assign_add(a3 * batch_size)
         self.total_count.assign_add(batch_size)
 
-    def result(self):
+    def result(self) -> tf.Tensor:
         """
-        기본적으로 'rmse' (sqrt of mse)만 반환.
-        나머지 지표는 get_all_metrics()로 별도 접근.
+        Computes and returns the root mean squared error (RMSE) based on accumulated states.
+
+        Returns:
+            tf.Tensor: RMSE value.
         """
         count = tf.maximum(self.total_count, 1.0)
         # RMSE
         rmse = tf.sqrt(self.sum_mse / count)
         return rmse
 
-    def get_all_metrics(self):
+    def get_all_metrics(self) -> dict:
         """
-        누적된 값으로 최종 지표들을 dictionary 형태로 반환
+        Returns all computed metrics as a dictionary.
+
+        Returns:
+            dict: Dictionary containing all metrics ('abs_diff', 'rmse', 'a1', etc.).
         """
+
         count = tf.maximum(self.total_count, 1.0)
 
         abs_diff = self.sum_abs_diff / count
@@ -124,7 +143,12 @@ class DepthMetrics(tf.keras.metrics.Metric):
             'a3':      a3
         }
 
-    def reset_states(self):
-        """Epoch 별로 metric 초기화"""
+    def reset_states(self) -> None:
+        """
+        Resets all accumulated states for the metrics. Typically called at the end of each epoch.
+
+        Returns:
+            None
+        """
         for var in self.variables:
             var.assign(tf.zeros_like(var))

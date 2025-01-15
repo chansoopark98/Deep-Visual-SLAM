@@ -1,51 +1,96 @@
 import tensorflow as tf
 import json
+import os
 
-class TFRecordLoader(object):
+class TFRecordLoader:
     def __init__(self, root_dir: str,
                  is_train: bool = True,
                  is_valid: bool = True,
                  is_test: bool = False,
                  image_size: tuple = (None, None),
                  depth_dtype: tf.dtypes.DType = tf.float32) -> None:
+        """
+        Initializes the TFRecordLoader class for loading TFRecord datasets.
+
+        Args:
+            root_dir (str): Root directory containing TFRecord files and metadata.
+            is_train (bool): Whether to load the training dataset (default: True).
+            is_valid (bool): Whether to load the validation dataset (default: True).
+            is_test (bool): Whether to load the test dataset (default: False).
+            image_size (tuple): Target size (height, width) of the images and depth maps.
+            depth_dtype (tf.dtypes.DType): Data type of the depth maps (default: tf.float32).
+        """
         self.root_dir = root_dir
         self.is_train = is_train
         self.is_valid = is_valid
         self.is_test = is_test
         self.image_size = image_size
         self.depth_dtype = depth_dtype
+
+        metadata_path = os.path.join(self.root_dir, 'metadata.json')
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+
+        self.train_samples, self.valid_samples, self.test_samples = self._load_metadata(metadata_path)
+
         if self.is_train:
-            self.train_samples, self.valid_samples, self.test_samples = self._load_metadata(f'{self.root_dir}/metadata.json')
-            self.train_dataset = tf.data.TFRecordDataset(f'{self.root_dir}/train.tfrecord')
-            self.train_dataset = self.train_dataset.map(self._parse_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            train_path = os.path.join(self.root_dir, 'train.tfrecord')
+            self._validate_file(train_path)
+            self.train_dataset = self._load_tfrecord(train_path)
+
         if self.is_valid:
-            self.valid_dataset = tf.data.TFRecordDataset(f'{self.root_dir}/valid.tfrecord')
-            self.valid_dataset = self.valid_dataset.map(self._parse_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            valid_path = os.path.join(self.root_dir, 'valid.tfrecord')
+            self._validate_file(valid_path)
+            self.valid_dataset = self._load_tfrecord(valid_path)
+
         if self.is_test:
-            self.test_dataset = tf.data.TFRecordDataset(f'{self.root_dir}/test.tfrecord')
-            self.test_dataset = self.test_dataset.map(self._parse_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    
-    def _load_metadata(self, metadata_path):
+            test_path = os.path.join(self.root_dir, 'test.tfrecord')
+            self._validate_file(test_path)
+            self.test_dataset = self._load_tfrecord(test_path)
+
+    def _load_metadata(self, metadata_path: str) -> tuple:
+        """
+        Loads metadata containing sample counts for train, validation, and test datasets.
+
+        Args:
+            metadata_path (str): Path to the metadata JSON file.
+
+        Returns:
+            Tuple[int, int, int]: Counts of train, validation, and test samples.
+        """
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
-        if self.is_train:
-            train_samples = metadata.get('train_count', None)
-        if self.is_valid:
-            valid_samples = metadata.get('valid_count', None)
-        else:
-            valid_samples = 0
-        if self.is_test:
-            test_samples = metadata.get('test_count', None)
-        else:
-            test_samples = 0
+        train_samples = metadata.get('train_count', 0)
+        valid_samples = metadata.get('valid_count', 0)
+        test_samples = metadata.get('test_count', 0)
         return train_samples, valid_samples, test_samples
 
-    def _parse_data(self, example_proto):
+    def _validate_file(self, path: str) -> None:
+        """Validates if a file exists."""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"TFRecord file not found: {path}")
+
+    def _load_tfrecord(self, path: str) -> tf.data.Dataset:
+        """Loads and parses a TFRecord file."""
+        dataset = tf.data.TFRecordDataset(path)
+        dataset = dataset.map(self._parse_data, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+        return dataset
+
+    def _parse_data(self, example_proto: tf.train.Example) -> tuple:
+        """
+        Parses a single TFRecord example into RGB and depth tensors.
+
+        Args:
+            example_proto (tf.train.Example): Serialized TFRecord example.
+
+        Returns:
+            Tuple[tf.Tensor, tf.Tensor]: Decoded RGB image and depth map tensors.
+        """
         feature_description = {
             'rgb': tf.io.FixedLenFeature([], tf.string),
             'depth': tf.io.FixedLenFeature([], tf.string)
         }
-
         parsed_features = tf.io.parse_single_example(example_proto, feature_description)
 
         rgb = tf.image.decode_jpeg(parsed_features['rgb'], channels=3)
@@ -56,7 +101,7 @@ class TFRecordLoader(object):
         rgb = tf.ensure_shape(rgb, [self.image_size[0], self.image_size[1], 3])
         depth = tf.ensure_shape(depth, [self.image_size[0], self.image_size[1], 1])
         return rgb, depth
-
+    
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     diode_path = './depth/data/diode_tfrecord'
