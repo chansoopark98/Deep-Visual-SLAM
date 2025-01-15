@@ -16,6 +16,7 @@ class DataLoader(object):
         self.auto_opt = tf.data.AUTOTUNE
         self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
         self.std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
+        self.crop_size = 150
         self.num_train_samples = 0
         self.num_valid_samples = 0
 
@@ -47,55 +48,70 @@ class DataLoader(object):
             self.num_valid_samples += dataset.valid_samples
 
         return train_datasets, valid_datasets
-
+    
     @tf.function(jit_compile=True)
-    def preprocess_image(self, rgb: tf.Tensor):
-        # rgb = tf.image.resize(rgb,
-        #                       self.image_size,
-        #                       method=tf.image.ResizeMethod.BILINEAR)
-        rgb = self.normalize_image(rgb)
-        return rgb
+    def random_crop(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor) -> tuple:
+        """
+        left, right : [H, W, 3] (uint8 또는 float32 등)
+        flow        : [H, W, 2]
+        최종적으로 (H_out, W_out) 크기 Tensor로 리턴
+        """
+        concat = tf.concat([left, right, flow], axis=-1)
+        concat = tf.image.random_crop(concat, size=(self.image_size[0] - self.crop_size,
+                                                    self.image_size[1] - self.crop_size, 8))
 
-    @tf.function(jit_compile=True)
-    def preprocess_flow(self, flow: tf.Tensor):
-        flow = tf.cast(flow, tf.float32)
-        # flow = tf.image.resize(flow,
-        #                         self.image_size,
-        #                         method=tf.image.ResizeMethod.BILINEAR)
-        return flow
+        left_cropped = concat[:, :, :3]
+        right_cropped = concat[:, :, 3:6]
+        flow_cropped = concat[:, :, 6:]
+
+        # 4) 리사이즈 (BILINEAR 등 필요에 따라 선택)
+        left_resized = tf.image.resize(left_cropped, size=self.image_size,
+                                       method=tf.image.ResizeMethod.BILINEAR)
+        right_resized = tf.image.resize(right_cropped, size=self.image_size,
+                                        method=tf.image.ResizeMethod.BILINEAR)
+        flow_resized = tf.image.resize(flow_cropped, size=self.image_size,
+                                       method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+
+        # 5) Flow 값 스케일링
+        cropped_shape = tf.shape(concat)
         
+        scale_x = tf.cast(self.image_size[1], tf.float32) / tf.cast(cropped_shape[1], tf.float32)
+        scale_y = tf.cast(self.image_size[0], tf.float32) / tf.cast(cropped_shape[0], tf.float32)
+
+        # flow_resized는 shape = [H_out, W_out, 2]
+        flow_x, flow_y = tf.split(flow_resized, num_or_size_splits=2, axis=-1)
+        flow_x = flow_x * scale_x
+        flow_y = flow_y * scale_y
+
+        flow_resized = tf.concat([flow_x, flow_y], axis=-1)
+
+        return left_resized, right_resized, flow_resized
+    
     @tf.function(jit_compile=True)
     def normalize_image(self, image: tf.Tensor) -> tf.Tensor:
         image = tf.cast(image, tf.float32)
-        # image /= 255.0
-        # image = (image - self.mean) / self.std
         image /= 255.0
-        image = (2 * image) - 1.0
-        # image = image * (1.0 / 127.5) - 1.0
+        image = (image - self.mean) / self.std
         return image
     
     @tf.function(jit_compile=True)
     def denormalize_image(self, image):
-        # image = (image * self.std) + self.mean
-        # image *= 255.0
-        image = (image + 1.0) / 2.0
-        image = image * 255.0
-        # image = (image + 1.0) * 127.5
+        image = (image * self.std) + self.mean
+        image *= 255.0
         image = tf.cast(image, tf.uint8)
         return image
 
     @tf.function(jit_compile=True)
     def train_preprocess(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor) -> tuple:
-        left = self.preprocess_image(left)
-        right = self.preprocess_image(right)
-        flow = self.preprocess_flow(flow)
+        left, right, flow = self.augment(left, right, flow)
+        left = self.normalize_image(left)
+        right = self.normalize_image(right)
         return left, right, flow
 
     @tf.function(jit_compile=True)
     def valid_preprocess(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor) -> tuple:
-        left = self.preprocess_image(left)
-        right = self.preprocess_image(right)
-        flow = self.preprocess_flow(flow)
+        left = self.normalize_image(left)
+        right = self.normalize_image(right)
         return left, right, flow
     
     @tf.function(jit_compile=True)
@@ -108,7 +124,6 @@ class DataLoader(object):
         left = tf.cast(left, tf.float32) / 255.0
         right = tf.cast(right, tf.float32) / 255.0
         
-
         if tf.random.uniform([]) > 0.5:
             delta_brightness = tf.random.uniform([], -0.2, 0.2)
             left = tf.image.adjust_brightness(left, delta_brightness)
@@ -129,6 +144,10 @@ class DataLoader(object):
             delta = tf.random.uniform([], -max_delta, max_delta)
             left = tf.image.adjust_hue(left, delta)
             right = tf.image.adjust_hue(right, delta)
+
+        # random crop
+        if tf.random.uniform([]) > 0.5:
+            left, right, flow = self.random_crop(left, right, flow)
 
         # flip left-right
         if tf.random.uniform([]) > 0.5:
@@ -152,6 +171,9 @@ class DataLoader(object):
             # 3) 다시 합치기
             flow = tf.concat([flow_x, flow_y], axis=-1)  # shape [H, W, 2]
 
+        left *= 255.
+        right *= 255.
+
         left = tf.clip_by_value(left, 0., 255.)
         right = tf.clip_by_value(right, 0., 255.)
         
@@ -160,8 +182,8 @@ class DataLoader(object):
     def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool, is_train: bool = True) -> tf.data.Dataset:
         combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
             
-        if use_shuffle:
-            combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 256, reshuffle_each_iteration=True)
+        if use_shuffle and is_train:
+            combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 128, reshuffle_each_iteration=True)
         if is_train:
             combined_dataset = combined_dataset.map(self.train_preprocess, num_parallel_calls=self.auto_opt)
         else:
@@ -192,14 +214,16 @@ if __name__ == '__main__':
     }
     data_loader = DataLoader(config)
     for left, right, flow in data_loader.train_dataset.take(data_loader.num_train_samples):
+        # left, right, flow = data_loader.random_crop(left[0], right[0], flow[0])
+        left, right, flow = left[0], right[0], flow[0]
         left = data_loader.denormalize_image(left)
         right = data_loader.denormalize_image(right)
         print(left.shape, right.shape, flow.shape)
-        plt.imshow(left[0])
+        plt.imshow(left)
         plt.show()
-        plt.imshow(right[0])
+        plt.imshow(right)
         plt.show()
-        plt.imshow(flow[0, :, :, 0], cmap='plasma')
+        plt.imshow(flow[:, :, 0], cmap='plasma')
         plt.show()
-        plt.imshow(flow[0, :, :, 1], cmap='plasma')
+        plt.imshow(flow[:, :, 1], cmap='plasma')
         plt.show()

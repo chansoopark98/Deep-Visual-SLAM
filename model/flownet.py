@@ -100,6 +100,7 @@ class Flownet(tf.keras.Model):
         self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1')
         self.upflow1 = PredictFlow(name='upflow1')
 
+    @tf.function(jit_compile=True)
     def call(self, inputs, training=False):
         left, right = inputs
         model_input = tf.concat([left, right], axis=-1)

@@ -6,6 +6,7 @@ class FlowLearner(object):
         self.config = config
         self.max_flow = config['Train']['max_flow']
 
+    @tf.function(jit_compile=True)
     def sequence_loss(self, y_true, y_pred, gamma=0.8):
         y_pred = tf.cast(y_pred, tf.float32)
         flow_gt = y_true
@@ -30,6 +31,7 @@ class FlowLearner(object):
 
         return flow_loss
 
+    @tf.function(jit_compile=True)
     def forward_step(self, left, right, flow, training=True) -> list[dict, list]:
         pred_flows = self.model([left, right], training=training)
         loss_dict = {

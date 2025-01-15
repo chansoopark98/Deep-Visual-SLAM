@@ -11,7 +11,7 @@ class FlyingChairHandler(object):
     def preprocess(self, left, right, flow) -> tuple:
         left = tf.image.resize(left, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
         right = tf.image.resize(right, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
-        flow = tf.image.resize(flow, self.target_size, method=tf.image.ResizeMethod.BILINEAR)
+        flow = tf.image.resize(flow, self.target_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
         # Adjust resize factor
         rescaled_flow = flow * tf.constant([self.x_factor, self.y_factor], dtype=tf.float32)
