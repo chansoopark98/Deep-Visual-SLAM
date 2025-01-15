@@ -14,8 +14,13 @@ class EndPointError(tf.keras.metrics.Metric):
         self.count = self.add_weight(name='count', initializer='zeros')
 
     def update_state(self, y_true, y_pred):
-        flow_gt, valid = y_true
+        y_pred = tf.cast(y_pred, tf.float32)
+        flow_gt = y_true
         
+        valid_cond_1 = tf.abs(flow_gt[:, :, :, 0]) < 1000
+        valid_cond_2 = tf.abs(flow_gt[:, :, :, 1]) < 1000
+        valid = valid_cond_1 & valid_cond_2
+
         # exclude invalid pixels and extremely large displacements
         mag = tf.sqrt(tf.reduce_sum(flow_gt**2, axis=-1))
         valid = valid & (mag < self.max_flow)
@@ -33,11 +38,20 @@ class EndPointError(tf.keras.metrics.Metric):
         self.count.assign_add(1)
 
     def result(self):
-        count = tf.cast(self.count, dtype=self.epe.dtype)
+        return self.epe / tf.cast(self.count, self.epe.dtype)
+    
+    def get_all_metrics(self):
         result = {
-            'epe': self.epe / count,
-            'u1': self.u1 / count,
-            'u3': self.u3 / count,
-            'u5': self.u5 / count
-        }
+            'epe': self.epe / tf.cast(self.count, self.epe.dtype),
+            'u1': self.u1 / tf.cast(self.count, self.u1.dtype),
+            'u3': self.u3 / tf.cast(self.count, self.u3.dtype),
+            'u5': self.u5 / tf.cast(self.count, self.u5.dtype)
+            }
         return result
+    
+    def reset_states(self):
+        self.epe.assign(0.0)
+        self.u1.assign(0.0)
+        self.u3.assign(0.0)
+        self.u5.assign(0.0)
+        self.count.assign(0.0)

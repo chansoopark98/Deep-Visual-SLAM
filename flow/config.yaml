@@ -1,5 +1,5 @@
 Directory:
-  exp_name: relative_test
+  exp_name: Resnet_flownet_ep300_full
   data_dir: ./flow/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -11,16 +11,16 @@ Dataset:
 Train:
   use_shuffle: True
   train_plot_interval: 100
-  valid_plot_interval: 100
+  valid_plot_interval: 10
   img_w: 496 # 720
   img_h: 368
   max_flow: 400
   clip_norm: 1.0
   beta1: 0.9
   weight_decay: 0.0001
-  batch_size: 4 # 1
-  epoch: 11
-  init_lr: 0.0001
+  batch_size: 16 # 1
+  epoch: 301
+  init_lr: 0.001
   final_lr: 0.00001
   power: 0.9
 
