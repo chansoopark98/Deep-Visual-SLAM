@@ -2,11 +2,13 @@
 
 Deep Learning-Based Monocular Depth Estimation TensorFlow Implementation
 
+![Depth Estimation Result](/assets/depth_result.png)
+
 ## Table of Contents
 
 1. [Setup and Installation](#setup-and-installation)
 2. [Usage](#usage)
-   - [Prepare Dataset](#prepare-dataset)
+   - [Prepare Dataset](#prepare-datasets)
    - [Training](#training)
    - [Evaluation](#evaluation)
 3. [Modules](#modules)
