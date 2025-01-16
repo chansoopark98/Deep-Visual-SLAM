@@ -43,7 +43,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     dummy = tf.ones((480, 640, 3))
     dummy_depth = tf.ones((480, 640, 1))
-    handler = NyuHandler(target_size=(792, 1408))
+    handler = NyuHandler()
     a, b = handler.nyu_crop_resize(dummy, dummy_depth)
     print(a.shape, b.shape)
     plt.imshow(a)

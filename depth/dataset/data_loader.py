@@ -51,7 +51,7 @@ class DataLoader(object):
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'nyu_depth_v2_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
                                      is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
-            handler = NyuHandler(target_size=self.image_size)
+            handler = NyuHandler()
 
             if self.config['Dataset']['Nyu_depth_v2']['train']:
                 dataset.train_dataset = dataset.train_dataset.map(handler.nyu_crop_resize,

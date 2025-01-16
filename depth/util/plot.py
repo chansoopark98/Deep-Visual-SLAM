@@ -28,7 +28,7 @@ def plot_images(image: tf.Tensor,
     if mode == 'relative':
         prefix = 'Relative GT Depth'
         depth_max = 1.0
-    else:
+    elif mode == 'metric':
         prefix = 'Metric GT Depth'
 
     # Extract the first image and depth maps for visualization

@@ -1,6 +1,4 @@
 import tensorflow_datasets as tfds
-from PIL import Image
-import numpy as np
 import os
 import tensorflow as tf
 import json
