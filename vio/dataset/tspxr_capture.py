@@ -100,6 +100,7 @@ class TspxrCapture(object):
         self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'tspxr_capture')
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
+        self.num_source = self.config['Train']['num_source'] # 2
         self.train_data = self.generate_datasets(scene_dirs=self.train_dir, shuffle=True)
         self.valid_data = self.generate_datasets(scene_dirs=self.valid_dir, shuffle=False)
         self.test_data = self.generate_datasets(scene_dirs=self.valid_dir, shuffle=False)
