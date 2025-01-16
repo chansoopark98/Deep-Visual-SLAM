@@ -4,6 +4,7 @@ import subprocess
 from tqdm import tqdm
 import numpy as np
 import tensorflow as tf
+import argparse
 from PIL import Image
 import json
 
@@ -121,6 +122,9 @@ class DimlConverterTFRecord(object):
         return example.SerializeToString()
 
 if __name__ == '__main__':
-    root_dir = '/media/park-ubuntu/park_file/depth_data/'
-    save_dir = './depth/data/'
-    converter = DimlConverterTFRecord(root_dir, save_dir=save_dir)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--root_dir', type=str, default='./diml')
+    parser.add_argument('--save_dir', type=str, default='./')
+    args = parser.parse_args()
+    
+    converter = DimlConverterTFRecord(args.root_dir, save_dir=args.save_dir)

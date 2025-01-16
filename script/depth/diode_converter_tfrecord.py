@@ -2,6 +2,7 @@ import os
 import glob
 import numpy as np
 import tensorflow as tf
+import argparse
 from PIL import Image
 import json
 
@@ -10,8 +11,8 @@ class DiodeConverterTFRecord(object):
         self.root_dir = root_dir
         self.save_dir = os.path.join(self.root_dir, 'diode_tfrecord')
 
-        self.train_dir = os.path.join(self.root_dir, 'train')
-        self.valid_dir = os.path.join(self.root_dir, 'val')
+        self.train_dir = os.path.join(self.root_dir, 'train', 'indoors')
+        self.valid_dir = os.path.join(self.root_dir, 'val', 'indoors')
 
         self.train_tfrecord_path = os.path.join(self.save_dir, 'train.tfrecord')
         self.valid_tfrecord_path = os.path.join(self.save_dir, 'valid.tfrecord')
@@ -83,5 +84,9 @@ class DiodeConverterTFRecord(object):
         return count
 
 if __name__ == '__main__':
-    root_dir = './depth/data/diode/'
-    converter = DiodeConverterTFRecord(root_dir)
+    # add argument parser
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--root_dir', type=str, default='./depth/data/diode/')
+    args = parser.parse_args()
+
+    converter = DiodeConverterTFRecord(args.root_dir)
