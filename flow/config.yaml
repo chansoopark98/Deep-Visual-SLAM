@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Resnet_FlowV2_ep30_full_augment
+  exp_name: Resnet_FlowV2_ep50_soft_augment_lr1e-4_norm1.0_decay1e-4
   data_dir: ./flow/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -10,16 +10,16 @@ Dataset:
 
 Train:
   use_shuffle: True
-  train_plot_interval: 100
+  train_plot_interval: 200
   valid_plot_interval: 10
   img_w: 496 # 720
   img_h: 368
   max_flow: 400
-  clip_norm: 5.0
+  clip_norm: 1.0
   beta1: 0.9
   weight_decay: 0.0001
-  batch_size: 8 # 1
-  epoch: 31
+  batch_size: 16 # 1
+  epoch: 51
   init_lr: 0.0001
   final_lr: 0.00001
   power: 0.9
@@ -27,4 +27,4 @@ Train:
 Experiment:
   gpus: [1] # [0, 1]
   gpu_vram: 24000
-  gpu_vram_factor: 0.8
+  gpu_vram_factor: 0.9

@@ -175,12 +175,12 @@ class DataLoader(object):
             right = tf.image.adjust_hue(right, delta)
 
         # Salt-and-Pepper noise
-        if tf.random.uniform([]) > 0.1:
-            left, right, flow = self.salt_and_pepper_noise(left, right, flow)
+        # if tf.random.uniform([]) > 0.1:
+        #     left, right, flow = self.salt_and_pepper_noise(left, right, flow)
 
         # random crop
-        if tf.random.uniform([]) > 0.5:
-            left, right, flow = self.random_crop(left, right, flow)
+        # if tf.random.uniform([]) > 0.5:
+        #     left, right, flow = self.random_crop(left, right, flow)
 
         # flip left-right
         if tf.random.uniform([]) > 0.5:

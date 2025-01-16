@@ -38,7 +38,11 @@ class Flownet(tf.keras.Model):
         self.image_width = image_shape[1]
         self.batch_size = batch_size
 
-        self.encoder = resnet_18()
+        # self.encoder = resnet_18()
+        self.encoder = Resnet(image_shape=(self.image_height, self.image_width, 6),
+                              batch_size=self.batch_size,
+                              pretrained=True,
+                              prefix='flow_resnet').build_model()
 
         filters = [16, 32, 64, 128, 256]
 
