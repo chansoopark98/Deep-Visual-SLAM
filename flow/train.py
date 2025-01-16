@@ -228,7 +228,7 @@ class Trainer(object):
             with self.valid_summary_writer.as_default():
                 metrics_dict = self.valid_flow_metrics.get_all_metrics()
                 for metric_name, metric_value in metrics_dict.items():
-                    tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=current_step)
+                    tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=epoch)
 
             if epoch % 5 == 0:
                 self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],

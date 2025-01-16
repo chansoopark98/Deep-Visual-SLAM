@@ -7,7 +7,7 @@ except:
 class Resnet:
     def __init__(self, image_shape, batch_size, pretrained=True, prefix='base'):
         """
-        Initializes the MobilenetV3Large class.
+        Initializes the Resnet18 class.
 
         Args:
             image_shape (tuple): Input image shape (height, width, channels).
@@ -24,7 +24,7 @@ class Resnet:
 
     def build_model(self) -> tf.keras.Model:
         """
-        Builds a MobileNetV3Large-based functional model with skip connections.
+        Builds a Resnet-based functional model with skip connections.
 
         Returns:
             tf.keras.Model: Functional model.
@@ -35,16 +35,17 @@ class Resnet:
 
         if self.pretrained:
             pretrained_weights = './assets/weights/resnet18.h5'
-            base_model.load_weights(pretrained_weights)
+            base_model.load_weights(pretrained_weights, by_name=True, skip_mismatch=True)
         
-        base_model.summary()
+        for layer in base_model.layers:
+            layer._name = f"{self.prefix}_{layer.name}"        
 
         layer_names = [
-            "relu",
-            "activation_3",
-            "activation_7",
-            "activation_11",
-            "activation_15",
+            f"{self.prefix}_activation_15",
+            f"{self.prefix}_activation_11",
+            f"{self.prefix}_activation_7",
+            f"{self.prefix}_activation_3",
+            f"{self.prefix}_relu",
         ]
 
         outputs = [base_model.get_layer(name).output for name in layer_names]
@@ -52,30 +53,32 @@ class Resnet:
         partial_model = tf.keras.Model(
             inputs=base_model.input,
             outputs=outputs,
-            name=f"{self.prefix}_partial"
+            name=f"{self.prefix}_partial_resnet18"
         )
-
-        inputs = tf.keras.Input(shape=self.image_shape, name="input_image")
+                
         features = partial_model(inputs)
 
-        x = features[-1]  # block6o_add (H/32)
+        x = features[0]  # block6o_add (H/32)
 
         skips = [
-            features[3],  # block5h_add (H/16)
+            features[1],  # block5h_add (H/16)
             features[2],  # block3d_add (H/8)
-            features[1],  # block2d_add (H/4)
-            features[0]   # block1b_add (H/2)
+            features[3],  # block2d_add (H/4)
+            features[4]   # block1b_add (H/2)
         ]
 
-        return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_model")
+        return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_resnet18")
 
 if __name__ == '__main__':
-    image_shape = (480, 640, 3)
+    image_shape = (480, 640, 6)
     batch_size = 4
     model_builder = Resnet(image_shape=image_shape, batch_size=batch_size)
     model = model_builder.build_model()
-    model.summary()
+    # model.summary()
     # model.save(f'./assets/weights/backbone_resnet18.h5')
-    tf.keras.models.save_model(model, 'assets/weigths/backbone_resnet18.h5')
-    encoder = tf.keras.models.load_model('assets/weigths/backbone_resnet18.h5')
-    encoder.summary()
+    # tf.keras.models.save_model(model, 'assets/weigths/backbone_resnet18.h5')
+    # encoder = tf.keras.models.load_model('assets/weigths/backbone_resnet18.h5')
+    # encoder.summary()
+    # model.summary()
+    test = model(tf.random.normal((batch_size, *image_shape)))
+    print(f'outputs {len(test)}')
