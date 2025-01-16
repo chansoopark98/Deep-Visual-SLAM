@@ -57,8 +57,8 @@ class DepthMetrics(tf.keras.metrics.Metric):
 
         # clip by value (to avoid NaN)
         epsilon = 1e-6
-        y_true = tf.clip_by_value(y_true, epsilon, 1e6)
-        y_pred = tf.clip_by_value(y_pred, epsilon, 1e6)
+        y_true = tf.clip_by_value(y_true, epsilon, 100.)
+        y_pred = tf.clip_by_value(y_pred, epsilon, 100.)
 
         # thresh = max(gt/pred, pred/gt)
         thresh = tf.maximum(y_true / y_pred, y_pred / y_true)
