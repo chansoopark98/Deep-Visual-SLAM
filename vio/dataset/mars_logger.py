@@ -3,13 +3,18 @@ import glob
 import pandas as pd
 import numpy as np
 import cv2
-from .utils import resample_imu
+try:
+    from .utils import resample_imu
+except:
+    from utils import resample_imu
 
 class MarsLoggerHandler(object):
     def __init__(self, config):
         self.config = config
         self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'mars_logger')
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        self.num_source = self.config['Train']['num_source'] # 2
+        self.imu_seq_len = self.config['Train']['imu_seq_len'] # 10
         self.original_image_size = (3000, 4000)
         self.save_image_size = (3000 // 4, 4000 // 4)
         self.train_dir = os.path.join(self.root_dir, 'train')
@@ -17,31 +22,6 @@ class MarsLoggerHandler(object):
         self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
         self.valid_data = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
 
-    # def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray) -> int:
-    #     video_file = os.path.join(scene_dir, 'movie.mp4')
-    #     rgb_save_path = os.path.join(scene_dir, 'rgb')
-        
-    #     resized_intrinsic = self._rescale_intrinsic(current_intrinsic, self.save_image_size, self.original_image_size)
-        
-    #     if not os.path.exists(rgb_save_path):
-    #         print(f'Extracting video file: {video_file}')
-    #         os.makedirs(rgb_save_path, exist_ok=True)
-    #         idx = 0
-    #         cap = cv2.VideoCapture(video_file)    
-
-    #         while cap.isOpened():
-    #             ret, frame = cap.read()
-    #             if not ret:
-    #                 break
-    #             rgb_name = os.path.join(rgb_save_path, f'rgb_{str(idx).zfill(6)}.jpg')
-    #             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    #             frame = cv2.resize(frame, (self.save_image_size[1], self.save_image_size[0]))
-    #             cv2.imwrite(rgb_name, frame)
-    #             idx += 1
-    #         cap.release()
-    #         cv2.destroyAllWindows()
-    #     return len(glob.glob(os.path.join(rgb_save_path, '*.jpg'))), resized_intrinsic
-    
     def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray, camera_data: pd.DataFrame) -> int:
         video_file = os.path.join(scene_dir, 'movie.mp4')
         metadata_file = os.path.join(scene_dir, 'movie_metadata.csv')
@@ -119,46 +99,48 @@ class MarsLoggerHandler(object):
         length, resized_intrinsic = self._extract_video(scene_dir, raw_intrinsic, camera_data)
 
         intrinsic = self._rescale_intrinsic(resized_intrinsic, self.image_size, self.save_image_size)
-        step = 1
-        imu_seq = 8
+    
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
         samples = []
-        for t in range(step, length - step):
-            # -------------------------
-            # 1) t-step, t, t+step
-            # -------------------------
-            t_left_idx = t - step
-            t_right_idx = t + step
+        for t in range(self.num_source, length - self.num_source):
+            left_images = []
+            right_images = []
+            left_imus = []
+            right_imus = []
 
-            time_left = camera_data.loc[t_left_idx, 'Timestamp[nanosec]']
-            time_curr = camera_data.loc[t, 'Timestamp[nanosec]']
-            time_right = camera_data.loc[t_right_idx, 'Timestamp[nanosec]']
+            for step in range(1, self.num_source + 1):
+                left_images.append(rgb_files[t - step])
+                right_images.append(rgb_files[t + step])
+                
+                t_left_idx = t - step
+                t_right_idx = t + step
+                time_left = camera_data.loc[t_left_idx, 'Timestamp[nanosec]']
+                time_curr = camera_data.loc[t, 'Timestamp[nanosec]']
+                time_right = camera_data.loc[t_right_idx, 'Timestamp[nanosec]']
 
-            mask_left = (imu_data['Timestamp[nanosec]'] >= time_left) & (imu_data['Timestamp[nanosec]'] < time_curr)
-            left_imu_df = imu_data[mask_left]
+                mask_left = (imu_data['Timestamp[nanosec]'] >= time_left) & (imu_data['Timestamp[nanosec]'] < time_curr)
+                left_imu_df = imu_data[mask_left]
 
-            mask_right = (imu_data['Timestamp[nanosec]'] >= time_curr) & (imu_data['Timestamp[nanosec]'] < time_right)
-            right_imu_df = imu_data[mask_right]
+                mask_right = (imu_data['Timestamp[nanosec]'] >= time_curr) & (imu_data['Timestamp[nanosec]'] < time_right)
+                right_imu_df = imu_data[mask_right]
 
-            left_imu_array = left_imu_df.iloc[:, 1:].values
-            right_imu_array = right_imu_df.iloc[:, 1:].values
+                left_imu_array = left_imu_df.iloc[:, 1:].values
+                right_imu_array = right_imu_df.iloc[:, 1:].values
 
-            if left_imu_array.shape[0] < 4:
-                continue
-            if right_imu_array.shape[0] < 4:
-                continue
+                left_imu_resampled = resample_imu(left_imu_array, self.imu_seq_len)
+                right_imu_resampled = resample_imu(right_imu_array, self.imu_seq_len)
 
-            left_imu_resampled = resample_imu(left_imu_array, imu_seq)
-            right_imu_resampled = resample_imu(right_imu_array, imu_seq)
+                left_imus.append(left_imu_resampled)
+                right_imus.append(right_imu_resampled)
 
             sample = {
-                'source_left': rgb_files[t_left_idx],
-                'target_image': rgb_files[t],
-                'source_right': rgb_files[t_right_idx],
-                'imu_left': left_imu_resampled,
-                'imu_right': right_imu_resampled,
-                'intrinsic': intrinsic
+                'source_left': left_images, # List [str, str]]
+                'target_image': rgb_files[t], # str
+                'source_right': right_images, # List [str, str]]
+                'imu_left': left_imus, # List [np.ndarray, np.ndarray] # [(imu_seq_len, 6), (imu_seq_len, 6)]
+                'imu_right': right_imus, # List [np.ndarray, np.ndarray] # [(imu_seq_len, 6), (imu_seq_len, 6)]
+                'intrinsic': intrinsic # np.ndarray (3, 3)
             }
             samples.append(sample)
         return samples
@@ -188,9 +170,14 @@ if __name__ == '__main__':
         'Train': {
             'batch_size': 1,
             'use_shuffle': True,
+            'num_source': 2,
+            'imu_seq_len': 10,
             'img_h': 720,
             'img_w': 1280
         }
     }
-    tspxr_capture = MarsLoggerHandler(config)
+    dataset = MarsLoggerHandler(config)
+    data_len = dataset.train_data.shape[0]
+    for idx in range(data_len):
+        print(dataset.train_data[idx])
     
