@@ -1,4 +1,6 @@
 tensorflow==2.12.1
+tensorflow_datasets
+joblib
 tqdm
 pyyaml
 matplotlib

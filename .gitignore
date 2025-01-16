@@ -5,18 +5,31 @@ __pycache__/
 
 # C extensions
 *.so
+
+# files
 *.h5
+
+# tensorboard log
 /tensorboard/
+
+# Assets
+/assets/weights/
+
+# depth ignore files and directories 
 /depth/data/*
 /depth/weights/
 /depth/tensorboard/
+/depth/results/
+
+# flow ignore files and directories
 /flow/data/*
 /flow/weights/
 /flow/tensorboard/
+
+# vio ignore files and directories
 /vio/data/
 /vio/weights/
 /vio/tensorboard/
-/assets/weights/
 
 # Distribution / packaging
 .Python
