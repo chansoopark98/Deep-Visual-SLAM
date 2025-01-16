@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from joblib import Parallel, delayed
+from pylab import count_nonzero, clip
 
 IMG_WIDTH = 1024
 IMG_HEIGHT = 768
@@ -16,7 +17,7 @@ def tone_map(rgb, entity_id_map):
     Adapted from:
     https://github.com/apple/ml-hypersim/blob/main/code/python/tools/scene_generate_images_tonemap.py
     """
-    from pylab import count_nonzero, clip
+    
     gamma = 1.0 / 2.2  # standard gamma correction exponent
     inv_gamma = 1.0 / gamma
     percentile = 90
