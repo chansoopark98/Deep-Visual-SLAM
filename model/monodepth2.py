@@ -319,7 +319,7 @@ class PoseNet(tf.keras.Model):
         return: [B, 1, 6]
         """
         # 1) ResNet 인코더
-        x, _ = self.encoder(inputs, training=training) 
+        x = self.encoder(inputs, training=training) 
         # x: 최종 conv5_x 특징맵, shape [B, H/32, W/32, 512]
 
         # 2) pose_conv0 -> pose_conv1 -> pose_conv2 -> pose_conv3

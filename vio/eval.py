@@ -57,12 +57,19 @@ class EvalTrajectory(Learner):
         self.pred_pose_list = []
         self.intrinsic_list = []
 
-    def update_state(self, images: list, imus: tf.Tensor, intrinsic: tf.Tensor):
+    def update_state(self, ref_images, tgt_image, intrinsic: tf.Tensor):
         """
         images: List of RGB images
         imus: List of IMU data
         intrinsic: Intrinsic matrix
         """
+        left_images = ref_images[:, :self.num_source] # [B, num_source, H, W, 3]
+        right_images = ref_images[:, self.num_source:] # [B, num_source, H, W, 3]
+
+        left_image = left_images[:, 0] # [B, H, W, 3]
+        right_image = right_images[:, 0] # [B, H, W, 3]
+        images = tf.concat([left_image, tgt_image, right_image], axis=-1) # [B, 3, H, W, 3]
+
         batch_disps, batch_poses = self.model(images, training=False)
         # list comprehension으로 변환
         batch_disps = [tf.cast(disp, tf.float32) for disp in batch_disps]
@@ -90,6 +97,8 @@ class EvalTrajectory(Learner):
             self.pred_depth_list.append(pred_depth)
             self.pred_pose_list.append(pred_pose)
             self.intrinsic_list.append(current_intrinsic)
+
+            del pred_depth, pred_pose, current_intrinsic
 
     def depth_to_pointcloud(self, depth, pose, intrinsic):
         K = intrinsic
@@ -136,7 +145,7 @@ class EvalTrajectory(Learner):
 
         return points_world_sampled
 
-    def eval_plot(self, is_show: bool = True):
+    def eval_plot(self, is_show: bool =False):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         
@@ -156,20 +165,6 @@ class EvalTrajectory(Learner):
             T_global = T_global @ T_local
             
             intrinsic = self.intrinsic_list[i]
-            # # 카메라 방향 표시 (z축 기준)
-            # origin = T_global[:3, 3]
-            # z_axis = T_global[:3, 2]  # 카메라 z축 방향
-            # arrow_len = 0.5
-            # arrow_end = origin + z_axis * arrow_len
-
-            # ax.quiver(
-            #     origin[0], origin[1], origin[2],
-            #     arrow_end[0] - origin[0],
-            #     arrow_end[1] - origin[1],
-            #     arrow_end[2] - origin[2],
-            #     color='blue', length=arrow_len,
-            #     normalize=False
-            # )
 
             if i % int(self.batch_size * 4) == 0:
                 pc.plot_camera(ax,
@@ -221,16 +216,25 @@ class EvalTrajectory(Learner):
         ax.set_zlabel('Z')
         ax.set_title('Visual Odometry: 3D Trajectory and Pointcloud')
         fig.tight_layout()
+        
+        self.clear_state()
 
+        # 마지막에 추가
         if is_show:
             plt.show()
         else:
             buf = io.BytesIO()
             fig.savefig(buf, format='png')
             buf.seek(0)
-            plt.close()
+            plt.close(fig)  # 플롯 객체 닫기
             image = tf.image.decode_png(buf.getvalue(), channels=4)
-            return image
+            buf.close()  # BytesIO 닫기
+            return tf.expand_dims(image, 0)
+        
+    def clear_state(self):
+        self.pred_depth_list.clear()
+        self.pred_pose_list.clear()
+        self.intrinsic_list.clear()
         
 
 if __name__ == '__main__':
@@ -284,7 +288,7 @@ if __name__ == '__main__':
     model_input_shape = (config['Train']['batch_size'], config['Train']['img_h'], config['Train']['img_w'], 9)
     model.build(model_input_shape)
     _ = model(tf.random.normal(model_input_shape), training=False)
-    model.load_weights('./weights/resnet_mixedPrecision_Step=2/epoch_35_model.h5')
+    # model.load_weights('./weights/resnet_mixedPrecision_Step=2/epoch_35_model.h5')
 
     eval_tool = EvalTrajectory(model=model, config=config)
 
@@ -292,8 +296,8 @@ if __name__ == '__main__':
 
     valid_tqdm = tqdm(data_loader.valid_dataset, total=data_loader.num_valid_samples)
     valid_tqdm.set_description('Validation || ')
-    for idx, (images, imus, intrinsic) in enumerate(valid_tqdm):
-        eval_tool.update_state(images, imus, intrinsic)
+    for idx, (ref_images, target_image, imus, intrinsic) in enumerate(valid_tqdm):
+        eval_tool.update_state(ref_images, target_image, intrinsic)
         # if idx > 100:
         #     break
     

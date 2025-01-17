@@ -101,6 +101,7 @@ class DataLoader(object):
         image = tf.cast(image, tf.uint8)
         return image
     
+    @tf.function()
     def train_preprocess(self, sample: dict) -> tuple:
         # read images
         left_images = tf.map_fn(self._read_image, sample['source_left'], fn_output_signature=tf.uint8)

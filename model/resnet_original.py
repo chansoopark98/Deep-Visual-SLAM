@@ -23,28 +23,40 @@ def basic_block_down(inputs, num_channels, kernel_size, name):
     x = tf.keras.layers.Activation('relu')(x)
     return x
          
-def resnet_18(inputs):
+def resnet_18(inputs, build_partial=True):
     x = tf.keras.layers.ZeroPadding2D(padding=(3,3), name='pad')(inputs)
     x = tf.keras.layers.Conv2D(filters=64, kernel_size=7, strides=2, padding='valid', activation='linear', use_bias=False, name='conv1')(x)
     x = tf.keras.layers.BatchNormalization(momentum=BATCH_NORM_DECAY, epsilon=1e-5, name='bn1')(x)
     x = tf.keras.layers.Activation('relu', name='relu')(x)
+
+    skip1 = x # H/2
+
     x = tf.keras.layers.ZeroPadding2D(padding=(1,1), name='pad1')(x)
     x = tf.keras.layers.MaxPool2D(pool_size=3, strides=2, padding='valid', name='maxpool')(x)
 
     x = basic_block(x, num_channels=64, kernel_size=3, num_blocks=2, skip_blocks=[], name='layer1')
 
+    skip2 = x # H/4
+
     x = basic_block_down(x, num_channels=128, kernel_size=3, name='layer2')
     x = basic_block(x, num_channels=128, kernel_size=3, num_blocks=2, skip_blocks=[0], name='layer2')
+
+    skip3 = x # H/8
 
     x = basic_block_down(x, num_channels=256, kernel_size=3, name='layer3')
     x = basic_block(x, num_channels=256, kernel_size=3, num_blocks=2, skip_blocks=[0], name='layer3')
 
+    skip4 = x # H/16
+
     x = basic_block_down(x, num_channels=512, kernel_size=3, name='layer4')
     x = basic_block(x, num_channels=512, kernel_size=3, num_blocks=2, skip_blocks=[0], name='layer4')
 
-    x = tf.keras.layers.GlobalAveragePooling2D(name='avgpool')(x)
-    x = tf.keras.layers.Dense(units=1000, use_bias=True, activation='linear', name='fc')(x)
-    return x
+    if build_partial:
+        return x, [skip4, skip3, skip2, skip1]
+    else:
+        x = tf.keras.layers.GlobalAveragePooling2D(name='avgpool')(x)
+        x = tf.keras.layers.Dense(units=1000, use_bias=True, activation='linear', name='fc')(x)
+        return x
     
 
 def resnet_34(inputs):
