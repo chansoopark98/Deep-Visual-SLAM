@@ -30,8 +30,8 @@ class Resnet:
             tf.keras.Model: Functional model.
         """
         inputs = tf.keras.Input(shape=self.image_shape)
-        outputs = resnet_18(inputs=inputs)
-        base_model = tf.keras.Model(inputs=inputs, outputs=outputs)
+        outputs = resnet_18(inputs=inputs, build_partial=True) # x, [skip4, skip3, skip2, skip1]
+        base_model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet18")
 
         if self.pretrained:
             pretrained_weights = './assets/weights/resnet18.h5'
@@ -40,34 +40,36 @@ class Resnet:
         for layer in base_model.layers:
             layer._name = f"{self.prefix}_{layer.name}"        
 
-        layer_names = [
-            f"{self.prefix}_activation_15",
-            f"{self.prefix}_activation_11",
-            f"{self.prefix}_activation_7",
-            f"{self.prefix}_activation_3",
-            f"{self.prefix}_relu",
-        ]
+        return base_model
+    
+        # layer_names = [
+        #     f"{self.prefix}_activation_15",
+        #     f"{self.prefix}_activation_11",
+        #     f"{self.prefix}_activation_7",
+        #     f"{self.prefix}_activation_3",
+        #     f"{self.prefix}_relu",
+        # ]
 
-        outputs = [base_model.get_layer(name).output for name in layer_names]
+        # outputs = [base_model.get_layer(name).output for name in layer_names]
 
-        partial_model = tf.keras.Model(
-            inputs=base_model.input,
-            outputs=outputs,
-            name=f"{self.prefix}_partial_resnet18"
-        )
+        # partial_model = tf.keras.Model(
+        #     inputs=base_model.input,
+        #     outputs=outputs,
+        #     name=f"{self.prefix}_partial_resnet18"
+        # )
                 
-        features = partial_model(inputs)
+        # features = partial_model(inputs)
 
-        x = features[0]  # block6o_add (H/32)
+        # x = features[0]  # block6o_add (H/32)
 
-        skips = [
-            features[1],  # block5h_add (H/16)
-            features[2],  # block3d_add (H/8)
-            features[3],  # block2d_add (H/4)
-            features[4]   # block1b_add (H/2)
-        ]
+        # skips = [
+        #     features[1],  # block5h_add (H/16)
+        #     features[2],  # block3d_add (H/8)
+        #     features[3],  # block2d_add (H/4)
+        #     features[4]   # block1b_add (H/2)
+        # ]
 
-        return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_resnet18")
+        # return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_resnet18")
 
 if __name__ == '__main__':
     image_shape = (480, 640, 6)

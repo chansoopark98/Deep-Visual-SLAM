@@ -13,7 +13,7 @@ class Learner(object):
 
         # 예시 하이퍼파라미터
         self.num_scales = 4
-        self.num_source = 2
+        self.num_source = self.config['Train']['num_source'] # 2
         
         self.smoothness_ratio = self.config['Train']['smoothness_ratio'] # 0.001
         self.auto_mask = self.config['Train']['auto_mask'] # True
@@ -123,25 +123,30 @@ class Learner(object):
 
         # 최종 (B, 3, 3)으로 스택
         intrinsics_rescaled = tf.stack([row0, row1, row2], axis=1)
-
         return intrinsics_rescaled
         
+    def forward_step(self, ref_images, tgt_image, intrinsic, training=True) -> tf.Tensor:
+        """
+        ref_images: (batch_size, num_source * 2, img_h, img_w, 3)
+            left_images: ref_images[:, :num_source]
+            right_images: ref_images[:, num_source:]
 
-    def forward_step(self, images, intrinsic, training=True) -> tf.Tensor:
-        # 1. Forward pass
-        pred_disps, pred_poses = self.model(images, training=training)
-        
-        pred_poses = tf.cast(pred_poses, tf.float32)
-        
-        # 2. Parse input images
-        left_image = images[..., :3]
-        tgt_image = images[..., 3:6]
-        right_image = images[..., 6:9]
-        src_image_stack = tf.concat([left_image, right_image], axis=3)
+        tgt_image: (batch_size, img_h, img_w, 3)
 
-        # 3. Multi-scale photometric + auto-mask + smoothness
-        H = tf.shape(tgt_image)[1]
-        W = tf.shape(tgt_image)[2]
+        # TODO: IMU 추가
+        Expected shape :
+        imus: (batch_size, imu_seq_len, 12)
+           left_imus: imug[:, :num_source]
+           right_imus: imug[:, :, num_source:]
+
+        intrinsic: (batch_size, 3, 3)
+        """
+        left_images = ref_images[:, :self.num_source] # [B, num_source, H, W, 3]
+        right_images = ref_images[:, self.num_source:] # [B, num_source, H, W, 3]
+
+        # TODO
+        # left_imus = imus[:, :self.num_source] # [B, num_source, imu_seq_len, 12]
+        # right_imus = imus[:, self.num_source:] # [B, num_source, imu_seq_len, 12]
 
         pixel_losses = 0.
         smooth_losses = 0.
@@ -149,101 +154,136 @@ class Learner(object):
 
         pred_depths = []
         pred_auto_masks = []
-        warped_images = [] # [[B, H, W, 3], [B, H, W, 3]] # left to target, right to target
-        warped_losses = [] # [[B, H, W, 1], [B, H, W, 1]] # left to target, right to target
+        
+        left_warped = []
+        right_warped = []
 
-        for s in range(self.num_scales):
-            # disp_s shape => [B, H/(2^s), W/(2^s), 1]
-            disp_s = pred_disps[s]
-            disp_s = tf.cast(disp_s, tf.float32)
-            # target scaled => nearest or bilinear, here nearest
-            tgt_scaled = tf.image.resize(tgt_image,
-                                         [H // (2**s), W // (2**s)],
-                                          method=tf.image.ResizeMethod.BILINEAR)
-            # src scaled
-            src_scaled = tf.image.resize(src_image_stack,
-                                         [H // (2**s), W // (2**s)],
-                                          method=tf.image.ResizeMethod.BILINEAR)
+        left_warped_losses = []
+        right_warped_losses = []
+        
 
-            # 3.1) depth = disp->depth
-            depth_s = self.disp_to_depth(disp_s, self.min_depth, self.max_depth)
-            pred_depths.append(depth_s)
+        for i in range(self.num_source):
+            left_image = left_images[:, i]  # [B, H, W, 3]
+            right_image = right_images[:, i]  # [B, H, W, 3]
 
-            # 3.2) reprojection loss
-            reprojection_list = []
-            for i in range(self.num_source):  # 0=left,1=right
-                # src_i
-                curr_src = src_scaled[..., i*3:(i+1)*3]
-                # pose => [B,num_source,6]
-                curr_pose = pred_poses[:, i, :]  # shape [B,6]
-                # warp
-                # intrinsics_simplified = ...
-                resized_intrinsics = self.rescale_intrinsics(intrinsic, H, W, H // (2**s), W // (2**s))
+            input_images = tf.concat([left_image, tgt_image, right_image], axis=3)  # [B, H, W, 9]
 
-                curr_proj_image = projective_inverse_warp(
-                    curr_src,
-                    tf.squeeze(depth_s, axis=3),
-                    curr_pose,
-                    intrinsics=resized_intrinsics,
-                    invert=(i==0),
-                    
-                )
-                # photometric
-                curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, tgt_scaled)
+            pred_disps, pred_poses = self.model(input_images, training=training)
+            pred_poses = tf.cast(pred_poses, tf.float32)
 
-                # for visualization
-                if s == 0:
-                    warped_images.append(curr_proj_image)
-                    warped_losses.append(curr_reproj_loss)
+            # Parse input images
+            src_image_stack = tf.concat([left_image, right_image], axis=3)
 
-                # for loss
-                reprojection_list.append(curr_reproj_loss)
+            # Multi-scale photometric + auto-mask + smoothness
+            H = tf.shape(tgt_image)[1]
+            W = tf.shape(tgt_image)[2]
 
-            # shape => [B, H/(2^s), W/(2^s), num_source]
-            reprojection_losses = tf.concat(reprojection_list, axis=3)
+            for s in range(self.num_scales):
+                # disp_s shape => [B, H/(2^s), W/(2^s), 1]
+                disp_s = pred_disps[s]
+                disp_s = tf.cast(disp_s, tf.float32)
+                # target scaled => nearest or bilinear, here nearest
+                tgt_scaled = tf.image.resize(tgt_image,
+                                            [H // (2**s), W // (2**s)],
+                                            method=tf.image.ResizeMethod.BILINEAR)
+                # src scaled
+                src_scaled = tf.image.resize(src_image_stack,
+                                            [H // (2**s), W // (2**s)],
+                                            method=tf.image.ResizeMethod.BILINEAR)
 
-            # 3.3) auto_mask
-            combined = reprojection_losses
-            if self.auto_mask:
-                identity_list = []
-                for i in range(self.num_source):
-                    # identity reprojection => src==tgt scaled
-                    identity_loss = self.compute_reprojection_loss(
-                        src_scaled[..., i*3:(i+1)*3], tgt_scaled
+                # 3.1) depth = disp->depth
+                depth_s = self.disp_to_depth(disp_s, self.min_depth, self.max_depth)
+                pred_depths.append(depth_s)
+
+                # 3.2) reprojection loss
+                reprojection_list = []
+
+                for i in range(self.num_source):  # 0=left,1=right
+                    # src_i
+                    curr_src = src_scaled[..., i*3:(i+1)*3]
+                    # pose => [B,num_source,6]
+                    curr_pose = pred_poses[:, i, :]  # shape [B,6]
+                    # warp
+                    # intrinsics_simplified = ...
+                    resized_intrinsics = self.rescale_intrinsics(intrinsic, H, W, H // (2**s), W // (2**s))
+
+                    curr_proj_image = projective_inverse_warp(
+                        curr_src,
+                        tf.squeeze(depth_s, axis=3),
+                        curr_pose,
+                        intrinsics=resized_intrinsics,
+                        invert=(i==0),
+                        
                     )
-                    identity_list.append(identity_loss)
-                identity_losses = tf.concat(identity_list, axis=3)
-                # random noise
-                identity_losses += tf.random.normal(tf.shape(identity_losses), stddev=1e-5)
+                    # photometric
+                    curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, tgt_scaled)
 
-                combined = tf.concat([identity_losses, reprojection_losses], axis=3)
+                    # for visualization
+                    if s == 0:
+                        if i == 0:
+                            left_warped.append(curr_proj_image)
+                            left_warped_losses.append(curr_reproj_loss)
+                        else:
+                            right_warped.append(curr_proj_image)
+                            right_warped_losses.append(curr_reproj_loss)
 
-                # For visualization
-                if s == 0:
-                    pred_auto_masks.append(tf.expand_dims(tf.cast(tf.argmin(combined, axis=3) > 1,tf.float32) * 255, -1))
+                    # for loss
+                    reprojection_list.append(curr_reproj_loss)
 
-            # min across channel => pick best
-            reprojection_loss = tf.reduce_mean(tf.reduce_min(combined, axis=3))
+                # shape => [B, H/(2^s), W/(2^s), num_source]
+                reprojection_losses = tf.concat(reprojection_list, axis=3)
 
-            # 3.4) smoothness
-            smooth_loss = self.get_smooth_loss(disp_s, tgt_scaled)
-            # scale 보정 => smooth_loss /= (2^s)
-            smooth_loss = smooth_loss / (2.0**s)
+                # 3.3) auto_mask
+                combined = reprojection_losses
+                if self.auto_mask:
+                    identity_list = []
+                    for i in range(self.num_source):
+                        # identity reprojection => src==tgt scaled
+                        identity_loss = self.compute_reprojection_loss(
+                            src_scaled[..., i*3:(i+1)*3], tgt_scaled
+                        )
+                        identity_list.append(identity_loss)
+                    identity_losses = tf.concat(identity_list, axis=3)
+                    # random noise
+                    identity_losses += tf.random.normal(tf.shape(identity_losses), stddev=1e-5)
 
-            scale_total_loss = reprojection_loss + self.smoothness_ratio * smooth_loss
-            total_loss += scale_total_loss
+                    combined = tf.concat([identity_losses, reprojection_losses], axis=3)
 
-            pixel_losses += reprojection_loss
-            smooth_losses += smooth_loss
+                    # For visualization
+                    if s == 0:
+                        pred_auto_masks.append(tf.expand_dims(tf.cast(tf.argmin(combined, axis=3) > 1,tf.float32) * 255, -1))
 
-        # visualizations output
+                # min across channel => pick best
+                reprojection_loss = tf.reduce_mean(tf.reduce_min(combined, axis=3))
+
+                # 3.4) smoothness
+                smooth_loss = self.get_smooth_loss(disp_s, tgt_scaled)
+                # scale 보정 => smooth_loss /= (2^s)
+                smooth_loss = smooth_loss / (2.0**s)
+
+                scale_total_loss = reprojection_loss + self.smoothness_ratio * smooth_loss
+                total_loss += scale_total_loss
+
+                pixel_losses += reprojection_loss
+                smooth_losses += smooth_loss
+
+        left_warped = tf.stack(left_warped, axis=1) # [B, num_source, H, W, 3]
+        right_warped = tf.stack(right_warped, axis=1) # [B, num_source, H, W, 3]
+        left_warped_losses = tf.stack(left_warped_losses, axis=1) # [B, num_source, H, W, 1]
+        right_warped_losses = tf.stack(right_warped_losses, axis=1) # [B, num_source, H, W, 1]
+
+        
+        pred_auto_masks = tf.stack(pred_auto_masks, axis=1) # [B, num_source, H, W, 1]    
+
         vis_outputs = {
-            'warped_image': warped_images,
-            'warped_loss': warped_losses,
-            'target': tgt_image,
-            'left_image': left_image,
-            'right_image': right_image,
-            'mask': pred_auto_masks,
+            'left_warped': left_warped, # [B, num_source, H, W, 3]
+            'right_warped': right_warped, # [B, num_source, H, W, 3]
+            'left_warped_losses': left_warped_losses, # [B, num_source, H, W, 1]
+            'right_warped_losses': right_warped_losses, # [B, num_source, H, W, 1]
+            'target': tgt_image, # [B, H, W, 3]
+            'left_images': left_images, # [B, num_source, H, W, 3]
+            'right_images': right_images, # [B, num_source, H, W, 3]
+            'masks': pred_auto_masks, # [B, num_source, H, W, 1]
         }
             
         # 평균 내기
@@ -253,3 +293,131 @@ class Learner(object):
         smooth_losses = smooth_losses / num_scales_f
 
         return total_loss, pixel_losses, smooth_losses, pred_depths, vis_outputs
+
+"""
+# # 1. Forward pass
+        # pred_disps, pred_poses = self.model(images, training=training)
+        
+        # pred_poses = tf.cast(pred_poses, tf.float32)
+        
+        # # 2. Parse input images
+        # left_image = images[..., :3]
+        # tgt_image = images[..., 3:6]
+        # right_image = images[..., 6:9]
+        # src_image_stack = tf.concat([left_image, right_image], axis=3)
+
+        # # 3. Multi-scale photometric + auto-mask + smoothness
+        # H = tf.shape(tgt_image)[1]
+        # W = tf.shape(tgt_image)[2]
+
+        # pixel_losses = 0.
+        # smooth_losses = 0.
+        # total_loss = 0.
+
+        # pred_depths = []
+        # pred_auto_masks = []
+        # warped_images = [] # [[B, H, W, 3], [B, H, W, 3]] # left to target, right to target
+        # warped_losses = [] # [[B, H, W, 1], [B, H, W, 1]] # left to target, right to target
+
+        # for s in range(self.num_scales):
+        #     # disp_s shape => [B, H/(2^s), W/(2^s), 1]
+        #     disp_s = pred_disps[s]
+        #     disp_s = tf.cast(disp_s, tf.float32)
+        #     # target scaled => nearest or bilinear, here nearest
+        #     tgt_scaled = tf.image.resize(tgt_image,
+        #                                  [H // (2**s), W // (2**s)],
+        #                                   method=tf.image.ResizeMethod.BILINEAR)
+        #     # src scaled
+        #     src_scaled = tf.image.resize(src_image_stack,
+        #                                  [H // (2**s), W // (2**s)],
+        #                                   method=tf.image.ResizeMethod.BILINEAR)
+
+        #     # 3.1) depth = disp->depth
+        #     depth_s = self.disp_to_depth(disp_s, self.min_depth, self.max_depth)
+        #     pred_depths.append(depth_s)
+
+        #     # 3.2) reprojection loss
+        #     reprojection_list = []
+        #     for i in range(self.num_source):  # 0=left,1=right
+        #         # src_i
+        #         curr_src = src_scaled[..., i*3:(i+1)*3]
+        #         # pose => [B,num_source,6]
+        #         curr_pose = pred_poses[:, i, :]  # shape [B,6]
+        #         # warp
+        #         # intrinsics_simplified = ...
+        #         resized_intrinsics = self.rescale_intrinsics(intrinsic, H, W, H // (2**s), W // (2**s))
+
+        #         curr_proj_image = projective_inverse_warp(
+        #             curr_src,
+        #             tf.squeeze(depth_s, axis=3),
+        #             curr_pose,
+        #             intrinsics=resized_intrinsics,
+        #             invert=(i==0),
+                    
+        #         )
+        #         # photometric
+        #         curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, tgt_scaled)
+
+        #         # for visualization
+        #         if s == 0:
+        #             warped_images.append(curr_proj_image)
+        #             warped_losses.append(curr_reproj_loss)
+
+        #         # for loss
+        #         reprojection_list.append(curr_reproj_loss)
+
+        #     # shape => [B, H/(2^s), W/(2^s), num_source]
+        #     reprojection_losses = tf.concat(reprojection_list, axis=3)
+
+        #     # 3.3) auto_mask
+        #     combined = reprojection_losses
+        #     if self.auto_mask:
+        #         identity_list = []
+        #         for i in range(self.num_source):
+        #             # identity reprojection => src==tgt scaled
+        #             identity_loss = self.compute_reprojection_loss(
+        #                 src_scaled[..., i*3:(i+1)*3], tgt_scaled
+        #             )
+        #             identity_list.append(identity_loss)
+        #         identity_losses = tf.concat(identity_list, axis=3)
+        #         # random noise
+        #         identity_losses += tf.random.normal(tf.shape(identity_losses), stddev=1e-5)
+
+        #         combined = tf.concat([identity_losses, reprojection_losses], axis=3)
+
+        #         # For visualization
+        #         if s == 0:
+        #             pred_auto_masks.append(tf.expand_dims(tf.cast(tf.argmin(combined, axis=3) > 1,tf.float32) * 255, -1))
+
+        #     # min across channel => pick best
+        #     reprojection_loss = tf.reduce_mean(tf.reduce_min(combined, axis=3))
+
+        #     # 3.4) smoothness
+        #     smooth_loss = self.get_smooth_loss(disp_s, tgt_scaled)
+        #     # scale 보정 => smooth_loss /= (2^s)
+        #     smooth_loss = smooth_loss / (2.0**s)
+
+        #     scale_total_loss = reprojection_loss + self.smoothness_ratio * smooth_loss
+        #     total_loss += scale_total_loss
+
+        #     pixel_losses += reprojection_loss
+        #     smooth_losses += smooth_loss
+
+        # # visualizations output
+        # vis_outputs = {
+        #     'warped_image': warped_images,
+        #     'warped_loss': warped_losses,
+        #     'target': tgt_image,
+        #     'left_image': left_image,
+        #     'right_image': right_image,
+        #     'mask': pred_auto_masks,
+        # }
+            
+        # # 평균 내기
+        # num_scales_f = tf.cast(self.num_scales, tf.float32)
+        # total_loss = total_loss / num_scales_f
+        # pixel_losses = pixel_losses / num_scales_f
+        # smooth_losses = smooth_losses / num_scales_f
+
+        # return total_loss, pixel_losses, smooth_losses, pred_depths, vis_outputs
+"""

@@ -5,101 +5,177 @@ import matplotlib.pyplot as plt
 from utils.utils import *
 import tensorflow as tf
 
-def plot_images(image: tf.Tensor, pred_depths: tf.Tensor):
-    image = image[0]
-    # Plot 설정
-    depth_len = len(pred_depths)
+class PlotTool:
+    def __init__(self, config: dict) -> None:
+        self.batch_size = config['Train']['batch_size']
+        self.vis_batch_size = config['Train']['vis_batch_size']
+        if self.vis_batch_size > self.batch_size:
+            self.vis_batch_size = self.batch_size
+        self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
+        self.num_source = config['Train']['num_source'] # 2
+        self.num_scales = config['Train']['num_scale'] # 4
 
-    fig, axes = plt.subplots(1, 1 + depth_len, figsize=(20, 5))
+    def plot_images(self, images: tf.Tensor, pred_depths: tf.Tensor, denorm_func: callable):
+        # Plot 설정
+        image = denorm_func(images[0])
+        pred_depths = [depth[0] for depth in pred_depths]
+        
+        fig, axes = plt.subplots(2, 1 + self.num_scales, figsize=(10, 10))
 
-    axes[0].imshow(image)
-    axes[0].set_title('Image')
-    axes[0].axis('off')
+        axes[0, 0].imshow(image)
+        axes[0, 0].set_title('Image')
+        axes[0, 0].axis('off')
 
-    for idx in range(depth_len):
-        pred_depth = pred_depths[idx][0].numpy()
-        axes[1 + idx].imshow(pred_depth, vmin=0., vmax=10., cmap='plasma')
-        axes[1 + idx].set_title(f'Pred Depth Scale {idx}')
-        axes[1 + idx].axis('off')
+        for source in range(self.num_source):
+            if source == 0:
+                axes[source, 0].imshow(image)
+                axes[source, 0].set_title('Image')
+                axes[source, 0].axis('off')
+            else:
+                # non-use
+                axes[source, 0].axis('off')
 
-    fig.tight_layout()
+            for idx in range(self.num_scales):
+                sample_idx = source * self.num_scales + idx
+                depth = pred_depths[sample_idx]
+                axes[source, 1 + idx].imshow(depth, vmin=0., vmax=10., cmap='plasma')
+                axes[source, 1 + idx].set_title(f'Source {source} / Scale {idx}')
+                axes[source, 1 + idx].axis('off')
 
-    # 이미지를 Tensorboard에 로깅하기 위해 버퍼에 저장
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
+        fig.tight_layout()
 
-    plt.close()
-    image = tf.image.decode_png(buf.getvalue(), channels=4)
+        # 이미지를 Tensorboard에 로깅하기 위해 버퍼에 저장
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png')
+        buf.seek(0)
 
-    return tf.expand_dims(image, 0)
+        plt.close(fig)
+        image = tf.image.decode_png(buf.getvalue(), channels=4)
 
-def plot_warp_images(target_image: tf.Tensor,
-                     left_image: tf.Tensor,
-                     right_image: tf.Tensor,
-                     warped_images: list,
-                     warped_losses: list,
-                     masks: list,
-                     denrom_func):
-    
-    left_image = denrom_func(left_image[0])
-    target_image = denrom_func(target_image[0])
-    right_image = denrom_func(right_image[0])
+        return tf.expand_dims(image, 0)
 
-    warped_images = [denrom_func(warped_image[0]) for warped_image in warped_images]
-    
-    # left_to_target / target / right_to_target
-    # left_to_target loss / right_to_target loss / mask
-    fig, axes = plt.subplots(2, 5, figsize=(20, 10))
-    
-    axes[0, 0].imshow(left_image, vmin=0, vmax=255)
-    axes[0, 0].set_title('Left Image')
-    axes[0, 0].axis('off')
-    
-    axes[0, 1].imshow(warped_images[0], vmin=0, vmax=255)
-    axes[0, 1].set_title('Left to Target')
-    axes[0, 1].axis('off')
+    def plot_warp_images(self,
+                         vis_outputs: dict,
+                         denorm_func: callable):
+        """
+        vis_outputs = {
+            'left_warped': left_warped, # [B, num_source, H, W, 3]
+            'right_warped': right_warped, # [B, num_source, H, W, 3]
+            'left_warped_losses': left_warped_losses, # [B, num_source, H, W, 1]
+            'right_warped_losses': right_warped_losses, # [B, num_source, H, W, 1]
+            'target': tgt_image, # [B, H, W, 3]
+            'left_images': left_images, # [B, num_source, H, W, 3]
+            'right_images': right_images, # [B, num_source, H, W, 3]
+            'masks': pred_auto_masks, # [B, num_source, H, W, 1]
+        }
+        """
+        left_warped_images = vis_outputs['left_warped']
+        right_warped_images = vis_outputs['right_warped']
+        
+        target_images = vis_outputs['target']
+        left_images = vis_outputs['left_images']
+        right_images = vis_outputs['right_images']
+        
+        batch = 0
+        fig, axes = plt.subplots(self.num_source, 5, figsize=(20, 10)) # 2, 5
+        
+        target_image = target_images[batch, :, :, :]
+        target_image = denorm_func(target_image)
 
-    axes[0, 2].imshow(target_image, vmin=0, vmax=255)
-    axes[0, 2].set_title('Target Image')
-    axes[0, 2].axis('off')
+        for i in range(self.num_source):
+            left_image = left_images[batch, i, :, :, :] # (H, W, 3)
+            left_image = denorm_func(left_image)    
 
-    axes[0, 3].imshow(warped_images[1], vmin=0, vmax=255)
-    axes[0, 3].set_title('Right to Target')
-    axes[0, 3].axis('off')
+            right_image = right_images[batch, i, :, :, :] # (H, W, 3)
+            right_image = denorm_func(right_image)
 
-    axes[0, 4].imshow(right_image, vmin=0, vmax=255)
-    axes[0, 4].set_title('Right Image')
-    axes[0, 4].axis('off')
+            left_warped = left_warped_images[batch, i, :, :, :] # (H, W, 3)
+            left_warped = denorm_func(left_warped)
 
+            right_warped = right_warped_images[batch, i, :, :, :] # (H, W, 3)
+            right_warped = denorm_func(right_warped)
 
-    axes[1, 1].imshow(warped_losses[0][0])
-    axes[1, 1].set_title('Left to Target Loss')
-    axes[1, 1].axis('off')
+            axes[i, 0].imshow(left_image, vmin=0, vmax=255)
+            axes[i, 0].set_title('Left Image')
+            axes[i, 0].axis('off')
+            
+            axes[i, 1].imshow(left_warped, vmin=0, vmax=255)
+            axes[i, 1].set_title('Left to Target')
+            axes[i, 1].axis('off')
 
-    axes[1, 2].imshow(warped_losses[1][0])
-    axes[1, 2].set_title('Right to Target Loss')
-    axes[1, 2].axis('off')
+            axes[i, 2].imshow(target_image, vmin=0, vmax=255)
+            axes[i, 2].set_title('Target Image')
+            axes[i, 2].axis('off')
 
-    axes[1, 3].imshow(masks[0][0])
-    axes[1, 3].set_title('Mask')
-    axes[1, 3].axis('off')
+            axes[i, 3].imshow(right_warped, vmin=0, vmax=255)
+            axes[i, 3].set_title('Right to Target')
+            axes[i, 3].axis('off')
 
-    # non-used plot
-    axes[1, 0].axis('off')
-    axes[1, 4].axis('off')
-    
-    fig.tight_layout()
+            axes[i, 4].imshow(right_image, vmin=0, vmax=255)
+            axes[i, 4].set_title('Right Image')
+            axes[i, 4].axis('off')
 
-    # 이미지를 Tensorboard에 로깅하기 위해 버퍼에 저장
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
+        # non-used plot
+        # axes[1, 0].axis('off')
+        # axes[1, 4].axis('off')
+            
+        fig.tight_layout()
 
-    plt.close()
-    image = tf.image.decode_png(buf.getvalue(), channels=4)
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png')
+        buf.seek(0)
 
-    return tf.expand_dims(image, 0)
+        plt.close()
+        image = tf.image.decode_png(buf.getvalue(), channels=4)
+        return tf.expand_dims(image, 0)
+
+    def plot_warp_loss(self, vis_outputs: dict):
+        """
+        vis_outputs = {
+            'left_warped': left_warped, # [B, num_source, H, W, 3]
+            'right_warped': right_warped, # [B, num_source, H, W, 3]
+            'left_warped_losses': left_warped_losses, # [B, num_source, H, W, 1]
+            'right_warped_losses': right_warped_losses, # [B, num_source, H, W, 1]
+            'target': tgt_image, # [B, H, W, 3]
+            'left_images': left_images, # [B, num_source, H, W, 3]
+            'right_images': right_images, # [B, num_source, H, W, 3]
+            'masks': pred_auto_masks, # [B, num_source, H, W, 1]
+        }
+        """
+        left_warped_losses = vis_outputs['left_warped_losses']
+        right_warped_losses = vis_outputs['right_warped_losses']
+        masks = vis_outputs['masks']
+
+        batch = 0
+        fig, axes = plt.subplots(self.num_source, 3, figsize=(10, 10)) # 2, 5
+        
+        for i in range(self.num_source):
+            left_warped_loss = left_warped_losses[batch, i, :, :, :] # (H, W, 1)
+            right_warped_loss = right_warped_losses[batch, i, :, :, :] # (H, W, 1)
+            mask = masks[batch, i, :, :, :] # (H, W, 1)
+            
+            axes[i, 0].imshow(left_warped_loss)
+            axes[i, 0].set_title('Left to Target Loss')
+            axes[i, 0].axis('off')
+
+            
+            axes[i, 1].imshow(right_warped_loss)
+            axes[i, 1].set_title('Right to Target Loss')
+            axes[i, 1].axis('off')
+
+            axes[i, 2].imshow(mask)
+            axes[i, 2].set_title('Mask')
+            axes[i, 2].axis('off')
+
+        fig.tight_layout()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png')
+        buf.seek(0)
+
+        plt.close()
+        image = tf.image.decode_png(buf.getvalue(), channels=4)
+        return tf.expand_dims(image, 0)
 
 
 # def plot_line_tensorboard(imgs: np.ndarray, pred: np.ndarray, gt: np.ndarray, decision: np.ndarray):
