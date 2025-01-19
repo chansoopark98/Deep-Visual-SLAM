@@ -1,7 +1,10 @@
 import tensorflow_datasets as tfds
-import os
 import tensorflow as tf
+
+import os
 import json
+import argparse
+
 
 def serialize_example(rgb, depth):
     """Serialize a single RGB and depth pair into a TFRecord example."""
@@ -16,31 +19,33 @@ def serialize_example(rgb, depth):
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
 
-if __name__ == '__main__':
-    data_dir = './depth/data/'
-    output_dir = './depth/data/nyu_depth_v2_tfrecord/'
 
-    train_tfrecord_path = os.path.join(output_dir, 'train.tfrecord')
-    valid_tfrecord_path = os.path.join(output_dir, 'valid.tfrecord')
+def default_parser():
+    parser = argparse.ArgumentParser("TF Dataset base Depth estimate Dataset")
+    parser.add_argument('--root-path', type=str, default="depth/data/", help='dist dataset root-path')
+    args = parser.parse_args()
+    return args
 
-    os.makedirs(output_dir, exist_ok=True)
+
+def nyu_main_process(args): 
+    # dist /{root-path}/nyu_depth_v2_tfrecord
+    dist_path = os.path.join(args.root_path, "nyu_depth_v2_tfrecord")
+    metadata = {}
+    all_datasets = []
+
+    if not os.path.exists(args.output_path):
+        os.makedirs(args.output_path, exist_ok=True)
 
     # Load NYU Depth v2 dataset
-    nyu_train = tfds.load(name='nyu_depth_v2', data_dir=data_dir, split='train')
-    nyu_valid = tfds.load(name='nyu_depth_v2', data_dir=data_dir, split='validation')
-
-    all_datasets = [(nyu_train, train_tfrecord_path), 
-                    (nyu_valid, valid_tfrecord_path)]
-
-    # Dictionary to store dataset sample counts
-    metadata = {}
+    for dataset_name in ['train', 'validation']:
+        all_datasets.append({'dataset': tfds.load(name='nyu_depth_v2', data_dir=args.root_path, split=dataset_name),
+                             'path': os.path.join(dist_path, f'{dataset_name}.tfrecord'),
+                             'split': dataset_name})
 
     # Iterate over the datasets
-    for dataset, tfrecord_path in all_datasets:
-        count = 0  # Initialize sample counter
-
-        with tf.io.TFRecordWriter(tfrecord_path) as writer:
-            for data in dataset:
+    for dataset_info in all_datasets:
+        with tf.io.TFRecordWriter(dataset_info['path']) as writer:
+            for idx, data in enumerate(dataset_info['dataset'], 1):
                 # Extract RGB and depth data
                 rgb = data['image'].numpy()
                 depth = data['depth'].numpy()
@@ -49,16 +54,20 @@ if __name__ == '__main__':
                 serialized_example = serialize_example(rgb, depth)
                 writer.write(serialized_example)
 
-                count += 1  # Increment sample count
-
         # Save count to metadata
-        dataset_name = 'train_count' if 'train' in tfrecord_path else 'valid_count'
-        metadata[dataset_name] = count
+        # Dictionary to store dataset sample counts
+        metadata[f'{dataset_info["split"]}_count'] = idx
 
     # Save metadata to JSON
-    metadata_path = os.path.join(output_dir, 'metadata.json')
+    metadata_path = os.path.join(args.output_path, 'metadata.json')
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f)
 
-    print(f"TFRecord files saved to {output_dir}")
+    print(f"TFRecord files saved to {dist_path}")
     print(f"Metadata saved to {metadata_path}")
+    return dist_path
+
+
+if __name__ == '__main__':
+    args = default_parser()
+    nyu_main_process(args)
