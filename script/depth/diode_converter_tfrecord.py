@@ -55,7 +55,7 @@ class DiodeConverterTFRecord(object):
     def convert(self, root_dir, tfrecord_path, is_train: bool = True) -> int:
         """Convert the dataset to TFRecord format and return the sample count."""
         scenes = glob.glob(os.path.join(root_dir, 'indoors', '*'))
-        # count = 0
+        count = 0
 
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
             for scene in scenes:
@@ -94,17 +94,23 @@ class DiodeConverterTFRecord(object):
 
 
 def diode_main_process(args):
-    if not os.path.exists(args.root_dir):
+    save_path = os.path.join(args.root_dir, "diode")
+
+    if not os.path.exists(save_path):
+        print(f'0. downlaod start diode dataset')
         import requests
         import tarfile
         compress_filename = []
         for dataset, url in DIODE_DATASET_URL_DICT.items():
+            print(f'{dataset} dataset download start {url=} ')
             local_filename = url.split('/')[-1]
-            with requests.get(os.path.join(args.root_dir, url), stream=True) as r:
+            with requests.get(url, stream=True) as r:
                 r.raise_for_status()
                 with open(local_filename, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
+            # checksum added
+
             compress_filename.append(local_filename)
         save_path = os.path.join(args.root_dir, 'diode')
         if not os.path.exists(save_path):
@@ -115,7 +121,7 @@ def diode_main_process(args):
                 tar.add(save_path)
         del compress_filename, local_filename, save_path, requests, tarfile
 
-    converter = DiodeConverterTFRecord(os.path.join(args.root_dir, "diode"))
+    converter = DiodeConverterTFRecord(save_path)
     converter()
 
 
