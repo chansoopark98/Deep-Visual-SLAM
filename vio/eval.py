@@ -48,16 +48,21 @@ def pose_vector_to_transform(pose_vec):
     return T
 
 class EvalTrajectory(Learner):
-    def __init__(self, model: tf.keras.Model, config: dict):
-        super().__init__(model, config)
-        self.model = model
+    def __init__(self, depth_model: tf.keras.Model,
+                 pose_model: tf.keras.Model,
+                 config: dict):
+        super().__init__(depth_model, pose_model, config)
+        # self.model = model
+        self.depth_net = depth_model
+        self.pose_net = pose_model
+
         self.batch_size = config['Train']['batch_size']
-        self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
+        self.image_shape = (config['Train']['img_h'], config['Train']['img_w'])
         self.pred_depth_list = []
         self.pred_pose_list = []
         self.intrinsic_list = []
 
-    def update_state(self, ref_images, tgt_image, intrinsic: tf.Tensor):
+    def update_state(self, ref_images, tgt_image, imus, intrinsic: tf.Tensor):
         """
         images: List of RGB images
         imus: List of IMU data
@@ -66,11 +71,35 @@ class EvalTrajectory(Learner):
         left_images = ref_images[:, :self.num_source] # [B, num_source, H, W, 3]
         right_images = ref_images[:, self.num_source:] # [B, num_source, H, W, 3]
 
+        left_imus = imus[:, :self.num_source] # [B, num_source, 6]
+        right_imus = imus[:, self.num_source:] # [B, num_source, 6]
+
         left_image = left_images[:, 0] # [B, H, W, 3]
         right_image = right_images[:, 0] # [B, H, W, 3]
-        images = tf.concat([left_image, tgt_image, right_image], axis=-1) # [B, 3, H, W, 3]
 
-        batch_disps, batch_poses = self.model(images, training=False)
+        left_imu = left_imus[:, 0] # [B, 6]
+        right_imu = right_imus[:, 0] # [B, 6]
+
+        # images = tf.concat([left_image, tgt_image, right_image], axis=-1) # [B, 3, H, W, 3]
+
+        # batch_disps, batch_poses = self.model(images, training=False)
+
+        disp_raw = self.depth_net(tgt_image, training=False)
+
+        batch_disps = []
+        for s in range(self.num_scales):
+            scale_h = self.image_shape[0] // (2 ** s)
+            scale_w = self.image_shape[1] // (2 ** s)
+            scaled_disp = tf.image.resize(disp_raw[s], [scale_h, scale_w], method=tf.image.ResizeMethod.BILINEAR)
+            batch_disps.append(scaled_disp)
+
+        cat_left = tf.concat([left_image, tgt_image], axis=3)   # [B,H,W,6]
+        cat_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
+        pose_left = self.pose_net([cat_left, left_imu], training=False)    # [B,6]
+        pose_right = self.pose_net([cat_right, right_imu], training=False)  # [B,6]
+        batch_poses = tf.stack([pose_left, pose_right], axis=1)    # [B,2,6]
+        batch_poses = tf.cast(batch_poses, tf.float32) 
+
         # list comprehension으로 변환
         batch_disps = [tf.cast(disp, tf.float32) for disp in batch_disps]
         batch_poses = tf.cast(batch_poses, tf.float32)
@@ -165,12 +194,12 @@ class EvalTrajectory(Learner):
             T_global = T_global @ T_local
             
             intrinsic = self.intrinsic_list[i]
-
+            
             if i % int(self.batch_size * 4) == 0:
                 pc.plot_camera(ax,
                                intrinsic,
                                T_global,
-                               sensor_size=(self.image_size[1], self.image_size[0]),
+                               sensor_size=(self.image_shape[1], self.image_shape[0]),
                                virtual_image_distance=0.2,
                                c='g',
                                strict_check=False)
@@ -235,7 +264,6 @@ class EvalTrajectory(Learner):
         self.pred_depth_list.clear()
         self.pred_pose_list.clear()
         self.intrinsic_list.clear()
-        
 
 if __name__ == '__main__':
     matplotlib.use('TkAgg')

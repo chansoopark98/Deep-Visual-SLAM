@@ -3,9 +3,11 @@ import tensorflow as tf
 try:
     from .tspxr_capture import TspxrCapture
     from .mars_logger import MarsLoggerHandler
+    from .augmentation_tool import Augmentations
 except:
     from tspxr_capture import TspxrCapture
     from mars_logger import MarsLoggerHandler
+    from augmentation_tool import Augmentations
 
 class DataLoader(object):
     def __init__(self, config) -> None:
@@ -22,6 +24,8 @@ class DataLoader(object):
         self.num_train_samples = self.num_train_samples // self.batch_size
         self.num_valid_samples = self.num_valid_samples // self.batch_size
         self.num_test_samples = self.num_test_samples // self.batch_size
+
+        self.augmentor = Augmentations(image_size=self.image_size)
 
         if self.num_train_samples > 0:
             self.train_dataset = self._compile_dataset(self.train_dataset, batch_size=self.batch_size, use_shuffle=True, is_train=True)

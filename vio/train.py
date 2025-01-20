@@ -5,7 +5,7 @@ import tensorflow as tf
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
-from model.monodepth2 import MonoDepth2Model
+from model.monodepth2 import MonoDepth2Model, DispNet, PoseNet
 from monodepth_learner import Learner
 from tqdm import tqdm
 import numpy as np
@@ -27,11 +27,21 @@ class Trainer(object):
 
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
-        self.model = MonoDepth2Model(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
-                                     batch_size=self.config['Train']['batch_size'])
-        model_input_shape = (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 9)
-        self.model.build(model_input_shape)
-        self.model.summary()
+        # self.model = MonoDepth2Model(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
+        #                              batch_size=self.config['Train']['batch_size'])
+        # model_input_shape = (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 9)
+        # self.model.build(model_input_shape)
+        # self.model.summary()
+
+        image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
+        self.depth_net(tf.random.normal((1, *image_shape, 3)))
+        self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
+
+        self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        posenet_input_shape = [(self.batch_size, *image_shape, 6),
+                               (self.batch_size, self.config['Train']['imu_seq_len'], 6)]
+        self.pose_net.build(posenet_input_shape)
         
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
@@ -45,12 +55,17 @@ class Trainer(object):
         self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
                                                   weight_decay=self.config['Train']['weight_decay'])
+        all_variables = self.depth_net.trainable_variables + self.pose_net.trainable_variables
+        self.optimizer.build(all_variables)
         self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Train Method
-        self.learner = Learner(model=self.model, config=self.config)
+        self.learner = Learner(depth_model=self.depth_net,
+                               pose_model=self.pose_net,
+                               config=self.config)
 
-        self.eval_tool = EvalTrajectory(model=self.model, config=self.config)
+        self.eval_tool = EvalTrajectory(depth_model=self.depth_net,
+                                        pose_model=self.pose_net, config=self.config)
 
         self.plot_tool = PlotTool(config=self.config)
 
@@ -79,20 +94,26 @@ class Trainer(object):
                     exist_ok=True)
     
     @tf.function(jit_compile=True)
-    def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
-        with tf.GradientTape() as tape:
-            total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
+    def train_step(self, ref_images, target_image, imus, intrinsic) -> tf.Tensor:
+        with tf.GradientTape(persistent=True) as tape:
+            total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, imus, intrinsic, training=True)
             scaled_loss = self.optimizer.get_scaled_loss(total_loss)
 
         # loss update
-        scaled_gradients = tape.gradient(scaled_loss, self.model.trainable_variables)
-        gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
-        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        depth_scale_grad = tape.gradient(scaled_loss, self.depth_net.trainable_variables)
+        pose_scale_grad = tape.gradient(scaled_loss, self.pose_net.trainable_variables)
+
+        depth_unscale_grad = self.optimizer.get_unscaled_gradients(depth_scale_grad)
+        pose_unscale_grad = self.optimizer.get_unscaled_gradients(pose_scale_grad)
+
+        self.optimizer.apply_gradients(zip(depth_unscale_grad, self.depth_net.trainable_variables))
+        self.optimizer.apply_gradients(zip(pose_unscale_grad, self.pose_net.trainable_variables))
+        
         return total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs
     
     @tf.function(jit_compile=True)
-    def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
-        total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
+    def validation_step(self, ref_images, target_image, imus, intrinsic) -> tf.Tensor:
+        total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, imus, intrinsic, training=False)
         return total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs
 
     def train(self) -> None:        
@@ -106,8 +127,8 @@ class Trainer(object):
             print(' LR : {0}'.format(self.optimizer.learning_rate))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
-            for idx, (ref_images, target_image, _, intrinsic) in enumerate(train_tqdm):
-                train_t_loss, train_p_loss, train_s_loss, pred_train_depths, train_vis_outputs = self.train_step(ref_images, target_image, intrinsic)
+            for idx, (ref_images, target_image, imus, intrinsic) in enumerate(train_tqdm):
+                train_t_loss, train_p_loss, train_s_loss, pred_train_depths, train_vis_outputs = self.train_step(ref_images, target_image, imus, intrinsic)
 
                 # Update train metrics
                 self.train_total_loss(train_t_loss)
@@ -151,14 +172,14 @@ class Trainer(object):
             # Validation
             valid_tqdm = tqdm(self.data_loader.valid_dataset, total=self.data_loader.num_valid_samples)
             valid_tqdm.set_description('Validation || ')
-            for idx, (ref_images, target_image, _, intrinsic) in enumerate(valid_tqdm):
-                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths, valid_vis_outputs = self.validation_step(ref_images, target_image, intrinsic)
+            for idx, (ref_images, target_image, imus, intrinsic) in enumerate(valid_tqdm):
+                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths, valid_vis_outputs = self.validation_step(ref_images, target_image, imus, intrinsic)
 
                 # Update valid metrics
                 self.valid_total_loss(valid_t_loss)
                 self.valid_pixel_loss(valid_p_loss)
                 self.valid_smooth_loss(valid_s_loss)
-                self.eval_tool.update_state(ref_images, target_image, intrinsic)
+                self.eval_tool.update_state(ref_images, target_image, imus, intrinsic)
 
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     current_step = self.data_loader.num_valid_samples * epoch + idx
@@ -201,9 +222,12 @@ class Trainer(object):
                 tf.summary.image('Eval/Trajectory', eval_plot, step=epoch)
 
             if epoch % 5 == 0:
-                self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
-                                                                            self.config['Directory']['exp_name'],
-                                                                            epoch))
+                self.depth_net.save_weights('{0}/{1}/depth_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
+                                                                                          self.config['Directory']['exp_name'],
+                                                                                          epoch))
+                self.pose_net.save_weights('{0}/{1}/pose_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
+                                                                                        self.config['Directory']['exp_name'],
+                                                                                        epoch))
             self.train_total_loss.reset_states()
             self.train_pixel_loss.reset_states()
             self.train_smooth_loss.reset_states()

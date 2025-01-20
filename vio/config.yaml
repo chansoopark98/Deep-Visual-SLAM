@@ -1,5 +1,5 @@
 Directory:
-  exp_name: pretrained_maxD=10_480x640_ep101_bs8_adamW_wd1e-4_lr1e-4-1e-5_ssim0.85_smooth0.001_autoMask
+  exp_name: imu_test
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
