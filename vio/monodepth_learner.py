@@ -2,19 +2,19 @@ import tensorflow as tf
 from utils.projection_utils import projective_inverse_warp
 
 class Learner(object):
-    def __init__(self, model, config):
-        """
-        model: 이미 build된 tf.keras.Model (e.g. MonoDepth2Model)
-        optimizer: tf.keras.optimizers.Optimizer
-        config: hyperparams, etc.
-        """
-        self.model = model  # MonoDepth2Model
+    def __init__(self,
+                 depth_model: tf.keras.Model,
+                 pose_model: tf.keras.Model,
+                 config: dict):
+        self.depth_net = depth_model
+        self.pose_net = pose_model
         self.config = config
 
         # 예시 하이퍼파라미터
         self.num_scales = 4
         self.num_source = self.config['Train']['num_source'] # 2
         
+        self.image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.smoothness_ratio = self.config['Train']['smoothness_ratio'] # 0.001
         self.auto_mask = self.config['Train']['auto_mask'] # True
         self.ssim_ratio = self.config['Train']['ssim_ratio'] # 0.85
@@ -125,7 +125,7 @@ class Learner(object):
         intrinsics_rescaled = tf.stack([row0, row1, row2], axis=1)
         return intrinsics_rescaled
         
-    def forward_step(self, ref_images, tgt_image, intrinsic, training=True) -> tf.Tensor:
+    def forward_step(self, ref_images, tgt_image, imu, intrinsic, training=True) -> tf.Tensor:
         """
         ref_images: (batch_size, num_source * 2, img_h, img_w, 3)
             left_images: ref_images[:, :num_source]
@@ -144,6 +144,9 @@ class Learner(object):
         left_images = ref_images[:, :self.num_source] # [B, num_source, H, W, 3]
         right_images = ref_images[:, self.num_source:] # [B, num_source, H, W, 3]
 
+        left_imus = imu[:, :self.num_source] # [B, num_source, imu_seq_len, 6]
+        right_imus = imu[:, self.num_source:] # [B, num_source, imu_seq_len, 6]
+
         # TODO
         # left_imus = imus[:, :self.num_source] # [B, num_source, imu_seq_len, 12]
         # right_imus = imus[:, self.num_source:] # [B, num_source, imu_seq_len, 12]
@@ -161,14 +164,30 @@ class Learner(object):
         left_warped_losses = []
         right_warped_losses = []
         
-
         for i in range(self.num_source):
             left_image = left_images[:, i]  # [B, H, W, 3]
             right_image = right_images[:, i]  # [B, H, W, 3]
 
-            input_images = tf.concat([left_image, tgt_image, right_image], axis=3)  # [B, H, W, 9]
+            left_imu = left_imus[:, i]  # [B, imu_seq_len, 6]
+            right_imu = right_imus[:, i]  # [B, imu_seq_len, 6]
 
-            pred_disps, pred_poses = self.model(input_images, training=training)
+            # input_images = tf.concat([left_image, tgt_image, right_image], axis=3)  # [B, H, W, 9]
+
+            # pred_disps, pred_poses = self.model(input_images, training=training)
+            disp_raw = self.depth_net(tgt_image, training=training)
+
+            pred_disps = []
+            for s in range(self.num_scales):
+                scale_h = self.image_shape[0] // (2 ** s)
+                scale_w = self.image_shape[1] // (2 ** s)
+                scaled_disp = tf.image.resize(disp_raw[s], [scale_h, scale_w], method=tf.image.ResizeMethod.BILINEAR)
+                pred_disps.append(scaled_disp)
+
+            cat_left = tf.concat([left_image, tgt_image], axis=3)   # [B,H,W,6]
+            cat_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
+            pose_left = self.pose_net([cat_left, left_imu], training=training)    # [B,6]
+            pose_right = self.pose_net([cat_right, right_imu], training=training)  # [B,6]
+            pred_poses = tf.stack([pose_left, pose_right], axis=1)    # [B,2,6]
             pred_poses = tf.cast(pred_poses, tf.float32)
 
             # Parse input images
