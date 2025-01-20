@@ -39,7 +39,7 @@ class Trainer(object):
         # 3. Optimizer
         self.warmup_scheduler = tf.keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
-                                                                              self.config['Train']['init_lr'] * 0.1,
+                                                                              self.config['Train']['end_lr'],
                                                                               power=0.9)
         
         self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
@@ -114,19 +114,9 @@ class Trainer(object):
                 self.train_pixel_loss(train_p_loss)
                 self.train_smooth_loss(train_s_loss)
 
-                if idx % self.config['Train']['train_log_interval'] == 0:
+                if idx % self.config['Train']['train_plot_interval'] == 0:
                     current_step = self.data_loader.num_train_samples * epoch + idx
 
-                    with self.train_summary_writer.as_default():
-                        # Logging train total, pixel, smooth loss
-                        tf.summary.scalar(f'Train/{self.train_total_loss.name}',
-                                            self.train_total_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Train/{self.train_pixel_loss.name}',
-                                            self.train_pixel_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Train/{self.train_smooth_loss.name}',
-                                            self.train_smooth_loss.result(), step=current_step)
-
-                if idx % self.config['Train']['train_plot_interval'] == 0:
                     # Draw depth plot
                     train_depth_plot = self.plot_tool.plot_images(images=target_image, # target_image
                                                                   pred_depths=pred_train_depths,
@@ -148,6 +138,16 @@ class Trainer(object):
                     pixel_loss=self.train_pixel_loss.result().numpy(),
                     smooth_loss=self.train_smooth_loss.result().numpy())
             
+            # Logging train metrics
+            with self.train_summary_writer.as_default():
+                # Logging train total, pixel, smooth loss
+                tf.summary.scalar(f'Train/{self.train_total_loss.name}',
+                                    self.train_total_loss.result(), step=epoch)
+                tf.summary.scalar(f'Train/{self.train_pixel_loss.name}',
+                                    self.train_pixel_loss.result(), step=epoch)
+                tf.summary.scalar(f'Train/{self.train_smooth_loss.name}',
+                                    self.train_smooth_loss.result(), step=epoch)
+            
             # Validation
             valid_tqdm = tqdm(self.data_loader.valid_dataset, total=self.data_loader.num_valid_samples)
             valid_tqdm.set_description('Validation || ')
@@ -160,19 +160,8 @@ class Trainer(object):
                 self.valid_smooth_loss(valid_s_loss)
                 self.eval_tool.update_state(ref_images, target_image, intrinsic)
 
-                if idx % self.config['Train']['valid_log_interval'] == 0:
-                    current_step = self.data_loader.num_valid_samples * epoch + idx
-
-                    with self.valid_summary_writer.as_default():
-                        # Logging valid total, pixel, smooth loss
-                        tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
-                                          self.valid_total_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Valid/{self.valid_pixel_loss.name}',
-                                          self.valid_pixel_loss.result(), step=current_step)
-                        tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
-                                          self.valid_smooth_loss.result(), step=current_step)
-                
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
+                    current_step = self.data_loader.num_valid_samples * epoch + idx
                     # Draw target image - target depth plot
                     valid_depth_plot = self.plot_tool.plot_images(images=target_image,
                                                                   pred_depths=pred_valid_depths,
@@ -194,6 +183,16 @@ class Trainer(object):
                     pixel_loss=self.valid_pixel_loss.result().numpy(),
                     smooth_loss=self.valid_smooth_loss.result().numpy()
                 )
+
+            # Logging valid metrics
+            with self.valid_summary_writer.as_default():
+                # Logging valid total, pixel, smooth loss
+                tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
+                                    self.valid_total_loss.result(), step=epoch)
+                tf.summary.scalar(f'Valid/{self.valid_pixel_loss.name}',
+                                    self.valid_pixel_loss.result(), step=epoch)
+                tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
+                                    self.valid_smooth_loss.result(), step=epoch)
 
             # Eval
             eval_plot = self.eval_tool.eval_plot()
