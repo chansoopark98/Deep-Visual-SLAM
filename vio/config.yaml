@@ -1,5 +1,5 @@
 Directory:
-  exp_name: resnet_mixedPrecision_Step=2
+  exp_name: pretrained_maxD=10_480x640_ep101_bs8_adamW_wd1e-4_lr1e-4-1e-5_ssim0.85_smooth0.001_autoMask
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -11,10 +11,8 @@ Dataset:
 
 Train:
   use_shuffle: True
-  train_log_interval: 10
-  valid_log_interval: 10
-  train_plot_interval: 100 # 100
-  valid_plot_interval: 100
+  train_plot_interval: 200 # 100
+  valid_plot_interval: 50
   vis_batch_size: 1
   num_source: 2
   num_scale: 4
@@ -31,8 +29,9 @@ Train:
   batch_size: 8 # 1
   epoch: 101
   init_lr: 0.0001
+  end_lr: 0.00001
 
 Experiment:
   gpus: [1] # [0, 1]
   gpu_vram: 24000
-  gpu_vram_factor: 0.8
+  gpu_vram_factor: 0.9
