@@ -9,3 +9,6 @@ pydot
 graphviz
 opencv-python==4.6.0.66
 pytransform3d
+pyvista
+imageio
+imageio[ffmpeg]
