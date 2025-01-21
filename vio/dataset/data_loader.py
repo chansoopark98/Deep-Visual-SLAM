@@ -111,21 +111,104 @@ class DataLoader(object):
         left_images = tf.map_fn(self._read_image, sample['source_left'], fn_output_signature=tf.uint8)
         right_images = tf.map_fn(self._read_image, sample['source_right'], fn_output_signature=tf.uint8)
         target_image = self._read_image(sample['target_image'])
+        
+
+        # read imus
+        imu_left = tf.cast(sample['imu_left'], tf.float32)
+        imu_right = tf.cast(sample['imu_right'], tf.float32)
+        imus = tf.concat([imu_left, imu_right], axis=0)
+
+        # read intrinsic
+        intrinsic = tf.cast(sample['intrinsic'], tf.float32)
+
+        # augmentation
+        # left_images, right_images, target_image, imus, intrinsic = self.augmentation(left_images, right_images, target_image, imus, intrinsic)
 
         # normalize images
         left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
         right_images = tf.map_fn(self.normalize_image, right_images, fn_output_signature=tf.float32)
+        
         target_image = self.normalize_image(target_image)
-
-        imu_left = tf.cast(sample['imu_left'], tf.float32)
-        imu_right = tf.cast(sample['imu_right'], tf.float32)
-        intrinsic = tf.cast(sample['intrinsic'], tf.float32)
-
-        imus = tf.concat([imu_left, imu_right], axis=0)
 
         ref_images = tf.concat([left_images, right_images], axis=0)
 
         return ref_images, target_image, imus, intrinsic
+    
+    @tf.function()
+    def valid_process(self, sample: dict) -> tuple:
+        # read images
+        left_images = tf.map_fn(self._read_image, sample['source_left'], fn_output_signature=tf.uint8)
+        right_images = tf.map_fn(self._read_image, sample['source_right'], fn_output_signature=tf.uint8)
+        target_image = self._read_image(sample['target_image'])
+        
+
+        # read imus
+        imu_left = tf.cast(sample['imu_left'], tf.float32)
+        imu_right = tf.cast(sample['imu_right'], tf.float32)
+        imus = tf.concat([imu_left, imu_right], axis=0)
+
+        # read intrinsic
+        intrinsic = tf.cast(sample['intrinsic'], tf.float32)
+
+        # augmentation
+        # ref_images, target_image, imus, intrinsic = self.augmentation(ref_images, target_image, imus, intrinsic)
+
+        # normalize images
+        left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
+        right_images = tf.map_fn(self.normalize_image, right_images, fn_output_signature=tf.float32)
+        
+        target_image = self.normalize_image(target_image)
+
+        ref_images = tf.concat([left_images, right_images], axis=0)
+
+        return ref_images, target_image, imus, intrinsic
+    
+    @tf.function(jit_compile=True)
+    def augmentation(self, left_image, right_image, target_image, imus, intrinsic):
+        left_image = tf.cast(left_image, tf.float32) / 255.0
+        right_image = tf.cast(right_image, tf.float32) / 255.0
+        target_image = tf.cast(target_image, tf.float32) / 255.0
+
+        if tf.random.uniform([]) > 0.5:
+            imus = self.augmentor.imu_left_right_flip(imus)
+            left_image = tf.image.flip_left_right(left_image)
+            right_image = tf.image.flip_left_right(right_image)
+            target_image = tf.image.flip_left_right(target_image)
+
+        if tf.random.uniform([]) > 0.5:
+            delta_brightness = tf.random.uniform([], -0.2, 0.2)
+            left_image = tf.image.adjust_brightness(left_image, delta_brightness)
+            right_image = tf.image.adjust_brightness(right_image, delta_brightness)
+            target_image = tf.image.adjust_brightness(target_image, delta_brightness)
+        
+        if tf.random.uniform([]) > 0.5:
+            contrast_factor = tf.random.uniform([], 0.7, 1.3)
+            left_image = tf.image.adjust_contrast(left_image, contrast_factor)
+            right_image = tf.image.adjust_contrast(right_image, contrast_factor)
+            target_image = tf.image.adjust_contrast(target_image, contrast_factor)
+        
+        if tf.random.uniform([]) > 0.5:
+            gamma = tf.random.uniform([], 0.8, 1.2)
+            left_image = tf.image.adjust_gamma(left_image, gamma)
+            right_image = tf.image.adjust_gamma(right_image, gamma)
+            target_image = tf.image.adjust_gamma(target_image, gamma)
+        
+        if tf.random.uniform([]) > 0.5:
+            max_delta = 0.1
+            delta = tf.random.uniform([], -max_delta, max_delta)
+            left_image = tf.image.adjust_hue(left_image, delta)
+            right_image = tf.image.adjust_hue(right_image, delta)
+            target_image = tf.image.adjust_hue(target_image, delta)
+        
+        left_image *= 255.
+        right_image *= 255.
+        target_image *= 255.
+
+        left_image = tf.clip_by_value(left_image, 0., 255.)
+        right_image = tf.clip_by_value(right_image, 0., 255.)
+        target_image = tf.clip_by_value(target_image, 0., 255.)
+
+        return left_image, right_image, target_image, imus, intrinsic
     
     def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool, is_train: bool = True) -> tf.data.Dataset:
         combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
@@ -134,7 +217,7 @@ class DataLoader(object):
         if is_train:
             combined_dataset = combined_dataset.map(self.train_preprocess, num_parallel_calls=self.auto_opt)
         else:
-            combined_dataset = combined_dataset.map(self.train_preprocess, num_parallel_calls=self.auto_opt)
+            combined_dataset = combined_dataset.map(self.valid_process, num_parallel_calls=self.auto_opt)
         combined_dataset = combined_dataset.batch(batch_size, drop_remainder=True, num_parallel_calls=self.auto_opt)
         combined_dataset = combined_dataset.prefetch(self.auto_opt)
         return combined_dataset
@@ -169,3 +252,13 @@ if __name__ == '__main__':
         left_imus = imus[:, :data_loader.num_source]
         right_imus = imus[:, data_loader.num_source:]
         print(left_images.shape, right_images.shape, left_imus.shape, right_imus.shape)
+
+        # show all images
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(1, 5, figsize=(20, 4))
+        axes[0].imshow(left_images[0, 0])
+        axes[1].imshow(left_images[0, 1])
+        axes[2].imshow(right_images[0, 0])
+        axes[3].imshow(right_images[0, 1])
+        axes[4].imshow(target_image[0])
+        plt.show()

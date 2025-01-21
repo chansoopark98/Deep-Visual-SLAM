@@ -164,12 +164,12 @@ class Learner(object):
         left_warped_losses = []
         right_warped_losses = []
         
-        for i in range(self.num_source):
-            left_image = left_images[:, i]  # [B, H, W, 3]
-            right_image = right_images[:, i]  # [B, H, W, 3]
+        for src_idx in range(self.num_source):
+            left_image = left_images[:, src_idx]  # [B, H, W, 3]
+            right_image = right_images[:, src_idx]  # [B, H, W, 3]
 
-            left_imu = left_imus[:, i]  # [B, imu_seq_len, 6]
-            right_imu = right_imus[:, i]  # [B, imu_seq_len, 6]
+            left_imu = left_imus[:, src_idx]  # [B, imu_seq_len, 6]
+            right_imu = right_imus[:, src_idx]  # [B, imu_seq_len, 6]
 
             # input_images = tf.concat([left_image, tgt_image, right_image], axis=3)  # [B, H, W, 9]
 
@@ -291,7 +291,6 @@ class Learner(object):
         left_warped_losses = tf.stack(left_warped_losses, axis=1) # [B, num_source, H, W, 1]
         right_warped_losses = tf.stack(right_warped_losses, axis=1) # [B, num_source, H, W, 1]
 
-        
         pred_auto_masks = tf.stack(pred_auto_masks, axis=1) # [B, num_source, H, W, 1]    
 
         vis_outputs = {

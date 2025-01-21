@@ -233,26 +233,26 @@ class ImuNet(tf.keras.Model):
             tf.keras.layers.Conv1D(64, kernel_size=3, padding='same',
                                    use_bias=False,
                                    name='IMU_ENCODER_conv1'),
-            tf.keras.layers.BatchNormalization(
+            tf.keras.layers.BatchNormalization(momentum=0.9,
                                                name='IMU_ENCODER_bn1'),
-            tf.keras.layers.LeakyReLU(alpha=0.1,
+            tf.keras.layers.LeakyReLU(alpha=0.2,
                                       name='IMU_ENCODER_leaky_relu1'),\
 
             # Layer 2
             tf.keras.layers.Conv1D(128, kernel_size=3, padding='same',
                                    use_bias=False,
                                    name='IMU_ENCODER_conv2'),
-            tf.keras.layers.BatchNormalization(
+            tf.keras.layers.BatchNormalization(momentum=0.9,
                                                name='IMU_ENCODER_bn2'),
-            tf.keras.layers.LeakyReLU(alpha=0.1, name='IMU_ENCODER_leaky_relu2'),
+            tf.keras.layers.LeakyReLU(alpha=0.2, name='IMU_ENCODER_leaky_relu2'),
 
             # Layer 3
             tf.keras.layers.Conv1D(256, kernel_size=3, padding='same',
                                    use_bias=False,              
                                    name='IMU_ENCODER_conv3'),
-            tf.keras.layers.BatchNormalization(
+            tf.keras.layers.BatchNormalization(momentum=0.9,
                                                name='IMU_ENCODER_bn3'),
-            tf.keras.layers.LeakyReLU(alpha=0.1, name='IMU_ENCODER_leaky_relu3'),
+            tf.keras.layers.LeakyReLU(alpha=0.2, name='IMU_ENCODER_leaky_relu3'),
         ])
 
         cells = [tf.keras.layers.LSTMCell(256,
@@ -274,7 +274,6 @@ class ImuNet(tf.keras.Model):
         x = self.rnn(x, training=training) # [B, T, 256]
         x = self.average_pool(x) # [B, 256]
         return x
-
 
 class PoseNet(tf.keras.Model):
     """
@@ -310,8 +309,8 @@ class PoseNet(tf.keras.Model):
         self.dense_2 = tf.keras.layers.Dense(6, name='pose_dense2')
 
         # 3) ReduceMeanLayer, Reshape
-        self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
-        self.reshape_layer = tf.keras.layers.Reshape((6,), name='pose_reshape')
+        # self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
+        # self.reshape_layer = tf.keras.layers.Reshape((6,), name='pose_reshape')
 
     def call(self, inputs, training=False):
         img, imu = inputs
