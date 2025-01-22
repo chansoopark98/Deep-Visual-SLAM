@@ -147,10 +147,6 @@ class Learner(object):
         left_imus = imu[:, :self.num_source] # [B, num_source, imu_seq_len, 6]
         right_imus = imu[:, self.num_source:] # [B, num_source, imu_seq_len, 6]
 
-        # TODO
-        # left_imus = imus[:, :self.num_source] # [B, num_source, imu_seq_len, 12]
-        # right_imus = imus[:, self.num_source:] # [B, num_source, imu_seq_len, 12]
-
         pixel_losses = 0.
         smooth_losses = 0.
         total_loss = 0.
@@ -171,9 +167,6 @@ class Learner(object):
             left_imu = left_imus[:, src_idx]  # [B, imu_seq_len, 6]
             right_imu = right_imus[:, src_idx]  # [B, imu_seq_len, 6]
 
-            # input_images = tf.concat([left_image, tgt_image, right_image], axis=3)  # [B, H, W, 9]
-
-            # pred_disps, pred_poses = self.model(input_images, training=training)
             disp_raw = self.depth_net(tgt_image, training=training)
 
             pred_disps = []

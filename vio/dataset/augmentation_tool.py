@@ -37,3 +37,28 @@ class Augmentations:
         imu_flipped = tf.stack([gx, gy, gz, ax, ay, az], axis=-1)
 
         return imu_flipped
+    
+    @tf.function(jit_compile=True)
+    def image_left_right_flip(self, image):
+        """
+        Args:
+            image: (N, H, W, 3) shape, Tensor
+
+        Returns:
+            image_flipped: 좌우 반전된 이미지 (N, H, W, 3)
+        """
+        image_flipped = tf.image.flip_left_right(image)
+        return image_flipped
+    
+    @tf.function(jit_compile=True)
+    def brightness(self, image, delta):
+        """
+        Args:
+            image: (N, H, W, 3) shape, Tensor
+            delta: 밝기 조절 값
+        
+        Returns:
+            image_brightened: 밝기 조절된 이미지 (N, H, W, 3)
+        """
+        image_brightened = tf.image.adjust_brightness(image, delta)
+        return image_brightened
