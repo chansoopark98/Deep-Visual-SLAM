@@ -44,8 +44,12 @@ class DataLoader(object):
         self.num_test_samples = 0
         
         if self.config['Dataset']['tspxr_capture']:
-            dataset = TspxrCapture(config=self.config)
-            train_dataset  = self._build_generator(np_samples=dataset.train_data)
+            # todo
+            raise NotImplementedError
+        
+        if self.config['Dataset']['mars_logger']:
+            dataset = MarsLoggerHandler(config=self.config)
+            train_dataset = self._build_generator(np_samples=dataset.train_data)
             valid_dataset = self._build_generator(np_samples=dataset.valid_data)
             test_dataset = self._build_generator(np_samples=dataset.test_data)
 
@@ -56,17 +60,6 @@ class DataLoader(object):
             self.num_train_samples += dataset.train_data.shape[0]
             self.num_valid_samples += dataset.valid_data.shape[0]
             self.num_test_samples += dataset.test_data.shape[0]
-        
-        if self.config['Dataset']['mars_logger']:
-            dataset = MarsLoggerHandler(config=self.config)
-            train_dataset = self._build_generator(np_samples=dataset.train_data)
-            valid_dataset = self._build_generator(np_samples=dataset.valid_data)
-
-            train_datasets.append(train_dataset)
-            valid_datasets.append(valid_dataset)
-
-            self.num_train_samples += dataset.train_data.shape[0]
-            self.num_valid_samples += dataset.valid_data.shape[0]
         return train_datasets, valid_datasets, test_datasets
 
     def _build_generator(self, np_samples: np.ndarray) -> tf.data.Dataset:
