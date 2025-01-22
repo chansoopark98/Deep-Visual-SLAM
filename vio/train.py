@@ -5,7 +5,7 @@ import tensorflow as tf
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
-from model.monodepth2 import MonoDepth2Model, DispNet, PoseNet
+from model.monodepth2 import DispNet, PoseNet
 from monodepth_learner import Learner
 from tqdm import tqdm
 import numpy as np
@@ -27,11 +27,6 @@ class Trainer(object):
 
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
-        # self.model = MonoDepth2Model(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
-        #                              batch_size=self.config['Train']['batch_size'])
-        # model_input_shape = (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 9)
-        # self.model.build(model_input_shape)
-        # self.model.summary()
 
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
@@ -220,12 +215,11 @@ class Trainer(object):
             with self.test_summary_writer.as_default():
                 # Logging eval images
                 tf.summary.image('Eval/Trajectory', eval_plot, step=epoch)
-
-            if epoch % 5 == 0:
-                self.depth_net.save_weights('{0}/{1}/depth_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
+            
+            self.depth_net.save_weights('{0}/{1}/depth_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
                                                                                           self.config['Directory']['exp_name'],
                                                                                           epoch))
-                self.pose_net.save_weights('{0}/{1}/pose_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
+            self.pose_net.save_weights('{0}/{1}/pose_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
                                                                                         self.config['Directory']['exp_name'],
                                                                                         epoch))
             self.train_total_loss.reset_states()

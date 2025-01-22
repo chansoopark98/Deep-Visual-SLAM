@@ -149,7 +149,7 @@ if __name__ == '__main__':
     # 바닥에 추가
     plotter.add_mesh(
         plane,
-        # scalars="tile_color",
+        scalars="tile_color",
         show_edges=True,  # 타일 경계선 표시
         cmap=["gray", "white"],  # 타일 색상
     )

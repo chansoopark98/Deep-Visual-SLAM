@@ -122,7 +122,7 @@ class DataLoader(object):
         intrinsic = tf.cast(sample['intrinsic'], tf.float32)
 
         # augmentation
-        # left_images, right_images, target_image, imus, intrinsic = self.augmentation(left_images, right_images, target_image, imus, intrinsic)
+        left_images, right_images, target_image, imus, intrinsic = self.augmentation(left_images, right_images, target_image, imus, intrinsic)
 
         # normalize images
         left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
@@ -151,7 +151,7 @@ class DataLoader(object):
         intrinsic = tf.cast(sample['intrinsic'], tf.float32)
 
         # augmentation
-        # ref_images, target_image, imus, intrinsic = self.augmentation(ref_images, target_image, imus, intrinsic)
+        # left_images, right_images, target_image, imus, intrinsic = self.augmentation(left_images, right_images, target_image, imus, intrinsic)
 
         # normalize images
         left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
@@ -171,33 +171,33 @@ class DataLoader(object):
 
         if tf.random.uniform([]) > 0.5:
             imus = self.augmentor.imu_left_right_flip(imus)
-            left_image = tf.image.flip_left_right(left_image)
-            right_image = tf.image.flip_left_right(right_image)
-            target_image = tf.image.flip_left_right(target_image)
+            left_image = tf.map_fn(self.augmentor.image_left_right_flip, left_image)
+            right_image = tf.map_fn(self.augmentor.image_left_right_flip, right_image)
+            target_image = self.augmentor.image_left_right_flip(target_image)
 
         if tf.random.uniform([]) > 0.5:
-            delta_brightness = tf.random.uniform([], -0.2, 0.2)
-            left_image = tf.image.adjust_brightness(left_image, delta_brightness)
-            right_image = tf.image.adjust_brightness(right_image, delta_brightness)
+            delta_brightness = tf.random.uniform([], -0.4, 0.4)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_brightness(x, delta_brightness), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_brightness(x, delta_brightness), right_image)
             target_image = tf.image.adjust_brightness(target_image, delta_brightness)
         
         if tf.random.uniform([]) > 0.5:
             contrast_factor = tf.random.uniform([], 0.7, 1.3)
-            left_image = tf.image.adjust_contrast(left_image, contrast_factor)
-            right_image = tf.image.adjust_contrast(right_image, contrast_factor)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), right_image)
             target_image = tf.image.adjust_contrast(target_image, contrast_factor)
         
         if tf.random.uniform([]) > 0.5:
-            gamma = tf.random.uniform([], 0.8, 1.2)
-            left_image = tf.image.adjust_gamma(left_image, gamma)
-            right_image = tf.image.adjust_gamma(right_image, gamma)
+            gamma = tf.random.uniform([], 0.7, 1.3)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), right_image)
             target_image = tf.image.adjust_gamma(target_image, gamma)
         
         if tf.random.uniform([]) > 0.5:
-            max_delta = 0.1
+            max_delta = 0.2
             delta = tf.random.uniform([], -max_delta, max_delta)
-            left_image = tf.image.adjust_hue(left_image, delta)
-            right_image = tf.image.adjust_hue(right_image, delta)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), right_image)
             target_image = tf.image.adjust_hue(target_image, delta)
         
         left_image *= 255.
@@ -229,7 +229,7 @@ if __name__ == '__main__':
 
     data_loader = DataLoader(config)
     
-    for sample in data_loader.train_dataset.take(10):
+    for sample in data_loader.train_dataset.take(100):
         ref_images, target_image, imus, intrinsic = sample
         print(ref_images.shape, target_image.shape, imus.shape, intrinsic.shape)
 
@@ -247,8 +247,8 @@ if __name__ == '__main__':
         intrinsic: (batch_size, 3, 3)
         """
 
-        left_images = ref_images[:, :data_loader.num_source]
-        right_images = ref_images[:, data_loader.num_source:]
+        left_images = data_loader.denormalize_image(ref_images[:, :data_loader.num_source])
+        right_images = data_loader.denormalize_image(ref_images[:, data_loader.num_source:])
         left_imus = imus[:, :data_loader.num_source]
         right_imus = imus[:, data_loader.num_source:]
         print(left_images.shape, right_images.shape, left_imus.shape, right_imus.shape)
@@ -260,5 +260,5 @@ if __name__ == '__main__':
         axes[1].imshow(left_images[0, 1])
         axes[2].imshow(right_images[0, 0])
         axes[3].imshow(right_images[0, 1])
-        axes[4].imshow(target_image[0])
+        axes[4].imshow(data_loader.denormalize_image(target_image[0]))
         plt.show()
