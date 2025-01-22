@@ -19,8 +19,10 @@ class MarsLoggerHandler(object):
         self.save_image_size = (3000 // 4, 4000 // 4)
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
+        self.test_dir = os.path.join(self.root_dir, 'test')
         self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
         self.valid_data = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
+        self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False)
 
     def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray, camera_data: pd.DataFrame) -> int:
         video_file = os.path.join(scene_dir, 'movie.mp4')
