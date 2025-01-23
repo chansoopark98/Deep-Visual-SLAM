@@ -1,236 +1,284 @@
 import numpy as np
+import numpy.linalg as la
+import transformations as tr
+import math
 
-# ------------------------------------------------------------------------------
-# 도우미 함수들
-# ------------------------------------------------------------------------------
-def normalize_quaternion(q):
-    """Quaternion을 정규화하는 간단한 함수."""
-    return q / np.linalg.norm(q)
-
-def quaternion_to_rotation_matrix(q):
-    """
-    Quaternion -> 3x3 회전 행렬 변환.
-    q = [qw, qx, qy, qz]
-    """
-    qw, qx, qy, qz = q
-    # 회전 행렬 공식
-    R = np.array([
-        [1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qw*qz,     2*qx*qz + 2*qw*qy    ],
-        [2*qx*qy + 2*qw*qz,     1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qw*qx    ],
-        [2*qx*qz - 2*qw*qy,     2*qy*qz + 2*qw*qx,     1 - 2*qx**2 - 2*qy**2]
-    ], dtype=np.float32)
-    return R
-
-def rotation_matrix_to_quaternion(R):
-    """
-    3x3 회전행렬 -> Quaternion. (W, X, Y, Z) 순서.
-    """
-    # 수치 안정성 고려해 eps 추가
-    eps = 1e-8
-    trace = R[0, 0] + R[1, 1] + R[2, 2]
-    if trace > 0.0:
-        s = 0.5 / np.sqrt(trace + 1.0 + eps)
-        qw = 0.25 / s
-        qx = (R[2, 1] - R[1, 2]) * s
-        qy = (R[0, 2] - R[2, 0]) * s
-        qz = (R[1, 0] - R[0, 1]) * s
-    else:
-        # 대각원소 중 최댓값을 기준으로 계산
-        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-            s = 2.0 * np.sqrt(max(eps, 1.0 + R[0, 0] - R[1, 1] - R[2, 2]))
-            qw = (R[2, 1] - R[1, 2]) / s
-            qx = 0.25 * s
-            qy = (R[0, 1] + R[1, 0]) / s
-            qz = (R[0, 2] + R[2, 0]) / s
-        elif R[1, 1] > R[2, 2]:
-            s = 2.0 * np.sqrt(max(eps, 1.0 + R[1, 1] - R[0, 0] - R[2, 2]))
-            qw = (R[0, 2] - R[2, 0]) / s
-            qx = (R[0, 1] + R[1, 0]) / s
-            qy = 0.25 * s
-            qz = (R[1, 2] + R[2, 1]) / s
-        else:
-            s = 2.0 * np.sqrt(max(eps, 1.0 + R[2, 2] - R[0, 0] - R[1, 1]))
-            qw = (R[1, 0] - R[0, 1]) / s
-            qx = (R[0, 2] + R[2, 0]) / s
-            qy = (R[1, 2] + R[2, 1]) / s
-            qz = 0.25 * s
-    q = np.array([qw, qx, qy, qz], dtype=np.float32)
-    return normalize_quaternion(q)
-
-def build_transformation_matrix(pos, quat):
-    """
-    위치 pos(3,)와 쿼터니언 quat(4,) -> 4x4 변환행렬.
-    """
-    R = quaternion_to_rotation_matrix(quat)
-    T = np.eye(4, dtype=np.float32)
-    T[:3, :3] = R
-    T[:3, 3] = pos
-    return T
-
-def decompose_transformation_matrix(T):
-    """
-    4x4 변환행렬 -> (pos(3,), quat(4,)) 분해.
-    """
-    R = T[:3, :3]
-    pos = T[:3, 3]
-    quat = rotation_matrix_to_quaternion(R)
-    return pos, quat
-
-# ------------------------------------------------------------------------------
-# 간단한 확장 칼만 필터(EKF) 클래스 예시
-# ------------------------------------------------------------------------------
-class SimpleEKF:
+class ImuParameters:
     def __init__(self):
-        # 상태 벡터: [px, py, pz, vx, vy, vz, qw, qx, qy, qz]
-        # 초기값(정지, 단위쿼터니언)
-        self.state = np.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0], dtype=np.float32)
+        self.frequency = 200
+        self.sigma_a_n = 0.0     # acc noise.   m/(s*sqrt(s)), continuous noise sigma
+        self.sigma_w_n = 0.0     # gyro noise.  rad/sqrt(s), continuous noise sigma
+        self.sigma_a_b = 0.0     # acc bias     m/sqrt(s^5), continuous bias sigma
+        self.sigma_w_b = 0.0     # gyro bias    rad/sqrt(s^3), continuous bias sigma
 
-        # 공분산 행렬
-        self.P = np.eye(10, dtype=np.float32) * 1e-3
 
-        # 프로세스 노이즈, 측정 노이즈 가정
-        self.Q = np.eye(10, dtype=np.float32) * 1e-3   # 시스템(과정) 노이즈
-        self.R = np.eye(6, dtype=np.float32) * 1e-2    # 측정(포즈) 노이즈
-
-    def predict(self, imu_data, dt):
+class ESEKF(object):
+    def __init__(self, init_nominal_state: np.array, imu_parameters: ImuParameters):
         """
-        imu_data: (gx, gy, gz, ax, ay, az) 단일 샘플이라고 가정.
-        dt: 샘플 간격(sec).
+        :param init_nominal_state: [ p, q, v, a_b, w_b, g ], a 19x1 or 1x19 vector
+        :param imu_parameters: imu parameters
         """
-        # 상태 벡터 파싱
-        px, py, pz, vx, vy, vz, qw, qx, qy, qz = self.state
-        gyro = imu_data[:3]  # (gx, gy, gz)
-        acc  = imu_data[3:]  # (ax, ay, az)
+        self.nominal_state = init_nominal_state
+        if self.nominal_state[3] < 0:
+            self.nominal_state[3:7] *= 1    # force the quaternion has a positive real part.
+        self.imu_parameters = imu_parameters
 
-        # 현재 쿼터니언 -> 회전행렬
-        R = quaternion_to_rotation_matrix([qw, qx, qy, qz])
-        # 예측 단계(가장 간단한 버전):
-        #   1) 오리엔테이션 갱신(소각 근사 혹은 쿼터니언 미분)
-        #   2) 속도 갱신
-        #   3) 위치 갱신
+        # initialize noise covariance matrix
+        noise_covar = np.zeros((12, 12))
+        # assume the noises (especially sigma_a_n) are isotropic so that we can precompute self.noise_covar and save it.
+        noise_covar[0:3, 0:3] = (imu_parameters.sigma_a_n**2) * np.eye(3)
+        noise_covar[3:6, 3:6] = (imu_parameters.sigma_w_n**2) * np.eye(3)
+        noise_covar[6:9, 6:9] = (imu_parameters.sigma_a_b**2) * np.eye(3)
+        noise_covar[9:12, 9:12] = (imu_parameters.sigma_w_b**2) * np.eye(3)
+        G = np.zeros((18, 12))
+        G[3:6, 3:6] = -np.eye(3)
+        G[6:9, 0:3] = -np.eye(3)
+        G[9:12, 6:9] = np.eye(3)
+        G[12:15, 9:12] = np.eye(3)
+        self.noise_covar = G @ noise_covar @ G.T
 
-        # 1) Gyro 기반 Orientation 업데이트(아주 단순화)
-        # 실제로는 쿼터니언 미분 또는 소각 근사: delta_q ~ 1 + 0.5*gyro*dt
-        angle_axis = gyro * dt
-        # 소각 근사: 회전 벡터가 (rx, ry, rz)일 때,
-        # dq ~= [1, 0.5*rx, 0.5*ry, 0.5*rz]
-        dq = np.array([
-            1.0,
-            0.5 * angle_axis[0],
-            0.5 * angle_axis[1],
-            0.5 * angle_axis[2]
-        ], dtype=np.float32)
-        q_new = quaternion_multiply([qw, qx, qy, qz], dq)
-        q_new = normalize_quaternion(q_new)
+        # initialize error covariance matrix
+        self.error_covar = 0.01 * self.noise_covar
 
-        # 2) 가속도 기반 속도 업데이트 (중력 상쇄 등을 단순화한다고 가정)
-        # R @ acc => 바디좌표계 측정 a를 월드좌표계로 변환
-        acc_world = R @ acc
-        vx_new = vx + acc_world[0] * dt
-        vy_new = vy + acc_world[1] * dt
-        vz_new = vz + acc_world[2] * dt
+        self.last_predict_time = 0.0
 
-        # 3) 위치 업데이트
-        px_new = px + vx_new * dt
-        py_new = py + vy_new * dt
-        pz_new = pz + vz_new * dt
-
-        # state 갱신
-        self.state = np.array([
-            px_new, py_new, pz_new,
-            vx_new, vy_new, vz_new,
-            q_new[0], q_new[1], q_new[2], q_new[3]
-        ], dtype=np.float32)
-
-        # 공분산 P도 예측. (선형 근사 자코비안 필요 -> 단순화하여 P += Q)
-        self.P = self.P + self.Q
-
-    def update(self, measured_transform):
+    def predict(self, imu_measurement: np.array):
         """
-        딥러닝 모델이 추정한 4x4 변환행렬로부터 위치, 오리엔테이션을 측정값으로 사용한다.
-        측정값 z: [px, py, pz, roll, pitch, yaw] (단순 6D로 사용 가능) 등등
-        
-        여기서는 4x4를 pos, quat으로 분해 후, 
-        (px, py, pz, qx, qy, qz)만 쓰는 식으로 단순화.
+        :param imu_measurement: [t, w_m, a_m]
+        :return: 
         """
-        z_pos, z_quat = decompose_transformation_matrix(measured_transform)
+        if self.last_predict_time == imu_measurement[0]:
+            return
+        # we predict error_covar first, because __predict_nominal_state will change the nominal state.
+        self.__predict_error_covar(imu_measurement)
+        self.__predict_nominal_state(imu_measurement)
+        self.last_predict_time = imu_measurement[0]  # update timestamp
 
-        # 내부적으로는 [px, py, pz, qw, qx, qy, qz]를 사용하지만,
-        # roll/pitch/yaw 형태로 측정 업데이트를 할 수도 있음. 
-        # 여기서는 (px, py, pz, qx, qy, qz) 형태로 단순화된 측정값으로 사용.
-        # 측정 벡터 z: 6차원 (pos 3 + quat( x, y, z ) => qw는 별도로?)
-        # EKF에서는 오리엔테이션 측정이 약간 까다롭지만, 간단히 처리하겠습니다.
+    def __update_legacy(self, gt_measurement: np.array, measurement_covar: np.array):
+        """
+        An old implementation of the updating procedure.
+        :param gt_measurement: [p, q], a 7x1 or 1x7 vector
+        :param measurement_covar: a 7x7 symmetrical matrix
+        :return: 
+        """
+        """
+         Hx = dh/dx = [[I, 0, 0, 0, 0, 0]
+                       [0, I, 0, 0, 0, 0]]
+        """
+        Hx = np.zeros((7, 19))
+        Hx[0:3, 0:3] = np.eye(3)
+        Hx[3:7, 3:7] = np.eye(4)
+
+        """
+         X = dx/d(delta_x) = [[I_3, 0, 0],
+                              [0, Q_d_theta, 0],
+                              [0, 0, I_12]
+        """
+        X = np.zeros((19, 18))
+        q = self.nominal_state[3:7]
+        X[0:3, 0:3] = np.eye(3)
+        X[3:7, 3:6] = 0.5 * np.array([[-q[1], -q[2], -q[3]],
+                                      [q[0], -q[3], q[2]],
+                                      [q[3], q[0], -q[1]],
+                                      [-q[2], q[1], q[0]]])
+        X[7:19, 6:18] = np.eye(12)
+
+        H = Hx @ X                      # 7x18
+        PHt = self.error_covar @ H.T    # 18x7
+        # compute Kalman gain. HPH^T, project the error covariance to the measurement space.
+        K = PHt @ la.inv(H @ PHt + measurement_covar)
+
+        # update error covariance matrix
+        self.error_covar = (np.eye(18) - K @ H) @ self.error_covar
+        # force the error_covar to be a symmetrical matrix
+        self.error_covar = 0.5 * (self.error_covar + self.error_covar.T)
+
+        """
+        compute errors.
+        restrict quaternions in measurement and state have positive real parts.
+        this is necessary for errors computation since we subtract quaternions directly.
+        """
+        if gt_measurement[3] < 0:
+            gt_measurement[3:7] *= -1
+        # NOTE: subtracting quaternion directly is tricky. that's why we abandon this implementation.
+        errors = K @ (gt_measurement.reshape(-1, 1) - Hx @ self.nominal_state.reshape(-1, 1))
+
+        # inject errors to the nominal state
+        self.nominal_state[0:3] += errors[0:3, 0]  # update position
+        dq = tr.quaternion_about_axis(la.norm(errors[3:6, 0]), errors[3:6, 0])
+        # print(dq)
+        self.nominal_state[3:7] = tr.quaternion_multiply(q, dq)  # update rotation
+        self.nominal_state[3:7] /= la.norm(self.nominal_state[3:7])
+        if self.nominal_state[3] < 0:
+            self.nominal_state[3:7] *= 1
+        self.nominal_state[7:] += errors[6:, 0]  # update the rest.
+
+        """
+        reset errors to zero and modify the error covariance matrix.
+        we do nothing to the errors since we do not save them.
+        but we need to modify the error_covar according to P = GPG^T
+        """
+        G = np.eye(18)
+        G[3:6, 3:6] = np.eye(3) - tr.skew_matrix(0.5 * errors[3:6, 0])
+        self.error_covar = G @ self.error_covar @ G.T
+
+    def update(self, gt_measurement: np.array, measurement_covar: np.array):
+        """
+        :param gt_measurement: [p, q], a 7x1 or 1x7 vector
+        :param measurement_covar: a 6x6 symmetrical matrix = diag{sigma_p^2, sigma_theta^2}
+        :return: 
+        """
+        """
+        we simulate a system that measure the errors between the nominal state and ground-truth state directly,
+        so that we can avoid the direct subtracting of quaternions.
         
-        # 상태에서 추출한 예측값
-        px, py, pz, vx, vy, vz, qw, qx, qy, qz = self.state
+        we define q1 - q2 = conjugate(q2) x q1, so that q2 x (q1 - q2) = q1.
         
-        # 측정 z
-        z_vec = np.concatenate([z_pos, z_quat[1:]], axis=0)  # (6,)
+        ground_truth - nominal_state = delta = H @ error_state + noise
+        """
+        H = np.zeros((6, 18))
+        H[0:3, 0:3] = np.eye(3)
+        H[3:6, 3:6] = np.eye(3)
+        PHt = self.error_covar @ H.T  # 18x6
+        # compute Kalman gain. HPH^T, project the error covariance to the measurement space.
+        K = PHt @ la.inv(H @ PHt + measurement_covar)  # 18x6
+
+        # update error covariance matrix
+        self.error_covar = (np.eye(18) - K @ H) @ self.error_covar
+        # force the error_covar to be a symmetrical matrix
+        self.error_covar = 0.5 * (self.error_covar + self.error_covar.T)
+
+        # compute the measurements according to the nominal state and ground-truth state.
+        if gt_measurement[3] < 0:
+            gt_measurement[3:7] *= -1
+        gt_p = gt_measurement[0:3]
+        gt_q = gt_measurement[3:7]
+        q = self.nominal_state[3:7]
+
+        delta = np.zeros((6, 1))
+        delta[0:3, 0] = gt_p - self.nominal_state[0:3]
+        delta_q = tr.quaternion_multiply(tr.quaternion_conjugate(q), gt_q)
+        if delta_q[0] < 0:
+            delta_q *= -1
+        angle = math.asin(la.norm(delta_q[1:4]))
+        if math.isclose(angle, 0):
+            axis = np.zeros(3,)
+        else:
+            axis = delta_q[1:4] / la.norm(delta_q[1:4])
+        delta[3:6, 0] = angle * axis
+
+        # compute state errors.
+        errors = K @ delta
+
+        # inject errors to the nominal state
+        self.nominal_state[0:3] += errors[0:3, 0]  # update position
+        dq = tr.quaternion_about_axis(la.norm(errors[3:6, 0]), errors[3:6, 0])
+        # print(dq)
+        self.nominal_state[3:7] = tr.quaternion_multiply(q, dq)  # update rotation
+        self.nominal_state[3:7] /= la.norm(self.nominal_state[3:7])
+        if self.nominal_state[3] < 0:
+            self.nominal_state[3:7] *= 1
+        self.nominal_state[7:] += errors[6:, 0]  # update the rest.
+
+        """
+        reset errors to zero and modify the error covariance matrix.
+        we do nothing to the errors since we do not save them.
+        but we need to modify the error_covar according to P = GPG^T
+        """
+        G = np.eye(18)
+        G[3:6, 3:6] = np.eye(3) - tr.skew_matrix(0.5 * errors[3:6, 0])
+        self.error_covar = G @ self.error_covar @ G.T
+
+    def __predict_nominal_state(self, imu_measurement: np.array):
+        p = self.nominal_state[:3].reshape(-1, 1)
+        q = self.nominal_state[3:7]
+        v = self.nominal_state[7:10].reshape(-1, 1)
+        a_b = self.nominal_state[10:13].reshape(-1, 1)
+        w_b = self.nominal_state[13:16]
+        g = self.nominal_state[16:19].reshape(-1, 1)
+
+        w_m = imu_measurement[1:4].copy()
+        a_m = imu_measurement[4:7].reshape(-1, 1).copy()
+        dt = imu_measurement[0] - self.last_predict_time
+
+        """
+        dp/dt = v
+        dv/dt = R(a_m - a_b) + g
+        dq/dt = 0.5 * q x(quaternion product) (w_m - w_b)
         
-        # 예측값 h(x)
-        # 위치 3개 + quat( x, y, z ) 3개만 측정과 비교
-        h_pos = np.array([px, py, pz], dtype=np.float32)
-        h_quat = np.array([qw, qx, qy, qz], dtype=np.float32)
-        h_vec = np.concatenate([h_pos, h_quat[1:]], axis=0)  # (6,)
+        a_m and w_m are the measurements of IMU.
+        a_b and w_b are biases of acc and gyro, respectively.
+        R = R{q}, which bring the point from local coordinate to global coordinate.
+        """
+        w_m -= w_b
+        a_m -= a_b
 
-        # 잔차
-        y = z_vec - h_vec  # (6,)
+        # use the zero-order integration to integrate the quaternion.
+        # q_{n+1} = q_n x q{(w_m - w_b) * dt}
+        angle = la.norm(w_m)
+        axis = w_m / angle
+        R_w = tr.rotation_matrix(0.5 * dt * angle, axis)
+        q_w = tr.quaternion_from_matrix(R_w, True)
+        q_half_next = tr.quaternion_multiply(q, q_w)
 
-        # 측정행렬 H (선형 근사). 여기서는 단위 행렬 일부를 발췌한 형태로 단순 가정
-        # 상태는 10차원 -> 측정은 6차원
-        # [ px py pz vx vy vz qw qx qy qz ]
-        # 측정은 [ px py pz qx qy qz ]
-        H = np.zeros((6, 10), dtype=np.float32)
-        # 위치 부분
-        H[0, 0] = 1.0  # px
-        H[1, 1] = 1.0  # py
-        H[2, 2] = 1.0  # pz
-        # quat 중 x,y,z 부분만
-        H[3, 8] = 1.0  # qy => 실제로 인덱스 맞춤 필요
-        # 주의: 우리가 state에 qw,qx,qy,qz=(6,7,8,9)이므로
-        #       z_vec의 [3,4,5]가 (qx,qy,qz)에 해당
-        #       state의 [7,8,9]가 (qx,qy,qz)
-        #       잘 맞춰야 함.
-        H[3, 7] = 1.0  # qx
-        H[4, 8] = 1.0  # qy
-        H[5, 9] = 1.0  # qz
+        R_w = tr.rotation_matrix(dt * angle, axis)
+        q_w = tr.quaternion_from_matrix(R_w, True)
+        q_next = tr.quaternion_multiply(q, q_w)
+        if q_next[0] < 0:   # force the quaternion has a positive real part.
+            q_next *= -1
 
-        # 칼만 이득 K = P H^T (H P H^T + R)^-1
-        S = H @ self.P @ H.T + self.R  # (6,6)
-        K = self.P @ H.T @ np.linalg.inv(S)  # (10,6)
-        
-        # 상태 보정
-        x_update = self.state + K @ y  # (10,) 
-        self.state = x_update
-        
-        # P 보정: (I - K H) P
-        I = np.eye(10, dtype=np.float32)
-        self.P = (I - K @ H) @ self.P
-        
-        # 마지막으로 quaternion 정규화
-        qw_new, qx_new, qy_new, qz_new = self.state[6:10]
-        q_norm = np.linalg.norm(self.state[6:10])
-        if q_norm > 1e-8:
-            self.state[6:10] /= q_norm
+        # use RK4 method to integration velocity and position.
+        # integrate velocity first.
+        R = tr.quaternion_matrix(q)[:3, :3]
+        R_half_next = tr.quaternion_matrix(q_half_next)[:3, :3]
+        R_next = tr.quaternion_matrix(q_next)[:3, :3]
+        v_k1 = R @ a_m + g
+        v_k2 = R_half_next @ a_m + g
+        # v_k3 = R_half_next @ a_m + g  # yes. v_k2 = v_k3.
+        v_k3 = v_k2
+        v_k4 = R_next @ a_m + g
+        v_next = v + dt * (v_k1 + 2 * v_k2 + 2 * v_k3 + v_k4) / 6
 
-    def get_state(self):
-        """현재 추정 상태 (pos, vel, quat)."""
-        px, py, pz, vx, vy, vz, qw, qx, qy, qz = self.state
-        return (np.array([px, py, pz], dtype=np.float32),
-                np.array([vx, vy, vz], dtype=np.float32),
-                np.array([qw, qx, qy, qz], dtype=np.float32))
+        # integrate position
+        p_k1 = v
+        p_k2 = v + 0.5 * dt * v_k1  # k2 = v_next_half = v + 0.5 * dt * v' = v + 0.5 * dt * v_k1(evaluate at t0)
+        p_k3 = v + 0.5 * dt * v_k2  # v_k2 is evaluated at t0 + 0.5*delta
+        p_k4 = v + dt * v_k3
+        p_next = p + dt * (p_k1 + 2 * p_k2 + 2 * p_k3 + p_k4) / 6
 
-    def get_transformation_matrix(self):
-        """현재 추정 pos, quat -> 4x4 행렬 반환."""
-        pos, vel, quat = self.get_state()
-        return build_transformation_matrix(pos, quat)
+        self.nominal_state[:3] = p_next.reshape(3,)
+        self.nominal_state[3:7] = q_next
+        self.nominal_state[7:10] = v_next.reshape(3,)
+        # print(q_next)
 
-def quaternion_multiply(q1, q2):
-    """q1, q2: [qw, qx, qy, qz] 형태."""
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    w = w1*w2 - x1*x2 - y1*y2 - z1*z2
-    x = w1*x2 + x1*w2 + y1*z2 - z1*y2
-    y = w1*y2 + y1*w2 + z1*x2 - x1*z2
-    z = w1*z2 + z1*w2 + x1*y2 - y1*x2
-    return np.array([w, x, y, z], dtype=np.float32)
+    def __predict_error_covar(self, imu_measurement: np.array):
+        w_m = imu_measurement[1:4]
+        a_m = imu_measurement[4:7]
+        a_b = self.nominal_state[9:12]
+        w_b = self.nominal_state[12:15]
+        q = self.nominal_state[3:7]
+        R = tr.quaternion_matrix(q)[:3, :3]
+
+        F = np.zeros((18, 18))
+        F[0:3, 6:9] = np.eye(3)
+        F[3:6, 3:6] = -tr.skew_matrix(w_m - w_b)
+        F[3:6, 12:15] = -np.eye(3)
+        F[6:9, 3:6] = -R @ tr.skew_matrix(a_m - a_b)
+        F[6:9, 9:12] = -R
+
+        # use 3rd-order truncated integration to compute transition matrix Phi.
+        dt = imu_measurement[0] - self.last_predict_time
+        Fdt = F * dt
+        Fdt2 = Fdt @ Fdt
+        Fdt3 = Fdt2 @ Fdt
+        Phi = np.eye(18) + Fdt + 0.5 * Fdt2 + (1. / 6.) * Fdt3
+
+        """
+        use trapezoidal integration to integrate noise covariance:
+          Qd = 0.5 * dt * (Phi @ self.noise_covar @ Phi.T + self.noise_covar)
+          self.error_covar = Phi @ self.error_covar @ Phi.T + Qd
+          
+        operations above can be merged to the below for efficiency.
+        """
+        Qc_dt = 0.5*dt*self.noise_covar
+        self.error_covar = Phi @ (self.error_covar + Qc_dt) @ Phi.T + Qc_dt
