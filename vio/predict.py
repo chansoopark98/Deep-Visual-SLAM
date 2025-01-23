@@ -6,7 +6,7 @@ import sys
 import os
 import time
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-from model.monodepth2 import DispNet, PoseNet
+from model.monodepth2 import DispNet, PoseImuNet
 from utils.kalman_filter import SimpleEKF
 from eval import EvalTrajectory, euler_to_rotation_matrix, pose_vector_to_transform, pose_axis_angle_vec2mat
 
@@ -97,7 +97,7 @@ if __name__ == '__main__':
         depth_net(tf.random.normal((1, *image_shape, 3)))
         depth_net.load_weights('./weights/imu_test_dataV2_poseNet_dataAug/depth_net_epoch_49_model.h5')
 
-        pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
+        pose_net = PoseImuNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
         posenet_input_shape = [(batch_size, *image_shape, 6),
                                 (batch_size, config['Train']['imu_seq_len'], 6)]
         pose_net.build(posenet_input_shape)
