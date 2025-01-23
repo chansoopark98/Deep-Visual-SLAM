@@ -130,6 +130,11 @@ class MarsLoggerHandler(object):
                 left_imu_array = left_imu_df.iloc[:, 1:].values
                 right_imu_array = right_imu_df.iloc[:, 1:].values
 
+                # pd.dataframe -> np.ndarray
+                
+                left_imu_array = np.asarray(left_imu_array, np.float32)
+                right_imu_array = np.asarray(right_imu_array, np.float32)
+
                 left_imu_resampled = resample_imu(left_imu_array, self.imu_seq_len)
                 right_imu_resampled = resample_imu(right_imu_array, self.imu_seq_len)
 

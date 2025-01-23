@@ -95,8 +95,14 @@ class EvalTrajectory(Learner):
 
         cat_left = tf.concat([left_image, tgt_image], axis=3)   # [B,H,W,6]
         cat_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
-        pose_left = self.pose_net([cat_left, left_imu], training=False)    # [B,6]
-        pose_right = self.pose_net([cat_right, right_imu], training=False)  # [B,6]
+
+        # pose_left = self.pose_net([cat_left, left_imu], training=False)    # [B,6]
+        # pose_right = self.pose_net([cat_right, right_imu], training=False)  # [B,6]
+
+        pose_left = self.pose_net(cat_left, training=False)    # [B,6]
+        pose_right = self.pose_net(cat_right, training=False)  # [B,6]
+
+
         batch_poses = tf.stack([pose_left, pose_right], axis=1)    # [B,2,6]
         batch_poses = tf.cast(batch_poses, tf.float32) 
 

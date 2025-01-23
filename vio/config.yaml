@@ -1,5 +1,5 @@
 Directory:
-  exp_name: imu_test_dataV2_poseNet_dataAug
+  exp_name: vo_dataAug_ep101_lr1e-4_norm1.0_decay1e-4
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights

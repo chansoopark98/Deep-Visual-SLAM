@@ -5,7 +5,7 @@ import tensorflow as tf
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
-from model.monodepth2 import DispNet, PoseNet
+from model.monodepth2 import DispNet, PoseImuNet, PoseNet
 from monodepth_learner import Learner
 from tqdm import tqdm
 import numpy as np
@@ -33,9 +33,11 @@ class Trainer(object):
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
         self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
 
+        # self.pose_net = PoseImuNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        # posenet_input_shape = [(self.batch_size, *image_shape, 6),
+        #                        (self.batch_size, None, 6)]
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
-        posenet_input_shape = [(self.batch_size, *image_shape, 6),
-                               (self.batch_size, self.config['Train']['imu_seq_len'], 6)]
+        posenet_input_shape = [(self.batch_size, *image_shape, 6)]
         self.pose_net.build(posenet_input_shape)
         
         # 2. Dataset
