@@ -27,6 +27,7 @@ class DataLoader(object):
         self.max_depth = self.config['Train']['max_depth']
         self.num_train_samples = 0
         self.num_valid_samples = 0
+        self.crop_size = 100
 
         self.train_datasets, self.valid_datasets = self._load_dataset()
         
@@ -118,7 +119,6 @@ class DataLoader(object):
                               self.image_size,
                               method=tf.image.ResizeMethod.BILINEAR)
         rgb = tf.cast(rgb, tf.float32)
-        rgb = self.normalize_image(rgb)
         return rgb
 
     @tf.function(jit_compile=True)
@@ -209,9 +209,13 @@ class DataLoader(object):
                 - rgb (tf.Tensor): Augmented and preprocessed RGB tensor.
                 - depth (tf.Tensor): Augmented and preprocessed depth tensor.
         """
-        rgb, depth = self.augment(rgb, depth)
+
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
+        
+        rgb, depth = self.augment(rgb, depth)
+    
+        rgb = self.normalize_image(rgb)
         return rgb, depth
 
     @tf.function(jit_compile=True)
@@ -230,6 +234,8 @@ class DataLoader(object):
         """
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
+
+        rgb = self.normalize_image(rgb)
         return rgb, depth
     
     @tf.function(jit_compile=True)
@@ -282,7 +288,7 @@ class DataLoader(object):
         rgb = tf.cast(rgb, tf.float32) / 255.0
 
         if tf.random.uniform([]) > 0.5:
-            delta_brightness = tf.random.uniform([], -0.2, 0.2)
+            delta_brightness = tf.random.uniform([], -0.3, 0.3)
             rgb = tf.image.adjust_brightness(rgb, delta_brightness)
         
         if tf.random.uniform([]) > 0.5:
@@ -296,6 +302,18 @@ class DataLoader(object):
         if tf.random.uniform([]) > 0.5:
             max_delta = 0.1
             rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
+
+        # random crop
+        if tf.random.uniform([]) > 0.5:
+            concat = tf.concat([rgb, depth], axis=-1)
+            concat = tf.image.random_crop(concat, size=(self.image_size[0] - self.crop_size,
+                                                    self.image_size[1] - self.crop_size, 4))
+            
+            cropped_rgb = concat[:, :, :3]
+            cropped_depth = concat[:, :, 3:]
+
+            rgb = tf.image.resize(cropped_rgb, self.image_size, method=tf.image.ResizeMethod.BILINEAR)
+            depth = tf.image.resize(cropped_depth, self.image_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
         # flip left-right
         if tf.random.uniform([]) > 0.5:
@@ -338,36 +356,22 @@ class DataLoader(object):
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
+    import yaml
     root_dir = './depth/data/'
-    config = {
-        'Directory': {
-            'data_dir': root_dir
-        },
-        'Dataset':{
-            'Nyu_depth_v2': True,
-            'Diode': True,
-            'DIML': True,
-        },
-        'Train': {
-            'batch_size': 128,
-            'max_depth': 10.,
-            'min_depth': 0.1,
-            'use_shuffle': True,
-            'img_h': 480, # 480
-            'img_w': 720 # 720
-        }
-    }
+    with open('./depth/config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+
     data_loader = DataLoader(config)
     import os, sys
     sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-    from depth_learner import DepthLearner
-    learner = DepthLearner(None, None)
+    # from depth_learner import DepthLearner
+    # learner = DepthLearner(None, None)
 
     for idx, samples in enumerate(data_loader.train_dataset.take(data_loader.num_train_samples)):
-        rgb, depth, intrinsic = samples
+        rgb, depth = samples
         print(rgb.shape)
         print(depth.shape)
-        print(intrinsic)
+        
         rgb = data_loader.denormalize_image(rgb)
         plt.imshow(rgb[0])
         plt.show()
@@ -375,7 +379,7 @@ if __name__ == '__main__':
         plt.show()
     
         mask = depth > 0
-        disp, mask = learner.depth_to_disparity(depth[0], mask=mask)
+        # disp, mask = learner.depth_to_disparity(depth[0], mask=mask)
 
-        plt.imshow(disp, cmap='plasma')
-        plt.show()
+        # plt.imshow(disp, cmap='plasma')
+        # plt.show()
