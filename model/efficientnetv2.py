@@ -1,9 +1,62 @@
 import tensorflow as tf
 
+def get_efficientv2b0(image_shape):
+    base_model = tf.keras.applications.EfficientNetV2B0(
+        include_top=False,
+        weights='imagenet',
+        input_shape=image_shape,
+        classes=0,
+        classifier_activation=None,
+        include_preprocessing=False
+    )
+    base_model.summary()
+    layer_names = [
+        "block6h_add",
+        "block5e_add",
+        "block3b_add",
+        "block2b_add",
+        "block1a_project_activation",
+    ]
+
+    outputs = [base_model.get_layer(name).output for name in layer_names]
+
+    partial_model = tf.keras.Model(
+        inputs=base_model.input,
+        outputs=outputs,
+        name=f"efficientnetv2b0_partial"
+    )
+    return partial_model
+
+def get_efficientv2s(image_shape):
+    base_model = tf.keras.applications.EfficientNetV2S(
+        include_top=False,
+        weights='imagenet',
+        input_shape=image_shape,
+        classes=0,
+        classifier_activation=None,
+        include_preprocessing=False
+    )
+    layer_names = [
+        "block6o_add",
+        "block5h_add",
+        "block3d_add",
+        "block2d_add",
+        "block1b_add",
+    ]
+
+    outputs = [base_model.get_layer(name).output for name in layer_names]
+
+    partial_model = tf.keras.Model(
+        inputs=base_model.input,
+        outputs=outputs,
+        name=f"efficientnetv2s_partial"
+    )
+    return partial_model
+
 class EfficientNetV2Encoder:
-    def __init__(self, image_shape, batch_size, prefix='efficientnetv2s'):
+    def __init__(self, image_shape, model_type, batch_size, prefix='efficientnetv2'):
         """
-        Initializes the MobilenetV3Large class.
+        Initializes the EfficientNetV2Encoder class.
 
         Args:
             image_shape (tuple): Input image shape (height, width, channels).
@@ -14,104 +67,33 @@ class EfficientNetV2Encoder:
             raise ValueError("image_shape must be a tuple of (height, width, channels)")
 
         self.image_shape = image_shape
+        self.model_type = model_type
         self.batch_size = batch_size
         self.prefix = prefix
 
     def build_model(self) -> tf.keras.Model:
-        """
-        Builds a MobileNetV3Large-based functional model with skip connections.
 
-        Returns:
-            tf.keras.Model: Functional model.
-        """
+        if self.model_type == 's':
+            effnet = get_efficientv2s(self.image_shape)
 
-        base_model = tf.keras.applications.EfficientNetV2S(
-            include_top=False,
-            weights='imagenet',
-            input_shape=self.image_shape,
-            classes=0,
-            classifier_activation=None,
-            include_preprocessing=False
-        )
-        layer_names = [
-            "block1b_add",
-            "block2d_add",
-            "block3d_add",
-            "block5h_add",
-            "block6o_add",
-        ]
-
-        outputs = [base_model.get_layer(name).output for name in layer_names]
-
-        partial_model = tf.keras.Model(
-            inputs=base_model.input,
-            outputs=outputs,
-            name=f"{self.prefix}_partial"
-        )
+        elif self.model_type == 'b0':
+            effnet = get_efficientv2b0(self.image_shape)
 
         inputs = tf.keras.Input(shape=self.image_shape, name="input_image")
-        features = partial_model(inputs)
+        features = effnet(inputs)
 
-        x = features[-1]  # block6o_add (H/32)
+        x = features[0]  # (H/32)
 
         skips = [
-            features[3],  # block5h_add (H/16)
-            features[2],  # block3d_add (H/8)
-            features[1],  # block2d_add (H/4)
-            features[0]   # block1b_add (H/2)
+            features[1],  # (H/16)
+            features[2],  # (H/8)
+            features[3],  # (H/4)
+            features[4]   # (H/2)
         ]
-
         return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_model")
     
-# class EfficientNetV2Encoder(tf.keras.Model):
-#     def __init__(self, 
-#                  image_shape: tuple,
-#                  batch_size: int,
-#                  prefix: str = 'efficientnetv2',
-#                  **kwargs):
-#         super(EfficientNetV2Encoder, self).__init__(**kwargs)
-#         self.image_shape = image_shape
-#         self.batch_size = batch_size
-#         self.prefix = prefix
-
-#         self.base_model = tf.keras.applications.EfficientNetV2S(
-#             include_top=False,
-#             weights='imagenet',
-#             input_shape=(image_shape[0], image_shape[1], 3),
-#             classes=0,
-#             classifier_activation=None,
-#             include_preprocessing=False
-#         )
-#         self.layer_names = [
-#             "block1b_add",
-#             "block2d_add",
-#             "block3d_add",
-#             "block5h_add",
-#             "block6o_add",
-#         ]
-
-#         outputs = [self.base_model.get_layer(name).output for name in self.layer_names]
-        
-#         self.partial_model = tf.keras.Model(inputs=self.base_model.input, 
-#                                             outputs=outputs,
-#                                             name=f"{prefix}_partial")
-
-#     def call(self, inputs, training=False):
-#         """
-#         inputs: [B, H, W, 3]
-#         returns:
-#             x    : 가장 깊은 feature (H/32 크기)
-#             skips: [skip4, skip3, skip2, skip1] 형태로 반환
-#                    (기존 DispNet 구조가 skip[0], skip[1], ... 접근)
-#         """
-#         features = self.partial_model(inputs, training=training)
-        
-#         x = features[-1]  # block6o_add (H/32)
-        
-#         skips = [
-#             features[3],  # block5h_add (H/16)
-#             features[2],  # block3d_add (H/8)
-#             features[1],  # block2d_add (H/4)
-#             features[0]   # block1b_add (H/2)
-#         ]
-#         return x, skips
+if __name__ == '__main__':
+    image_shape = (224, 224, 3)
+    batch_size = 32
+    model = EfficientNetV2Encoder(image_shape, 'b0', batch_size)
+    model.build_model().summary()

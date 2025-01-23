@@ -1,5 +1,5 @@
 Directory:
-  exp_name: nyu_diode_diml_cropAug_640x480_0.1-10
+  exp_name: effv2b0_relative_ep31_lr2e-4_norm1.0_decay1e-3
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -16,11 +16,11 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: True  
     valid: False 
   Hypersim:
-    train: False 
+    train: True 
     valid: False 
 
 Train:
-  mode: 'metric' # 'relative' (normalized depth) or 'metric' (absolute depth)
+  mode: 'relative' # 'relative' (normalized depth) or 'metric' (absolute depth)
   use_shuffle: True # Whether to shuffle training data
   train_plot_interval: 100 # Interval for plotting during training
   valid_plot_interval: 100 # Interval for plotting during validation

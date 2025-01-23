@@ -115,10 +115,12 @@ class DispNet(tf.keras.Model):
                               batch_size=batch_size,
                               pretrained=True,
                               prefix=prefix + '_resnet18').build_model()
-
-        # self.encoder = tf.keras.models.load_model('./assets/weigths/backbone_resnet18.h5')
-        # self.encoder.build((batch_size, *image_shape, 3))
-
+        
+        # self.encoder = EfficientNetV2Encoder(image_shape=(*image_shape, 3),
+        #                                      model_type='b0',
+        #                                      batch_size=batch_size,
+        #                                      prefix=prefix + '_efficientnetv2').build_model()
+        
         # Depth Decoder
         print('Building Depth Decoder Model')
         filters = [16, 32, 64, 128, 256]
