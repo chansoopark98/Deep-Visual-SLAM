@@ -41,35 +41,6 @@ class Resnet:
             layer._name = f"{self.prefix}_{layer.name}"        
 
         return base_model
-    
-        # layer_names = [
-        #     f"{self.prefix}_activation_15",
-        #     f"{self.prefix}_activation_11",
-        #     f"{self.prefix}_activation_7",
-        #     f"{self.prefix}_activation_3",
-        #     f"{self.prefix}_relu",
-        # ]
-
-        # outputs = [base_model.get_layer(name).output for name in layer_names]
-
-        # partial_model = tf.keras.Model(
-        #     inputs=base_model.input,
-        #     outputs=outputs,
-        #     name=f"{self.prefix}_partial_resnet18"
-        # )
-                
-        # features = partial_model(inputs)
-
-        # x = features[0]  # block6o_add (H/32)
-
-        # skips = [
-        #     features[1],  # block5h_add (H/16)
-        #     features[2],  # block3d_add (H/8)
-        #     features[3],  # block2d_add (H/4)
-        #     features[4]   # block1b_add (H/2)
-        # ]
-
-        # return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_resnet18")
 
 if __name__ == '__main__':
     image_shape = (480, 640, 6)

@@ -4,11 +4,37 @@ import numpy as np
 import yaml
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from model.monodepth2 import DispNet, PoseNet
 from utils.visualization import Visualizer
 from eval import EvalTrajectory, pose_axis_angle_vec2mat
-from utils.kalman_filter import ESEKF, ImuParameters
+from kalman_filter import ESEKF, ImuParameters
+
+
+def imu_pose_to_transform(pose):
+    """
+    Convert IMU pose [p_x, p_y, p_z, q_w, q_x, q_y, q_z] to a 4x4 transformation matrix.
+    :param pose: Array of shape [7], where the first 3 elements are position and the next 4 are quaternion.
+    :return: Array of shape [4, 4], 4x4 transformation matrix.
+    """
+    # Extract position and quaternion
+    position = pose[:3]  # [3]
+    q_w, q_x, q_y, q_z = pose[3:]  # Quaternion components
+
+    # Compute the rotation matrix from quaternion
+    R = np.array([
+        [1 - 2 * (q_y**2 + q_z**2), 2 * (q_x * q_y - q_z * q_w), 2 * (q_x * q_z + q_y * q_w)],
+        [2 * (q_x * q_y + q_z * q_w), 1 - 2 * (q_x**2 + q_z**2), 2 * (q_y * q_z - q_x * q_w)],
+        [2 * (q_x * q_z - q_y * q_w), 2 * (q_y * q_z + q_x * q_w), 1 - 2 * (q_x**2 + q_y**2)]
+    ])
+
+    # Create the 4x4 transformation matrix
+    transform = np.eye(4)  # Initialize as identity matrix
+    transform[:3, :3] = R  # Set rotation
+    transform[:3, 3] = position  # Set translation
+
+    return transform
 
 if __name__ == '__main__':
     from dataset.data_loader import DataLoader
@@ -71,7 +97,7 @@ if __name__ == '__main__':
             input_images = tf.concat([left_image, target_image], axis=3)
             pose = pose_net(input_images, training=False) # [B, 6]
             pred_transform = pose_axis_angle_vec2mat(pose, invert=True)[0] # [4, 4] transformation matrix
-            
+
             updated_pose = visualizer.world_pose @ pred_transform.numpy()
             visualizer.world_pose = updated_pose
 

@@ -5,7 +5,7 @@ import math
 
 class ImuParameters:
     def __init__(self):
-        self.frequency = 200
+        self.frequency = 100
         self.sigma_a_n = 0.0     # acc noise.   m/(s*sqrt(s)), continuous noise sigma
         self.sigma_w_n = 0.0     # gyro noise.  rad/sqrt(s), continuous noise sigma
         self.sigma_a_b = 0.0     # acc bias     m/sqrt(s^5), continuous bias sigma
