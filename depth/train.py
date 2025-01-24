@@ -104,9 +104,13 @@ class Trainer(object):
                                                 name='valid_depth_metrics')
 
         # 7. Logger
+        depth_train_type = self.config['Train']['mode']
+        if depth_train_type not in ['relative', 'metric']:
+            raise ValueError("Invalid depth training type. Choose 'relative' or 'metric'.")
+        
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-        tensorboard_path = os.path.join('depth', self.config['Directory']['log_dir'] + \
-            '/' + current_time + '_')
+        tensorboard_path = os.path.join('depth', self.config['Directory']['log_dir'], 
+                        depth_train_type, current_time + '_')
         self.train_summary_writer = tf.summary.create_file_writer(
             tensorboard_path + self.config['Directory']['exp_name'] + '/train')
         self.valid_summary_writer = tf.summary.create_file_writer(
@@ -301,13 +305,13 @@ class Trainer(object):
             with self.train_summary_writer.as_default():
                 # Logging train total, pixel, smooth loss
                 tf.summary.scalar(f'Train/{self.train_total_loss.name}' ,
-                                    self.train_total_loss.result(), step=current_step)
+                                    self.train_total_loss.result(), step=epoch)
                 tf.summary.scalar(f'Train/{self.train_smooth_loss.name}',
-                                    self.train_smooth_loss.result(), step=current_step)
+                                    self.train_smooth_loss.result(), step=epoch)
                 tf.summary.scalar(f'Train/{self.train_log_loss.name}',
-                                    self.train_log_loss.result(), step=current_step)
+                                    self.train_log_loss.result(), step=epoch)
                 tf.summary.scalar(f'Train/{self.train_l1_loss.name}',
-                                    self.train_l1_loss.result(), step=current_step)
+                                    self.train_l1_loss.result(), step=epoch)
 
             # Validation
             valid_tqdm = tqdm(self.valid_dataset,
@@ -348,18 +352,18 @@ class Trainer(object):
             with self.valid_summary_writer.as_default():
                         # Logging valid total, pixel, smooth loss
                         tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
-                                          self.valid_total_loss.result(), step=current_step)
+                                          self.valid_total_loss.result(), step=epoch)
                         tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
-                                            self.valid_smooth_loss.result(), step=current_step)
+                                            self.valid_smooth_loss.result(), step=epoch)
                         tf.summary.scalar(f'Valid/{self.valid_log_loss.name}',
-                                            self.valid_log_loss.result(), step=current_step)
+                                            self.valid_log_loss.result(), step=epoch)
                         tf.summary.scalar(f'Valid/{self.valid_l1_loss.name}',
-                                            self.valid_l1_loss.result(), step=current_step)            
+                                            self.valid_l1_loss.result(), step=epoch)            
                         
             with self.valid_summary_writer.as_default():
                 metrics_dict = self.valid_depth_metrics.get_all_metrics()
                 for metric_name, metric_value in metrics_dict.items():
-                    tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=current_step)
+                    tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=epoch)
 
             if epoch % 5 == 0:
                 self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],

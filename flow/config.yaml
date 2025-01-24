@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Resnet_FlowV2_ep50_soft_augment_lr1e-4_norm1.0_decay1e-4
+  exp_name: Resnet_FlowV2_ep50_soft_augment_lr1e-4_norm1.0_decay1e-4_v2
   data_dir: ./flow/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -18,9 +18,9 @@ Train:
   clip_norm: 1.0
   beta1: 0.9
   weight_decay: 0.0001
-  batch_size: 16 # 1
-  epoch: 51
-  init_lr: 0.0001
+  batch_size: 32 # 1
+  epoch: 101
+  init_lr: 0.0004
   final_lr: 0.00001
   power: 0.9
 

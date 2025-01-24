@@ -379,7 +379,3 @@ if __name__ == '__main__':
         plt.show()
     
         mask = depth > 0
-        # disp, mask = learner.depth_to_disparity(depth[0], mask=mask)
-
-        # plt.imshow(disp, cmap='plasma')
-        # plt.show()

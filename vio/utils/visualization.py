@@ -20,7 +20,7 @@ class Visualizer:
         self.plotter.show_axes()
         self.plotter.add_axes_at_origin()
         self.plotter.show(auto_close=False, interactive_update=True)
-        
+
         self.draw_plane = draw_plane
         self.is_record = is_record
 
@@ -47,8 +47,6 @@ class Visualizer:
 
         # floor poisition
         self.world_center = init_pose[:3, 3]  # init_pose 중심
-        
-
 
     def _draw_plane(self, world_center: np.ndarray, grid_size: int, tile_size: int = 1) -> None:
         """
