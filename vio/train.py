@@ -6,7 +6,8 @@ from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
 from model.monodepth2 import DispNet, PoseImuNet, PoseNet
-from monodepth_learner import Learner
+# from monodepth_learner import Learner
+from monodepth_learner_new import Learner
 from tqdm import tqdm
 import numpy as np
 from datetime import datetime
@@ -91,9 +92,10 @@ class Trainer(object):
                     exist_ok=True)
     
     @tf.function(jit_compile=True)
-    def train_step(self, ref_images, target_image, imus, intrinsic) -> tf.Tensor:
+    def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
         with tf.GradientTape(persistent=True) as tape:
-            total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, imus, intrinsic, training=True)
+            # total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
             scaled_loss = self.optimizer.get_scaled_loss(total_loss)
 
         # loss update
@@ -106,12 +108,13 @@ class Trainer(object):
         self.optimizer.apply_gradients(zip(depth_unscale_grad, self.depth_net.trainable_variables))
         self.optimizer.apply_gradients(zip(pose_unscale_grad, self.pose_net.trainable_variables))
         
-        return total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs
+        return total_loss, pixel_loss, smooth_loss, pred_depths
     
     @tf.function(jit_compile=True)
-    def validation_step(self, ref_images, target_image, imus, intrinsic) -> tf.Tensor:
-        total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, imus, intrinsic, training=False)
-        return total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs
+    def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
+        # total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
+        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
+        return total_loss, pixel_loss, smooth_loss, pred_depths
 
     def train(self) -> None:        
         for epoch in range(self.config['Train']['epoch']):    
@@ -124,8 +127,8 @@ class Trainer(object):
             print(' LR : {0}'.format(self.optimizer.learning_rate))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
-            for idx, (ref_images, target_image, imus, intrinsic) in enumerate(train_tqdm):
-                train_t_loss, train_p_loss, train_s_loss, pred_train_depths, train_vis_outputs = self.train_step(ref_images, target_image, imus, intrinsic)
+            for idx, (ref_images, target_image, intrinsic) in enumerate(train_tqdm):
+                train_t_loss, train_p_loss, train_s_loss, pred_train_depths = self.train_step(ref_images, target_image, intrinsic)
 
                 # Update train metrics
                 self.train_total_loss(train_t_loss)
@@ -140,16 +143,16 @@ class Trainer(object):
                                                                   pred_depths=pred_train_depths,
                                                                   denorm_func=self.data_loader.denormalize_image)
 
-                    train_warp_plot = self.plot_tool.plot_warp_images(vis_outputs=train_vis_outputs,
-                                                                      denorm_func=self.data_loader.denormalize_image)
+                    # train_warp_plot = self.plot_tool.plot_warp_images(vis_outputs=train_vis_outputs,
+                    #                                                   denorm_func=self.data_loader.denormalize_image)
                     
-                    train_warp_loss_plot = self.plot_tool.plot_warp_loss(vis_outputs=train_vis_outputs)
+                    # train_warp_loss_plot = self.plot_tool.plot_warp_loss(vis_outputs=train_vis_outputs)
 
                     with self.train_summary_writer.as_default():
                         # Logging train images
                         tf.summary.image('Train/Depth Result', train_depth_plot, step=current_step)
-                        tf.summary.image('Train/Warp Result', train_warp_plot, step=current_step)
-                        tf.summary.image('Train/Warp Loss', train_warp_loss_plot, step=current_step)
+                        # tf.summary.image('Train/Warp Result', train_warp_plot, step=current_step)
+                        # tf.summary.image('Train/Warp Loss', train_warp_loss_plot, step=current_step)
                         
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy(),
@@ -169,14 +172,14 @@ class Trainer(object):
             # Validation
             valid_tqdm = tqdm(self.data_loader.valid_dataset, total=self.data_loader.num_valid_samples)
             valid_tqdm.set_description('Validation || ')
-            for idx, (ref_images, target_image, imus, intrinsic) in enumerate(valid_tqdm):
-                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths, valid_vis_outputs = self.validation_step(ref_images, target_image, imus, intrinsic)
+            for idx, (ref_images, target_image, intrinsic) in enumerate(valid_tqdm):
+                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths = self.validation_step(ref_images, target_image, intrinsic)
 
                 # Update valid metrics
                 self.valid_total_loss(valid_t_loss)
                 self.valid_pixel_loss(valid_p_loss)
                 self.valid_smooth_loss(valid_s_loss)
-                self.eval_tool.update_state(ref_images, target_image, imus, intrinsic)
+                self.eval_tool.update_state(ref_images, target_image, intrinsic)
 
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     current_step = self.data_loader.num_valid_samples * epoch + idx
@@ -185,16 +188,16 @@ class Trainer(object):
                                                                   pred_depths=pred_valid_depths,
                                                                   denorm_func=self.data_loader.denormalize_image)
                     
-                    valid_warp_plot = self.plot_tool.plot_warp_images(vis_outputs=valid_vis_outputs,
-                                                                      denorm_func=self.data_loader.denormalize_image)
+                    # valid_warp_plot = self.plot_tool.plot_warp_images(vis_outputs=valid_vis_outputs,
+                    #                                                   denorm_func=self.data_loader.denormalize_image)
                     
-                    valid_warp_loss_plot = self.plot_tool.plot_warp_loss(vis_outputs=valid_vis_outputs)
+                    # valid_warp_loss_plot = self.plot_tool.plot_warp_loss(vis_outputs=valid_vis_outputs)
 
                     with self.valid_summary_writer.as_default():
                         # Logging valid images
                         tf.summary.image('Valid/Depth Result', valid_depth_plot, step=current_step)
-                        tf.summary.image('Valid/Warp Result', valid_warp_plot, step=current_step)
-                        tf.summary.image('Valid/Warp Loss', valid_warp_loss_plot, step=current_step)
+                        # tf.summary.image('Valid/Warp Result', valid_warp_plot, step=current_step)
+                        # tf.summary.image('Valid/Warp Loss', valid_warp_loss_plot, step=current_step)
 
                 valid_tqdm.set_postfix(
                     total_loss=self.valid_total_loss.result().numpy(),

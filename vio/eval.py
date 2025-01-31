@@ -62,7 +62,7 @@ class EvalTrajectory(Learner):
         self.pred_pose_list = []
         self.intrinsic_list = []
 
-    def update_state(self, ref_images, tgt_image, imus, intrinsic: tf.Tensor):
+    def update_state(self, ref_images, tgt_image, intrinsic: tf.Tensor):
         """
         images: List of RGB images
         imus: List of IMU data
@@ -71,18 +71,8 @@ class EvalTrajectory(Learner):
         left_images = ref_images[:, :self.num_source] # [B, num_source, H, W, 3]
         right_images = ref_images[:, self.num_source:] # [B, num_source, H, W, 3]
 
-        left_imus = imus[:, :self.num_source] # [B, num_source, 6]
-        right_imus = imus[:, self.num_source:] # [B, num_source, 6]
-
         left_image = left_images[:, 0] # [B, H, W, 3]
         right_image = right_images[:, 0] # [B, H, W, 3]
-
-        left_imu = left_imus[:, 0] # [B, 6]
-        right_imu = right_imus[:, 0] # [B, 6]
-
-        # images = tf.concat([left_image, tgt_image, right_image], axis=-1) # [B, 3, H, W, 3]
-
-        # batch_disps, batch_poses = self.model(images, training=False)
 
         disp_raw = self.depth_net(tgt_image, training=False)
 
@@ -96,12 +86,8 @@ class EvalTrajectory(Learner):
         cat_left = tf.concat([left_image, tgt_image], axis=3)   # [B,H,W,6]
         cat_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
 
-        # pose_left = self.pose_net([cat_left, left_imu], training=False)    # [B,6]
-        # pose_right = self.pose_net([cat_right, right_imu], training=False)  # [B,6]
-
         pose_left = self.pose_net(cat_left, training=False)    # [B,6]
         pose_right = self.pose_net(cat_right, training=False)  # [B,6]
-
 
         batch_poses = tf.stack([pose_left, pose_right], axis=1)    # [B,2,6]
         batch_poses = tf.cast(batch_poses, tf.float32) 

@@ -26,12 +26,12 @@ Train:
   img_h: 480
   weight_decay: 0.0001
   beta1: 0.9
-  batch_size: 16 # 1
+  batch_size: 8 # 1
   epoch: 101
   init_lr: 0.0001
   end_lr: 0.00001
 
 Experiment:
-  gpus: [1] # [0, 1]
+  gpus: [0] # [0, 1]
   gpu_vram: 24000
   gpu_vram_factor: 0.9
