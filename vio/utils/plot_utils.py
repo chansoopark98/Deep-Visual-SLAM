@@ -20,27 +20,17 @@ class PlotTool:
         image = denorm_func(images[0])
         pred_depths = [depth[0] for depth in pred_depths]
         
-        fig, axes = plt.subplots(2, 1 + self.num_scales, figsize=(10, 10))
+        fig, axes = plt.subplots(1, 1 + self.num_scales, figsize=(10, 10))
 
-        axes[0, 0].imshow(image)
-        axes[0, 0].set_title('Image')
-        axes[0, 0].axis('off')
-
-        for source in range(self.num_source):
-            if source == 0:
-                axes[source, 0].imshow(image)
-                axes[source, 0].set_title('Image')
-                axes[source, 0].axis('off')
-            else:
-                # non-use
-                axes[source, 0].axis('off')
-
-            for idx in range(self.num_scales):
-                sample_idx = source * self.num_scales + idx
-                depth = pred_depths[sample_idx]
-                axes[source, 1 + idx].imshow(depth, vmin=0., vmax=10., cmap='plasma')
-                axes[source, 1 + idx].set_title(f'Source {source} / Scale {idx}')
-                axes[source, 1 + idx].axis('off')
+        axes[0].imshow(image)
+        axes[0].set_title('Image')
+        axes[0].axis('off')
+    
+        for idx in range(self.num_scales):
+            depth = pred_depths[idx]
+            axes[idx + 1].imshow(depth, vmin=0., vmax=10., cmap='plasma')
+            axes[idx + 1].set_title(f'Scale {idx}')
+            axes[idx + 1].axis('off')
 
         fig.tight_layout()
 
@@ -152,7 +142,7 @@ class PlotTool:
         for i in range(self.num_source):
             left_warped_loss = left_warped_losses[batch, i, :, :, :] # (H, W, 1)
             right_warped_loss = right_warped_losses[batch, i, :, :, :] # (H, W, 1)
-            mask = masks[batch, i, :, :, :] # (H, W, 1)
+            mask = masks[batch, 0, :, :, :] # (H, W, 1)
             
             axes[i, 0].imshow(left_warped_loss)
             axes[i, 0].set_title('Left to Target Loss')

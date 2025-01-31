@@ -104,18 +104,12 @@ class DataLoader(object):
         left_images = tf.map_fn(self._read_image, sample['source_left'], fn_output_signature=tf.uint8)
         right_images = tf.map_fn(self._read_image, sample['source_right'], fn_output_signature=tf.uint8)
         target_image = self._read_image(sample['target_image'])
-        
-
-        # read imus
-        imu_left = tf.cast(sample['imu_left'], tf.float32)
-        imu_right = tf.cast(sample['imu_right'], tf.float32)
-        imus = tf.concat([imu_left, imu_right], axis=0)
 
         # read intrinsic
         intrinsic = tf.cast(sample['intrinsic'], tf.float32)
 
         # augmentation
-        left_images, right_images, target_image, imus, intrinsic = self.augmentation(left_images, right_images, target_image, imus, intrinsic)
+        left_images, right_images, target_image, intrinsic = self.augmentation(left_images, right_images, target_image, intrinsic)
 
         # normalize images
         left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
@@ -125,7 +119,7 @@ class DataLoader(object):
 
         ref_images = tf.concat([left_images, right_images], axis=0)
 
-        return ref_images, target_image, imus, intrinsic
+        return ref_images, target_image, intrinsic
     
     @tf.function()
     def valid_process(self, sample: dict) -> tuple:
@@ -133,18 +127,9 @@ class DataLoader(object):
         left_images = tf.map_fn(self._read_image, sample['source_left'], fn_output_signature=tf.uint8)
         right_images = tf.map_fn(self._read_image, sample['source_right'], fn_output_signature=tf.uint8)
         target_image = self._read_image(sample['target_image'])
-        
-
-        # read imus
-        imu_left = tf.cast(sample['imu_left'], tf.float32)
-        imu_right = tf.cast(sample['imu_right'], tf.float32)
-        imus = tf.concat([imu_left, imu_right], axis=0)
 
         # read intrinsic
         intrinsic = tf.cast(sample['intrinsic'], tf.float32)
-
-        # augmentation
-        # left_images, right_images, target_image, imus, intrinsic = self.augmentation(left_images, right_images, target_image, imus, intrinsic)
 
         # normalize images
         left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
@@ -154,16 +139,15 @@ class DataLoader(object):
 
         ref_images = tf.concat([left_images, right_images], axis=0)
 
-        return ref_images, target_image, imus, intrinsic
+        return ref_images, target_image, intrinsic
     
     @tf.function(jit_compile=True)
-    def augmentation(self, left_image, right_image, target_image, imus, intrinsic):
+    def augmentation(self, left_image, right_image, target_image, intrinsic):
         left_image = tf.cast(left_image, tf.float32) / 255.0
         right_image = tf.cast(right_image, tf.float32) / 255.0
         target_image = tf.cast(target_image, tf.float32) / 255.0
 
         if tf.random.uniform([]) > 0.5:
-            imus = self.augmentor.imu_left_right_flip(imus)
             left_image = tf.map_fn(self.augmentor.image_left_right_flip, left_image)
             right_image = tf.map_fn(self.augmentor.image_left_right_flip, right_image)
             target_image = self.augmentor.image_left_right_flip(target_image)
@@ -201,7 +185,7 @@ class DataLoader(object):
         right_image = tf.clip_by_value(right_image, 0., 255.)
         target_image = tf.clip_by_value(target_image, 0., 255.)
 
-        return left_image, right_image, target_image, imus, intrinsic
+        return left_image, right_image, target_image, intrinsic
     
     def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool, is_train: bool = True) -> tf.data.Dataset:
         combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
@@ -217,14 +201,14 @@ class DataLoader(object):
 
 if __name__ == '__main__':
     import yaml
+    import matplotlib.pyplot as plt
     with open('./vio/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
     data_loader = DataLoader(config)
     
     for sample in data_loader.train_dataset.take(100):
-        ref_images, target_image, imus, intrinsic = sample
-        print(ref_images.shape, target_image.shape, imus.shape, intrinsic.shape)
+        ref_images, target_image, intrinsic = sample
 
         """
         ref_images: (batch_size, num_source * 2, img_h, img_w, 3)
@@ -242,12 +226,9 @@ if __name__ == '__main__':
 
         left_images = data_loader.denormalize_image(ref_images[:, :data_loader.num_source])
         right_images = data_loader.denormalize_image(ref_images[:, data_loader.num_source:])
-        left_imus = imus[:, :data_loader.num_source]
-        right_imus = imus[:, data_loader.num_source:]
-        print(left_images.shape, right_images.shape, left_imus.shape, right_imus.shape)
+        print(left_images.shape, right_images.shape)
 
         # show all images
-        import matplotlib.pyplot as plt
         fig, axes = plt.subplots(1, 5, figsize=(20, 4))
         axes[0].imshow(left_images[0, 0])
         axes[1].imshow(left_images[0, 1])
