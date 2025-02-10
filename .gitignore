@@ -8,6 +8,7 @@ __pycache__/
 
 # files
 *.h5
+*.mp4
 
 # tensorboard log
 /tensorboard/
