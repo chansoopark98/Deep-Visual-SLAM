@@ -116,11 +116,6 @@ class DispNet(tf.keras.Model):
                               pretrained=True,
                               prefix=prefix + '_resnet18').build_model()
         
-        # self.encoder = EfficientNetV2Encoder(image_shape=(*image_shape, 3),
-        #                                      model_type='b0',
-        #                                      batch_size=batch_size,
-        #                                      prefix=prefix + '_efficientnetv2').build_model()
-        
         # Depth Decoder
         print('Building Depth Decoder Model')
         filters = [16, 32, 64, 128, 256]
@@ -130,7 +125,7 @@ class DispNet(tf.keras.Model):
         self.iconv5_resize = tf.keras.layers.Resizing(
             height=self.image_height // 16,
             width=self.image_width // 16,
-            interpolation='bilinear',
+            interpolation='nearest',
             name='iconv5_resize'
         )
         self.upconv5 = reflect_conv(3, filters[4], 1, 'upconv5')
@@ -140,7 +135,7 @@ class DispNet(tf.keras.Model):
         self.iconv4_resize = tf.keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
-            interpolation='bilinear',
+            interpolation='nearest',
             name='iconv4_resize'
         )
         self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4')
@@ -151,7 +146,7 @@ class DispNet(tf.keras.Model):
         self.iconv3_resize = tf.keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
-            interpolation='bilinear',
+            interpolation='nearest',
             name='iconv3_resize'
         )
         self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3')
@@ -162,7 +157,7 @@ class DispNet(tf.keras.Model):
         self.iconv2_resize = tf.keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
-            interpolation='bilinear',
+            interpolation='nearest',
             name='iconv2_resize'
         )
         self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2')
@@ -173,7 +168,7 @@ class DispNet(tf.keras.Model):
         self.iconv1_resize = tf.keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
-            interpolation='bilinear',
+            interpolation='nearest',
             name='iconv1_resize'
         )
         self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1')
@@ -221,119 +216,6 @@ class DispNet(tf.keras.Model):
         disp1 = self.disp1(upconv1, training=training)
 
         return disp1, disp2, disp3, disp4
-
-class ImuNet(tf.keras.Model):
-    def __init__(self,
-                 batch_size: int,
-                 prefix='imunet',
-                 **kwargs):
-        super(ImuNet, self).__init__(**kwargs)
-        self.batch_size = batch_size
-
-        self.encoder_conv = tf.keras.Sequential([
-            # Layer1
-            tf.keras.layers.Conv1D(64, kernel_size=3, padding='same',
-                                   use_bias=False,
-                                   name='IMU_ENCODER_conv1'),
-            tf.keras.layers.BatchNormalization(momentum=0.9,
-                                               name='IMU_ENCODER_bn1'),
-            tf.keras.layers.LeakyReLU(alpha=0.2,
-                                      name='IMU_ENCODER_leaky_relu1'),\
-
-            # Layer 2
-            tf.keras.layers.Conv1D(128, kernel_size=3, padding='same',
-                                   use_bias=False,
-                                   name='IMU_ENCODER_conv2'),
-            tf.keras.layers.BatchNormalization(momentum=0.9,
-                                               name='IMU_ENCODER_bn2'),
-            tf.keras.layers.LeakyReLU(alpha=0.2, name='IMU_ENCODER_leaky_relu2'),
-
-            # Layer 3
-            tf.keras.layers.Conv1D(256, kernel_size=3, padding='same',
-                                   use_bias=False,              
-                                   name='IMU_ENCODER_conv3'),
-            tf.keras.layers.BatchNormalization(momentum=0.9,
-                                               name='IMU_ENCODER_bn3'),
-            tf.keras.layers.LeakyReLU(alpha=0.2, name='IMU_ENCODER_leaky_relu3'),
-        ])
-
-        cells = [tf.keras.layers.LSTMCell(256,
-                                          name='Pose_lstm_1'),
-                tf.keras.layers.LSTMCell(256,
-                                          name='Pose_lstm_2')
-                                          ]
-        stacked_lstm_cells = tf.keras.layers.StackedRNNCells(cells, name='Pose_stacked_lstm_cells')
-        
-        self.rnn = tf.keras.layers.RNN(stacked_lstm_cells, return_sequences=True, return_state=False, name='Pose_rnn')
-        self.average_pool = tf.keras.layers.GlobalAveragePooling1D(name='Pose_global_avg_pooling')
-    
-    def call(self, inputs, training=False):
-        """
-        inputs: [B, T, 6]
-        return: [B, 256]
-        """
-        x = self.encoder_conv(inputs, training=training) # [B, T, 256]
-        x = self.rnn(x, training=training) # [B, T, 256]
-        x = self.average_pool(x) # [B, 256]
-        return x
-
-class PoseImuNet(tf.keras.Model):
-    """
-    - 입력: (B, H, W, 6)  (ex: 소스+타겟 concat)
-    - 내부: ResNet-18 인코더 -> Conv/ReduceMean -> Reshape -> scale
-    - 출력: (B, 1, 6)  (Monodepth2식 pose)
-    """
-    def __init__(self,
-                 image_shape: tuple,
-                 batch_size: int,
-                 prefix='pose_resnet',
-                 **kwargs):
-        super(PoseImuNet, self).__init__(**kwargs)
-
-        self.image_height = image_shape[0]
-        self.image_width = image_shape[1]
-        self.batch_size = batch_size
-
-        # self.encoder = resnet_18()
-        self.img_encoder = CustomFlow(image_shape=(*image_shape, 6),
-                                  batch_size=batch_size,
-                                  prefix='custom_flow').build_model()
-        
-        self.imu_encoder = ImuNet(batch_size=batch_size, prefix='imu_encoder')
-
-        # filter_size, out_channel, stride, pad='same', name='conv'
-        self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
-        self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3
-        self.pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')  # kernel=3
-        self.pose_gap = tf.keras.layers.GlobalAveragePooling2D(name='pose_gap')
-
-        self.dense_1 = tf.keras.layers.Dense(256, name='pose_dense1')
-        self.dense_2 = tf.keras.layers.Dense(6, name='pose_dense2')
-
-        # 3) ReduceMeanLayer, Reshape
-        # self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
-        # self.reshape_layer = tf.keras.layers.Reshape((6,), name='pose_reshape')
-
-    def call(self, inputs, training=False):
-        img, imu = inputs
-
-        img_feat = self.img_encoder(img, training=training) 
-        imu_feat = self.imu_encoder(imu, training=training)
-        
-
-        # 2) pose_conv0 -> pose_conv1 -> pose_conv2 -> pose_conv3
-        img_feat = self.pose_conv0(img_feat)
-        img_feat = self.pose_conv1(img_feat)
-        img_feat = self.pose_conv2(img_feat)
-        img_feat = self.pose_gap(img_feat) # [B, 256]
-
-        concat_feat = tf.concat([img_feat, imu_feat], axis=-1) # [B, 512]
-        concat_feat = self.dense_1(concat_feat)
-        concat_feat = self.dense_2(concat_feat)
-
-        concat_feat *= 0.01
-
-        return concat_feat
 
 class PoseNet(tf.keras.Model):
     """
@@ -410,7 +292,7 @@ class MonoDepth2Model(tf.keras.Model):
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
         self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
 
-        self.pose_net = PoseImuNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
+        self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
 
     def call(self, inputs, training=False):
         src_left = inputs[..., :3]
@@ -436,69 +318,9 @@ class MonoDepth2Model(tf.keras.Model):
 
         return pred_disp_list, pred_poses
 
-def build_posenet(image_shape: tuple, batch_size: int) -> tf.keras.models.Model:
-    # ResNet-18
-    resnet_model = build_resnet18(image_shape=(*image_shape, 6),
-                                                batch_size=batch_size,
-                                                prefix='pose_resnet')
-    res18, _ = resnet_model.output  # [x, [skip1, skip2, skip3, skip4]]
-    
-    res18_concat = std_conv(1, 256, 1, name='pose_conv0')(res18)
-
-    pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')(res18_concat)
-    pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')(pose_conv1)
-    pose_conv3 = tf.keras.layers.Conv2D(6, (1, 1), strides=(1, 1), activation=None, name='pose_conv3')(pose_conv2)
-
-    pose_final = ReduceMeanLayer()(pose_conv3)
-    pose_final = tf.keras.layers.Reshape((1, 6))(pose_final)
-    pose_final = tf.keras.layers.Lambda(lambda x: x * tf.cast(pose_scale, tf.float32))(pose_final)
-
-    model = tf.keras.models.Model(inputs=[resnet_model.input], outputs=pose_final)
-    return model
-
-def build_resnet18(image_shape: tuple, batch_size: int, prefix: str) -> tf.keras.models.Model:
-    model_input = tf.keras.layers.Input(shape=image_shape, batch_size=batch_size)
-
-    print('Building ResNet-18 Model')
-    filters = [64, 64, 128, 256, 512]
-    kernels = [7, 3, 3, 3, 3]
-    strides = [2, 1, 2, 2, 2]
-
-    # conv1
-    print('\tBuilding unit: conv1')
-    x = std_conv(kernels[0], filters[0], strides[0], name=prefix+'_conv1')(model_input)
-    x = batch_norm(name=prefix+'_conv1')(x)
-    x = activation(type='relu', name=prefix+'_relu1')(x)
-    skip4 = x
-
-    x = tf.keras.layers.MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding='same', name='pool')(x)
-
-    # conv2_x
-    x = ResidualBlock(num_channel=filters[1], prefix=prefix+'_conv2_1')(x)
-    x = ResidualBlock(num_channel=filters[1], prefix=prefix+'_conv2_2')(x)
-    skip3 = x
-
-    # conv3_x
-    x = ResidualBlockFirst(out_channel=filters[2], stride=strides[2], prefix=prefix+'_conv3_1')(x)
-    x = ResidualBlock(num_channel=filters[2], prefix=prefix+'_conv3_2')(x)
-    skip2 = x
-
-    # conv4_x
-    x = ResidualBlockFirst(out_channel=filters[3], stride=strides[3], prefix=prefix+'_conv4_1')(x)
-    x = ResidualBlock(num_channel=filters[3], prefix=prefix+'_conv4_2')(x)
-    skip1 = x
-
-    # conv5_x
-    x = ResidualBlockFirst(out_channel=filters[4], stride=strides[4], prefix=prefix+'_conv5_1')(x)
-    x = ResidualBlock(num_channel=filters[4], prefix=prefix+'_conv5_2')(x)
-    
-    model = tf.keras.models.Model(inputs=model_input, outputs=[x, [skip1, skip2, skip3, skip4]])
-    return model
-
 
 if __name__ == '__main__':
     dispnet = DispNet(image_shape=(256, 256), batch_size=1, prefix='disp_resnet')
-    posenet = PoseImuNet(image_shape=(256, 256), batch_size=1, prefix='pose_resnet')
     monodepth = MonoDepth2Model(image_shape=(256, 256), batch_size=1)
     dummy = tf.random.normal((1, 256, 256, 3))
     dummy_src = tf.random.normal((1, 256, 256, 6))
@@ -507,6 +329,3 @@ if __name__ == '__main__':
     # test
     disp1, disp2, disp3, disp4 = dispnet(dummy, True)
     print(disp1.shape, disp2.shape, disp3.shape, disp4.shape)
-
-    pose = posenet([dummy_src, imu_src], False)
-    print(pose)
