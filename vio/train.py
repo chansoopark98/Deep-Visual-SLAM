@@ -5,7 +5,7 @@ import tensorflow as tf
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
-from model.monodepth2 import DispNet, PoseImuNet, PoseNet
+from model.monodepth2 import DispNet, PoseNet
 # from monodepth_learner import Learner
 from monodepth_learner_new import Learner
 from tqdm import tqdm
