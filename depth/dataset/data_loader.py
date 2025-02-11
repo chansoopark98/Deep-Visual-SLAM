@@ -3,9 +3,11 @@ import tensorflow as tf
 try:
     from .tfrecord_loader import TFRecordLoader
     from .nyu_handler import NyuHandler
+    from .custom_loader import CustomLoader
 except:
     from tfrecord_loader import TFRecordLoader
     from nyu_handler import NyuHandler
+    from custom_loader import CustomLoader
 
 class DataLoader(object):
     def __init__(self, config: dict) -> None:
@@ -97,7 +99,18 @@ class DataLoader(object):
                 self.num_train_samples += dataset.train_samples
             if self.config['Dataset']['Hypersim']['valid']:
                 valid_datasets.append(dataset.valid_dataset)
-                self.num_valid_samples += dataset.valid_samples   
+                self.num_valid_samples += dataset.valid_samples
+        
+        if self.config['Dataset']['Custom']:
+            dataset_name = os.path.join(self.config['Directory']['data_dir'], 'custom_tfrecord')
+            dataset = CustomLoader(config=self.config)
+            if self.config['Dataset']['Custom']['train']:
+
+                train_datasets.append(dataset.train_dataset)
+                self.num_train_samples += dataset.train_samples
+            if self.config['Dataset']['Custom']['valid']:
+                valid_datasets.append(dataset.valid_dataset)
+                self.num_valid_samples += dataset.valid_samples
         return train_datasets, valid_datasets
 
     @tf.function(jit_compile=True)
@@ -195,7 +208,7 @@ class DataLoader(object):
         normalized_depth = tf.clip_by_value(normalized_depth, 0., 1.0)
         return rgb, normalized_depth
 
-    @tf.function(jit_compile=True)
+    # @tf.function(jit_compile=True)
     def train_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         """
         Preprocesses training data by applying data augmentation and normalization.
@@ -209,7 +222,7 @@ class DataLoader(object):
                 - rgb (tf.Tensor): Augmented and preprocessed RGB tensor.
                 - depth (tf.Tensor): Augmented and preprocessed depth tensor.
         """
-
+        print(rgb, depth)
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
         
@@ -287,19 +300,19 @@ class DataLoader(object):
         # rgb augmentations
         rgb = tf.cast(rgb, tf.float32) / 255.0
 
-        if tf.random.uniform([]) > 0.5:
-            delta_brightness = tf.random.uniform([], -0.3, 0.3)
+        if tf.random.uniform([]) > 0.3:
+            delta_brightness = tf.random.uniform([], -0.2, 0.2)
             rgb = tf.image.adjust_brightness(rgb, delta_brightness)
         
-        if tf.random.uniform([]) > 0.5:
-            contrast_factor = tf.random.uniform([], 0.7, 1.3)
+        if tf.random.uniform([]) > 0.3:
+            contrast_factor = tf.random.uniform([], 0.8, 1.2)
             rgb = tf.image.adjust_contrast(rgb, contrast_factor)
         
-        if tf.random.uniform([]) > 0.5:
-            gamma = tf.random.uniform([], 0.8, 1.2)
+        if tf.random.uniform([]) > 0.3:
+            gamma = tf.random.uniform([], 0.9, 1.1)
             rgb = tf.image.adjust_gamma(rgb, gamma)
         
-        if tf.random.uniform([]) > 0.5:
+        if tf.random.uniform([]) > 0.3:
             max_delta = 0.1
             rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
 
@@ -357,6 +370,8 @@ class DataLoader(object):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import yaml
+    import tensorflow_probability as tfp
+
     root_dir = './depth/data/'
     with open('./depth/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
@@ -378,4 +393,9 @@ if __name__ == '__main__':
         plt.imshow(depth[0], cmap='plasma')
         plt.show()
     
-        mask = depth > 0
+
+        m_gt   = tf.maximum(tfp.stats.percentile(depth,   50.0, interpolation='nearest'), 1e-6)
+        gt_norm   = depth   / m_gt
+
+        plt.imshow(gt_norm[0], cmap='plasma')
+        plt.show()

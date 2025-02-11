@@ -1,5 +1,5 @@
 Directory:
-  exp_name: relative_resnet18_nyu_diode_diml_640x480
+  exp_name: test_custom # Experiment name
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -7,20 +7,23 @@ Directory:
 
 Dataset: # True is using the dataset, False is not using the dataset
   Nyu_depth_v2:
-    train: True  
-    valid: True  
+    train: False  
+    valid: False  
   Diode:
-    train: True  
+    train: False  
     valid: False 
   DIML:
-    train: True  
+    train: False  
     valid: False 
   Hypersim:
-    train: True 
+    train: False 
     valid: False 
+  Custom:
+    train: True 
+    valid: True
 
 Train:
-  mode: 'relative' # 'relative' (normalized depth) or 'metric' (absolute depth)
+  mode: 'metric' # 'relative' (normalized depth) or 'metric' (absolute depth)
   use_shuffle: True # Whether to shuffle training data
   train_plot_interval: 500 # Interval for plotting during training
   valid_plot_interval: 50 # Interval for plotting during validation
@@ -31,7 +34,7 @@ Train:
   beta1: 0.9  # Beta1 for Adam optimizer
   weight_decay: 0.0001 # Weight decay for AdamW optimizer
   batch_size: 32  # Training batch size
-  epoch: 101  # Total number of epochs
+  epoch: 31  # Total number of epochs
   init_lr: 0.0002  # Initial learning rate
   final_lr: 0.00001 # Final learning rate after warmup
   power: 0.9  # Learning rate scheduler power factor

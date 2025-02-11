@@ -3,6 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from typing import Dict, Any, List, Tuple
 from depth_learner import DepthLearner
+# from depth_learner_test import DepthLearner
 from model.monodepth2 import DispNet
 from util.plot import plot_images
 from util.metrics import DepthMetrics
@@ -58,7 +59,7 @@ class Trainer(object):
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
         self.model.build(model_input_shape)
         _ = self.model(tf.random.normal(model_input_shape))
-        self.model.load_weights('./assets/weights/depth/epoch_10_model.h5')
+        self.model.load_weights('./assets/weights/depth/epoch_35_model.h5') # Pretrained relative depth weights
         self.model.summary()
 
         # 2. Dataset
