@@ -66,13 +66,13 @@ class CustomLoader(object):
 
     @tf.function()
     def _read_depth(self, depth_path):
-        
-        depth = tf.py_function(func=self.load_npy_file, inp=[depth_path], Tout=tf.float32)
-        depth = tf.expand_dims(depth, axis=-1)
-        depth = tf.ensure_shape(depth, (540, 960, 1))
-        depth = tf.image.resize(depth, self.image_size)
-        
-        return depth
+        depth_image = tf.io.read_file(depth_path)
+        depth_image = tf.io.decode_png(depth_image, channels=1)
+        depth_image = tf.image.resize(depth_image, self.image_size)
+        depth_image = tf.cast(depth_image, tf.float32)
+        depth_image /= 255.0
+        depth_image *= 15.0
+        return depth_image
     
     @tf.function()
     def parse_function(self, sample):
