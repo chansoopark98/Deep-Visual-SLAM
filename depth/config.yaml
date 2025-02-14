@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test_custom # Experiment name
+  exp_name: gOver_depthV2_ep31_lr2e-4_norm1.0_decay1e-4
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
