@@ -354,7 +354,7 @@ class DataLoader(object):
         combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
             
         if use_shuffle:
-            combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 256, reshuffle_each_iteration=True)
+            combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 128, reshuffle_each_iteration=True)
         if is_train:
             combined_dataset = combined_dataset.map(self.train_preprocess, num_parallel_calls=self.auto_opt)
         else:

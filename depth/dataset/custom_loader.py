@@ -8,7 +8,8 @@ import tensorflow as tf
 class CustomLoader(object):
     def __init__(self, config):
         self.config = config
-        self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'capture_dataset')
+        # self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'capture_dataset')
+        self.root_dir = '/media/park-ubuntu/park_cs/custom_dataset'
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
@@ -66,12 +67,10 @@ class CustomLoader(object):
 
     @tf.function()
     def _read_depth(self, depth_path):
-        depth_image = tf.io.read_file(depth_path)
-        depth_image = tf.io.decode_png(depth_image, channels=1)
-        depth_image = tf.image.resize(depth_image, self.image_size)
-        depth_image = tf.cast(depth_image, tf.float32)
-        depth_image /= 255.0
-        depth_image *= 15.0
+        depth_image = tf.py_function(self.load_npy_file, [depth_path], tf.float32)
+        depth_image = tf.expand_dims(depth_image, axis=-1)
+        depth_image = tf.ensure_shape(depth_image, (1080, 1920, 1))
+        depth_image = tf.image.resize(depth_image, self.image_size, method='nearest')
         return depth_image
     
     @tf.function()
