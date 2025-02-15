@@ -34,8 +34,8 @@ Train:
   beta1: 0.9  # Beta1 for Adam optimizer
   weight_decay: 0.0001 # Weight decay for AdamW optimizer
   batch_size: 32  # Training batch size
-  epoch: 31  # Total number of epochs
-  init_lr: 0.0002  # Initial learning rate
+  epoch: 101  # Total number of epochs
+  init_lr: 0.0004  # Initial learning rate
   final_lr: 0.00001 # Final learning rate after warmup
   power: 0.9  # Learning rate scheduler power factor
 
