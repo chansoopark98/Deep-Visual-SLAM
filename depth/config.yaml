@@ -8,12 +8,12 @@ Directory:
 Dataset: # True is using the dataset, False is not using the dataset
   Nyu_depth_v2:
     train: True  
-    valid: False  
+    valid: True  
   Diode:
     train: True  
     valid: False 
   DIML:
-    train: True  
+    train: False  
     valid: False 
   Hypersim:
     train: False 
