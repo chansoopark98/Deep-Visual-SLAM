@@ -7,6 +7,7 @@ try:
     from .resnet_tf import Resnet
     from .raft.raft_backbone import CustomRAFT
     from .flownet import CustomFlow
+    from .mobilenetv4_test import MobileNetV4ConvSmall
 except:
     from model_utils import *
     from efficientnetv2 import EfficientNetV2Encoder
@@ -15,6 +16,8 @@ except:
     from resnet_tf import Resnet
     from raft.raft_backbone import CustomRAFT
     from flownet import CustomFlow
+    from mobilenetv4_test import MobileNetV4ConvSmall
+    
 
 class ResNet18Encoder(tf.keras.Model):
     def __init__(self,

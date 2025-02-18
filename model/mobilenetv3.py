@@ -28,8 +28,8 @@ class MobilenetV3Large:
             pretrained_weights = 'imagenet'
         else:
             pretrained_weights = None
-
-        base_model = tf.keras.applications.MobileNetV3Large(
+            
+        base_model: tf.keras.Model = tf.keras.applications.MobileNetV3Large(
             input_shape=(self.image_shape[0], self.image_shape[1], 3),
             alpha=1.0,
             minimalistic=False,
@@ -42,13 +42,14 @@ class MobilenetV3Large:
             classifier_activation=None,
             include_preprocessing=False
         )
+        base_model.summary()
 
         layer_names = [
-            "expanded_conv/Add",
-            "expanded_conv_2/Add",
-            "expanded_conv_5/Add",
-            "expanded_conv_11/Add",
-            "expanded_conv_14/Add",
+            "expanded_conv/Add", # 240 320 16
+            "expanded_conv_2/Add", # 120 160 24
+            "expanded_conv_5/Add", # 60 80 40
+            "expanded_conv_11/Add", # 30 40 112
+            "expanded_conv_14/Add", # 15 20 160
         ]
 
         outputs = [base_model.get_layer(name).output for name in layer_names]
@@ -65,10 +66,10 @@ class MobilenetV3Large:
         x = features[-1]  # block6o_add (H/32)
 
         skips = [
-            features[3],  # block5h_add (H/16)
-            features[2],  # block3d_add (H/8)
-            features[1],  # block2d_add (H/4)
-            features[0]   # block1b_add (H/2)
+            features[3],
+            features[2],
+            features[1],
+            features[0],
         ]
 
         return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_model")
@@ -77,4 +78,9 @@ if __name__ == '__main__':
     image_shape = (480, 640, 3)
     batch_size = 4
     model_builder = MobilenetV3Large(image_shape=image_shape, batch_size=batch_size)
-    model = model_builder.build_model()
+    partial_model = model_builder.build_model()
+    partial_model.build(input_shape=(batch_size, *image_shape))
+    x, skips = partial_model(tf.random.normal((batch_size, *image_shape)))
+    print(f'outputs {x.shape}')
+    for skip in skips:
+        print(skip.shape)
