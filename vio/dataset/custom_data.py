@@ -15,8 +15,6 @@ class CustomDataHandler(object):
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.num_source = self.config['Train']['num_source'] # 2
         self.imu_seq_len = self.config['Train']['imu_seq_len'] # 10
-        self.original_image_size = (3000, 4000)
-        self.save_image_size = (3000 // 4, 4000 // 4)
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
         # self.test_dir = os.path.join(self.root_dir, 'test')
