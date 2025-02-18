@@ -32,7 +32,7 @@ class Trainer(object):
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
+        self.depth_net.load_weights('./assets/weights/depth/nyu_diode_custom.h5')
 
         # self.pose_net = PoseImuNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         # posenet_input_shape = [(self.batch_size, *image_shape, 6),

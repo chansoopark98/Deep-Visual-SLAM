@@ -125,7 +125,7 @@ class DispNet(tf.keras.Model):
         self.iconv5_resize = tf.keras.layers.Resizing(
             height=self.image_height // 16,
             width=self.image_width // 16,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv5_resize'
         )
         self.upconv5 = reflect_conv(3, filters[4], 1, 'upconv5')
@@ -135,7 +135,7 @@ class DispNet(tf.keras.Model):
         self.iconv4_resize = tf.keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv4_resize'
         )
         self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4')
@@ -146,7 +146,7 @@ class DispNet(tf.keras.Model):
         self.iconv3_resize = tf.keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv3_resize'
         )
         self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3')
@@ -157,7 +157,7 @@ class DispNet(tf.keras.Model):
         self.iconv2_resize = tf.keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv2_resize'
         )
         self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2')
@@ -168,7 +168,7 @@ class DispNet(tf.keras.Model):
         self.iconv1_resize = tf.keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
-            interpolation='nearest',
+            interpolation='bilinear',
             name='iconv1_resize'
         )
         self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1')
