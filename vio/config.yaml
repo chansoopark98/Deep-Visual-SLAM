@@ -1,12 +1,12 @@
 Directory:
-  exp_name: vo_dataAug_ep101_lr1e-4_norm1.0_decay1e-4
+  exp_name: nyu_diode_diml_custom_metric_640x480_
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
   results: ./results
 
 Dataset:
-  tspxr_capture: False
+  custom_data: True
   mars_logger: True
 
 Train:

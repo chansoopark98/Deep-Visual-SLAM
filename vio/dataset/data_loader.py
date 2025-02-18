@@ -1,11 +1,11 @@
 import numpy as np
 import tensorflow as tf
 try:
-    from .tspxr_capture import TspxrCapture
+    from .custom_data import CustomDataHandler
     from .mars_logger import MarsLoggerHandler
     from .augmentation_tool import Augmentations
 except:
-    from tspxr_capture import TspxrCapture
+    from custom_data import CustomDataHandler
     from mars_logger import MarsLoggerHandler
     from augmentation_tool import Augmentations
 
@@ -43,9 +43,17 @@ class DataLoader(object):
         self.num_valid_samples = 0
         self.num_test_samples = 0
         
-        if self.config['Dataset']['tspxr_capture']:
-            # todo
-            raise NotImplementedError
+        if self.config['Dataset']['custom_data']:
+            dataset = CustomDataHandler(config=self.config)
+            train_dataset = self._build_generator(np_samples=dataset.train_data)
+            valid_dataset = self._build_generator(np_samples=dataset.valid_data)
+
+            train_datasets.append(train_dataset)
+            valid_datasets.append(valid_dataset)
+
+            self.num_train_samples += dataset.train_data.shape[0]
+            self.num_valid_samples += dataset.valid_data.shape[0]
+
         
         if self.config['Dataset']['mars_logger']:
             dataset = MarsLoggerHandler(config=self.config)
@@ -69,8 +77,6 @@ class DataLoader(object):
                 'source_left': tf.TensorSpec(shape=(None,), dtype=tf.string),  # 리스트로 가변 길이
                 'target_image': tf.TensorSpec(shape=(), dtype=tf.string),  # 단일 스트링
                 'source_right': tf.TensorSpec(shape=(None,), dtype=tf.string),  # 리스트로 가변 길이
-                'imu_left': tf.TensorSpec(shape=(None, None, 6), dtype=tf.float32),  # 리스트 -> (step, imu_seq, 6)
-                'imu_right': tf.TensorSpec(shape=(None, None, 6), dtype=tf.float32),  # 리스트 -> (step, imu_seq, 6)
                 'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32)  # 고정 크기 (3, 3)
             }
         )

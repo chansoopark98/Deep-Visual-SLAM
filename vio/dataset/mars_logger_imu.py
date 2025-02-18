@@ -85,6 +85,7 @@ class MarsLoggerHandler(object):
     def _process(self, scene_dir: str):
         # load csv imu file
         imu_file = os.path.join(scene_dir, 'gyro_accel.csv')
+        imu_data = pd.read_csv(imu_file)
 
         # load camera metadata
         camera_file = os.path.join(scene_dir, 'movie_metadata.csv')
@@ -106,15 +107,43 @@ class MarsLoggerHandler(object):
         for t in range(self.num_source, length - self.num_source):
             left_images = []
             right_images = []
+            left_imus = []
+            right_imus = []
 
             for step in range(1, self.num_source + 1):
                 left_images.append(rgb_files[t - step])
                 right_images.append(rgb_files[t + step])
+                
+                t_left_idx = t - step
+                t_right_idx = t + step
+                time_left = camera_data.loc[t_left_idx, 'Timestamp[nanosec]']
+                time_curr = camera_data.loc[t, 'Timestamp[nanosec]']
+                time_right = camera_data.loc[t_right_idx, 'Timestamp[nanosec]']
+
+                mask_left = (imu_data['Timestamp[nanosec]'] >= time_left) & (imu_data['Timestamp[nanosec]'] < time_curr)
+                left_imu_df = imu_data[mask_left]
+
+                mask_right = (imu_data['Timestamp[nanosec]'] >= time_curr) & (imu_data['Timestamp[nanosec]'] < time_right)
+                right_imu_df = imu_data[mask_right]
+
+                left_imu_array = left_imu_df.iloc[:, 1:].values
+                right_imu_array = right_imu_df.iloc[:, 1:].values
+                
+                left_imu_array = np.asarray(left_imu_array, np.float32)
+                right_imu_array = np.asarray(right_imu_array, np.float32)
+
+                left_imu_resampled = resample_imu(left_imu_array, self.imu_seq_len)
+                right_imu_resampled = resample_imu(right_imu_array, self.imu_seq_len)
+
+                left_imus.append(left_imu_resampled)
+                right_imus.append(right_imu_resampled)
 
             sample = {
                 'source_left': left_images, # List [str, str]]
                 'target_image': rgb_files[t], # str
                 'source_right': right_images, # List [str, str]]
+                'imu_left': left_imus, # List [np.ndarray, np.ndarray] # [(imu_seq_len, 6), (imu_seq_len, 6)]
+                'imu_right': right_imus, # List [np.ndarray, np.ndarray] # [(imu_seq_len, 6), (imu_seq_len, 6)]
                 'intrinsic': intrinsic # np.ndarray (3, 3)
             }
             samples.append(sample)
