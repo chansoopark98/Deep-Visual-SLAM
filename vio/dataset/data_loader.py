@@ -159,29 +159,29 @@ class DataLoader(object):
             target_image = self.augmentor.image_left_right_flip(target_image)
 
         if tf.random.uniform([]) > 0.5:
-            delta_brightness = tf.random.uniform([], -0.4, 0.4)
+            delta_brightness = tf.random.uniform([], -0.2, 0.2)
             left_image = tf.map_fn(lambda x: tf.image.adjust_brightness(x, delta_brightness), left_image)
             right_image = tf.map_fn(lambda x: tf.image.adjust_brightness(x, delta_brightness), right_image)
             target_image = tf.image.adjust_brightness(target_image, delta_brightness)
         
         if tf.random.uniform([]) > 0.5:
-            contrast_factor = tf.random.uniform([], 0.7, 1.3)
+            contrast_factor = tf.random.uniform([], 0.9, 1.1)
             left_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), left_image)
             right_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), right_image)
             target_image = tf.image.adjust_contrast(target_image, contrast_factor)
         
-        if tf.random.uniform([]) > 0.5:
-            gamma = tf.random.uniform([], 0.7, 1.3)
-            left_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), left_image)
-            right_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), right_image)
-            target_image = tf.image.adjust_gamma(target_image, gamma)
+        # if tf.random.uniform([]) > 0.5:
+        #     gamma = tf.random.uniform([], 0.9, 1.1)
+        #     left_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), left_image)
+        #     right_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), right_image)
+        #     target_image = tf.image.adjust_gamma(target_image, gamma)
         
-        if tf.random.uniform([]) > 0.5:
-            max_delta = 0.2
-            delta = tf.random.uniform([], -max_delta, max_delta)
-            left_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), left_image)
-            right_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), right_image)
-            target_image = tf.image.adjust_hue(target_image, delta)
+        # if tf.random.uniform([]) > 0.5:
+        #     max_delta = 0.1
+        #     delta = tf.random.uniform([], -max_delta, max_delta)
+        #     left_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), left_image)
+        #     right_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), right_image)
+        #     target_image = tf.image.adjust_hue(target_image, delta)
         
         left_image *= 255.
         right_image *= 255.

@@ -103,7 +103,7 @@ class MarsLoggerHandler(object):
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
         samples = []
-        for t in range(self.num_source, length - self.num_source):
+        for t in range(self.num_source, length - self.num_source, 3):
             left_images = []
             right_images = []
 
