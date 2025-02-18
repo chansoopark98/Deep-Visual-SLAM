@@ -7,6 +7,12 @@ pose_scale = 0.01
 def std_conv(filter_size, out_channel, stride, pad='same', name='conv'):
     return tf.keras.layers.Conv2D(out_channel, (filter_size, filter_size), strides=(stride, stride), padding=pad, name=name+'_'+'conv')
 
+def hard_sigmoid(x):
+    return tf.keras.layers.ReLU(6.0)(x + 3.0) * (1.0 / 6.0)
+
+def hard_swish(x):
+    return tf.keras.layers.Multiply()([x, hard_sigmoid(x)])
+
 def reflect_conv(filter_size, out_channel, stride, name='conv', activation_fn=tf.nn.elu):
     """
     returns a `tf.keras.Sequential` with ReflectionPadding2D + Conv2D(...).
@@ -19,8 +25,9 @@ def reflect_conv(filter_size, out_channel, stride, name='conv', activation_fn=tf
                                strides=(stride, stride),
                                padding='valid',
                                activation=activation_fn,
-                               name=name + '_conv_reflect')
+                               name=name + '_conv_reflect'),
     ], name=name + '_reflect_conv_seq')
+
     return conv_reflect
 
 def batch_norm(name='BatchNorm'):

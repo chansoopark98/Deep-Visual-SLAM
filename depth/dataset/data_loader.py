@@ -170,8 +170,11 @@ class DataLoader(object):
         """
         # Normalize image pytorch style
         image = tf.cast(image, tf.float32)
-        image /= 255.0
-        image = (image - self.mean) / self.std
+        # image /= 255.0
+        # image = (image - self.mean) / self.std
+        # normalize to -1 to 1
+        image = (image - 127.5) / 127.5
+
         return image
     
     @tf.function(jit_compile=True)
@@ -185,8 +188,10 @@ class DataLoader(object):
         Returns:
             tf.Tensor: Denormalized image tensor of shape [H, W, 3] with dtype uint8.
         """
-        image = (image * self.std) + self.mean
-        image *= 255.0
+        # image = (image * self.std) + self.mean
+        # image *= 255.0
+        # -1 ~1 to 255
+        image = (image * 127.5) + 127.5
         image = tf.cast(image, tf.uint8)
         return image
 
