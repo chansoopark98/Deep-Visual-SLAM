@@ -43,18 +43,17 @@ class DataLoader(object):
         self.num_valid_samples = 0
         self.num_test_samples = 0
         
-        if self.config['Dataset']['custom_data']:
-            dataset = CustomDataHandler(config=self.config)
-            train_dataset = self._build_generator(np_samples=dataset.train_data)
-            valid_dataset = self._build_generator(np_samples=dataset.valid_data)
+        # if self.config['Dataset']['custom_data']:
+        #     dataset = CustomDataHandler(config=self.config)
+        #     train_dataset = self._build_generator(np_samples=dataset.train_data)
+        #     valid_dataset = self._build_generator(np_samples=dataset.valid_data)
 
-            train_datasets.append(train_dataset)
-            valid_datasets.append(valid_dataset)
+        #     train_datasets.append(train_dataset)
+        #     valid_datasets.append(valid_dataset)
 
-            self.num_train_samples += dataset.train_data.shape[0]
-            self.num_valid_samples += dataset.valid_data.shape[0]
+        #     self.num_train_samples += dataset.train_data.shape[0]
+        #     self.num_valid_samples += dataset.valid_data.shape[0]
 
-        
         if self.config['Dataset']['mars_logger']:
             dataset = MarsLoggerHandler(config=self.config)
             train_dataset = self._build_generator(np_samples=dataset.train_data)
@@ -165,24 +164,23 @@ class DataLoader(object):
             target_image = tf.image.adjust_brightness(target_image, delta_brightness)
         
         if tf.random.uniform([]) > 0.5:
-            contrast_factor = tf.random.uniform([], 0.9, 1.1)
+            contrast_factor = tf.random.uniform([], 0.8, 1.2)
             left_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), left_image)
             right_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), right_image)
             target_image = tf.image.adjust_contrast(target_image, contrast_factor)
         
-        # if tf.random.uniform([]) > 0.5:
-        #     gamma = tf.random.uniform([], 0.9, 1.1)
-        #     left_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), left_image)
-        #     right_image = tf.map_fn(lambda x: tf.image.adjust_gamma(x, gamma), right_image)
-        #     target_image = tf.image.adjust_gamma(target_image, gamma)
+        if tf.random.uniform([]) > 0.5:
+            saturation_factor = tf.random.uniform([], 0.8, 1.2)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_saturation(x, saturation_factor), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_saturation(x, saturation_factor), right_image)
+            target_image = tf.image.adjust_saturation(target_image, saturation_factor)
         
-        # if tf.random.uniform([]) > 0.5:
-        #     max_delta = 0.1
-        #     delta = tf.random.uniform([], -max_delta, max_delta)
-        #     left_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), left_image)
-        #     right_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, delta), right_image)
-        #     target_image = tf.image.adjust_hue(target_image, delta)
-        
+        if tf.random.uniform([]) > 0.5:
+            hue_factor = tf.random.uniform([], -0.1, 0.1)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, hue_factor), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, hue_factor), right_image)
+            target_image = tf.image.adjust_hue(target_image, hue_factor)
+
         left_image *= 255.
         right_image *= 255.
         target_image *= 255.

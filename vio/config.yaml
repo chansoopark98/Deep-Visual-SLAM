@@ -1,12 +1,12 @@
 Directory:
-  exp_name: new_vo_dataStep3
+  exp_name: test_vo
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
   results: ./results
 
 Dataset:
-  custom_data: True
+  custom_data: False
   mars_logger: True
 
 Train:

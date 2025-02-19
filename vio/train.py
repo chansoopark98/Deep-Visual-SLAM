@@ -32,11 +32,8 @@ class Trainer(object):
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        self.depth_net.load_weights('./assets/weights/depth/nyu_diode_custom.h5')
+        self.depth_net.load_weights('./assets/weights/depth/disp_with_custom.h5')
 
-        # self.pose_net = PoseImuNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
-        # posenet_input_shape = [(self.batch_size, *image_shape, 6),
-        #                        (self.batch_size, None, 6)]
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
         self.pose_net.build(posenet_input_shape)
@@ -50,9 +47,13 @@ class Trainer(object):
                                                                               self.config['Train']['end_lr'],
                                                                               power=0.9)
         
-        self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
-                                                  beta_1=self.config['Train']['beta1'],
-                                                  weight_decay=self.config['Train']['weight_decay'])
+        # self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
+        #                                           beta_1=self.config['Train']['beta1'],
+        #                                           weight_decay=self.config['Train']['weight_decay'])
+        
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
+                                                  beta_1=self.config['Train']['beta1'])
+        
         all_variables = self.depth_net.trainable_variables + self.pose_net.trainable_variables
         self.optimizer.build(all_variables)
         self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
@@ -94,7 +95,6 @@ class Trainer(object):
     @tf.function(jit_compile=True)
     def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
         with tf.GradientTape(persistent=True) as tape:
-            # total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
             total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
             scaled_loss = self.optimizer.get_scaled_loss(total_loss)
 
@@ -112,7 +112,6 @@ class Trainer(object):
     
     @tf.function(jit_compile=True)
     def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
-        # total_loss, pixel_loss, smooth_loss, pred_depths, vis_outputs = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
         total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
@@ -143,16 +142,9 @@ class Trainer(object):
                                                                   pred_depths=pred_train_depths,
                                                                   denorm_func=self.data_loader.denormalize_image)
 
-                    # train_warp_plot = self.plot_tool.plot_warp_images(vis_outputs=train_vis_outputs,
-                    #                                                   denorm_func=self.data_loader.denormalize_image)
-                    
-                    # train_warp_loss_plot = self.plot_tool.plot_warp_loss(vis_outputs=train_vis_outputs)
-
                     with self.train_summary_writer.as_default():
                         # Logging train images
                         tf.summary.image('Train/Depth Result', train_depth_plot, step=current_step)
-                        # tf.summary.image('Train/Warp Result', train_warp_plot, step=current_step)
-                        # tf.summary.image('Train/Warp Loss', train_warp_loss_plot, step=current_step)
                         
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy(),
@@ -187,17 +179,10 @@ class Trainer(object):
                     valid_depth_plot = self.plot_tool.plot_images(images=target_image,
                                                                   pred_depths=pred_valid_depths,
                                                                   denorm_func=self.data_loader.denormalize_image)
-                    
-                    # valid_warp_plot = self.plot_tool.plot_warp_images(vis_outputs=valid_vis_outputs,
-                    #                                                   denorm_func=self.data_loader.denormalize_image)
-                    
-                    # valid_warp_loss_plot = self.plot_tool.plot_warp_loss(vis_outputs=valid_vis_outputs)
 
                     with self.valid_summary_writer.as_default():
                         # Logging valid images
                         tf.summary.image('Valid/Depth Result', valid_depth_plot, step=current_step)
-                        # tf.summary.image('Valid/Warp Result', valid_warp_plot, step=current_step)
-                        # tf.summary.image('Valid/Warp Loss', valid_warp_loss_plot, step=current_step)
 
                 valid_tqdm.set_postfix(
                     total_loss=self.valid_total_loss.result().numpy(),
