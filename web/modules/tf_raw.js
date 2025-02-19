@@ -32,9 +32,11 @@ class InferenceManager {
         // tf.browser.fromPixels: canvas를 [height, width, 3] 텐서로 변환
         let imgTensor = tf.browser.fromPixels(this.canvas);
         // 모델에서 요구하는 크기로 리사이즈 (예: [224, 224])
-        imgTensor = tf.image.resizeBilinear(imgTensor, this.inputSize);
+        // imgTensor = tf.image.resizeBilinear(imgTensor, this.inputSize);
+        imgTensor = tf.image.resizeNearestNeighbor(imgTensor, this.inputSize);
+        imgTensor = imgTensor.toFloat();
         // 픽셀 값을 0~255에서 0~1 범위로 정규화
-        imgTensor = imgTensor.toFloat().div(tf.scalar(255));
+        // imgTensor = imgTensor.toFloat().div(tf.scalar(255));
         return imgTensor;
       });
     }
@@ -82,19 +84,19 @@ class InferenceManager {
     // 주어진 간격으로 반복 추론을 수행합니다.
     // callback(result)는 추론 결과를 처리하는 사용자 정의 함수입니다.
     startContinuousInference(callback) {
-        this.isRunning = true;
-        const inferLoop = async () => {
-          if (!this.isRunning) return;
-          const result = await this.runInference();
-          if (callback) {
-            callback(result);
-          }
-          // 다음 애니메이션 프레임에서 바로 추론을 이어갑니다.
-          requestAnimationFrame(inferLoop);
-        };
-        inferLoop();
-      }
-      
+      this.isRunning = true;
+      const inferLoop = async () => {
+        if (!this.isRunning) return;
+        const result = await this.runInference();
+        if (callback) {
+          callback(result);
+        }
+        // 추론 결과를 사용한 후, 결과 텐서들의 메모리를 관리해 주세요.
+        // 예를 들어, 단일 텐서인 경우 result.dispose(), 배열인 경우 각각 dispose()
+        setTimeout(inferLoop, this.inferenceInterval);
+      };
+      inferLoop();
+    }
   
     // 반복 추론을 중지합니다.
     stopContinuousInference() {

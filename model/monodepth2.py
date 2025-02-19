@@ -232,7 +232,7 @@ class PoseNet(tf.keras.Model):
                  prefix='pose_resnet',
                  **kwargs):
         super(PoseNet, self).__init__(**kwargs)
-
+        
         self.image_height = image_shape[0]
         self.image_width = image_shape[1]
         self.batch_size = batch_size
