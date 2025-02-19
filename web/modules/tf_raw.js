@@ -1,6 +1,5 @@
 // inferenceManager.js
 // 메모리 모니터링
-
 setInterval(() => {
     const memoryInfo = tf.memory();
     console.log('Memory state:', {
@@ -9,8 +8,8 @@ setInterval(() => {
       unreliable: memoryInfo.unreliable
     });
   }, 1000);
-
-class InferenceManager {
+  
+  class InferenceManager {
     /**
      * @param {tf.GraphModel} model - TensorFlow.js GraphModel (inference 전용)
      * @param {HTMLCanvasElement} canvas - 카메라 영상이 그려진 canvas 요소
@@ -28,21 +27,23 @@ class InferenceManager {
   
     // canvas의 현재 프레임을 캡처하고 전처리합니다.
     captureFrame() {
-      return tf.tidy(() => {
+      const startTime = performance.now();  // 시작 시간 기록
+      const imgTensor = tf.tidy(() => {
         // tf.browser.fromPixels: canvas를 [height, width, 3] 텐서로 변환
-        let imgTensor = tf.browser.fromPixels(this.canvas);
+        let tensor = tf.browser.fromPixels(this.canvas);
         // 모델에서 요구하는 크기로 리사이즈 (예: [224, 224])
-        // imgTensor = tf.image.resizeBilinear(imgTensor, this.inputSize);
-        imgTensor = tf.image.resizeNearestNeighbor(imgTensor, this.inputSize);
-        imgTensor = imgTensor.toFloat();
-        // 픽셀 값을 0~255에서 0~1 범위로 정규화
-        // imgTensor = imgTensor.toFloat().div(tf.scalar(255));
-        return imgTensor;
+        tensor = tf.image.resizeNearestNeighbor(tensor, this.inputSize);
+        tensor = tensor.toFloat();
+        return tensor;
       });
+      const endTime = performance.now();    // 종료 시간 기록
+      console.log(`captureFrame 시간: ${endTime - startTime} ms`);
+      return imgTensor;
     }
   
     // 이전 프레임과 현재 프레임을 이어붙여 모델 입력 텐서를 준비합니다.
     prepareInput() {
+      const startTime = performance.now();
       // 현재 프레임 캡처
       const currFrame = this.captureFrame(); // shape: [h, w, 3]
       let combined;
@@ -62,22 +63,27 @@ class InferenceManager {
       // combined 텐서는 dispose (inputTensor는 독립적 메모리)
       combined.dispose();
       currFrame.dispose();
+      const endTime = performance.now();
+      console.log(`prepareInput 시간: ${endTime - startTime} ms`);
       return inputTensor;
     }
   
     // 준비된 입력 텐서를 사용하여 모델 추론을 실행합니다.
     async runInference() {
+      const startTime = performance.now();
       const inputTensor = this.prepareInput();
       let output;
       try {
         // GraphModel의 경우 executeAsync를 사용하여 비동기로 실행합니다.
-        output = await this.model.execute(inputTensor);
+        output = await this.model.executeAsync(inputTensor);
       } catch (error) {
         console.error('Error during inference:', error);
       } finally {
         // 입력 텐서는 더 이상 필요 없으므로 메모리 해제
         inputTensor.dispose();
       }
+      const endTime = performance.now();
+      console.log(`runInference 시간: ${endTime - startTime} ms`);
       return output;
     }
   
@@ -87,10 +93,13 @@ class InferenceManager {
       this.isRunning = true;
       const inferLoop = async () => {
         if (!this.isRunning) return;
+        const loopStartTime = performance.now();
         const result = await this.runInference();
         if (callback) {
           callback(result);
         }
+        const loopEndTime = performance.now();
+        console.log(`한 사이클 추론 전체 시간: ${loopEndTime - loopStartTime} ms`);
         // 추론 결과를 사용한 후, 결과 텐서들의 메모리를 관리해 주세요.
         // 예를 들어, 단일 텐서인 경우 result.dispose(), 배열인 경우 각각 dispose()
         setTimeout(inferLoop, this.inferenceInterval);
@@ -107,7 +116,7 @@ class InferenceManager {
   // 사용 예시 (예: main.js)
   const modelPath = '../assets/tfjs/model.json';
   tf.setBackend('webgl');
-
+  
   tf.loadGraphModel(modelPath)
     .then(model => {
       console.log('Model loaded successfully.');
@@ -118,7 +127,7 @@ class InferenceManager {
       // 추론 결과를 처리할 콜백 함수 예시
       const handleResult = result => {
         console.log('Inference result:', result);
-        // 결과 텐서가 단일 텐서일 경우:
+        // 결과 텐서가 단일 텐서인 경우:
         if (result instanceof tf.Tensor) {
           result.dispose();
         }
