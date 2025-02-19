@@ -14,7 +14,7 @@ if __name__ == '__main__':
     with open('./vio/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
     
-    with tf.device('/GPU:0'):
+    with tf.device('/GPU:1'):
         config['Train']['batch_size'] = 1
         num_source = config['Train']['num_source']
         image_shape = (config['Train']['img_h'], config['Train']['img_w'])
@@ -22,12 +22,12 @@ if __name__ == '__main__':
 
         depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='disp_resnet')
         depth_net(tf.random.normal((1, *image_shape, 3)))
-        depth_net.load_weights('./weights/vo_dataAug_ep101_lr1e-4_norm1.0_decay1e-4/depth_net_epoch_100_model.h5')
+        depth_net.load_weights('./weights/test_vo/depth_net_epoch_41_model.h5')
 
         pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
         posenet_input_shape = [(batch_size, *image_shape, 6)]
         pose_net.build(posenet_input_shape)
-        pose_net.load_weights('./weights/vo_dataAug_ep101_lr1e-4_norm1.0_decay1e-4/pose_net_epoch_100_model.h5')
+        pose_net.load_weights('./weights/test_vo/pose_net_epoch_41_model.h5')
 
         eval_tool = EvalTrajectory(depth_model=depth_net, pose_model=pose_net, config=config)
 
