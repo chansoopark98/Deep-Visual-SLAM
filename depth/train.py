@@ -73,7 +73,7 @@ class Trainer(object):
         self.valid_samples = self.data_loader.num_valid_samples
         
         # 3. Optimizer
-        self.warmup_scheduler = tf.keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
+        self.scheduler = tf.keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
                                                                               self.config['Train']['final_lr'],
                                                                               power=self.config['Train']['power'])
@@ -81,7 +81,7 @@ class Trainer(object):
         self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
                                                   weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None
-                                                  ) # 
+                                                  )
         
         self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
@@ -259,7 +259,7 @@ class Trainer(object):
             None
         """
         for epoch in range(self.config['Train']['epoch']):
-            lr = self.warmup_scheduler(epoch)
+            lr = self.scheduler(epoch)
 
             # Set learning rate
             self.optimizer.learning_rate = lr

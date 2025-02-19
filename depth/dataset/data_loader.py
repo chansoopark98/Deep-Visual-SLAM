@@ -170,11 +170,8 @@ class DataLoader(object):
         """
         # Normalize image pytorch style
         image = tf.cast(image, tf.float32)
-        # image /= 255.0
-        # image = (image - self.mean) / self.std
-        # normalize to -1 to 1
-        image = (image - 127.5) / 127.5
-
+        image /= 255.0
+        image = (image - self.mean) / self.std
         return image
     
     @tf.function(jit_compile=True)
@@ -188,10 +185,8 @@ class DataLoader(object):
         Returns:
             tf.Tensor: Denormalized image tensor of shape [H, W, 3] with dtype uint8.
         """
-        # image = (image * self.std) + self.mean
-        # image *= 255.0
-        # -1 ~1 to 255
-        image = (image * 127.5) + 127.5
+        image = (image * self.std) + self.mean
+        image *= 255.0
         image = tf.cast(image, tf.uint8)
         return image
 
@@ -305,19 +300,19 @@ class DataLoader(object):
         # rgb augmentations
         rgb = tf.cast(rgb, tf.float32) / 255.0
 
-        if tf.random.uniform([]) > 0.3:
+        if tf.random.uniform([]) > 0.5:
             delta_brightness = tf.random.uniform([], -0.2, 0.2)
             rgb = tf.image.adjust_brightness(rgb, delta_brightness)
         
-        if tf.random.uniform([]) > 0.3:
+        if tf.random.uniform([]) > 0.5:
             contrast_factor = tf.random.uniform([], 0.8, 1.2)
             rgb = tf.image.adjust_contrast(rgb, contrast_factor)
         
-        if tf.random.uniform([]) > 0.3:
-            gamma = tf.random.uniform([], 0.9, 1.1)
-            rgb = tf.image.adjust_gamma(rgb, gamma)
-        
-        if tf.random.uniform([]) > 0.3:
+        if tf.random.uniform([]) > 0.5:
+            saturation_factor = tf.random.uniform([], 0.8, 1.2)
+            rgb = tf.image.adjust_saturation(rgb, saturation_factor)
+
+        if tf.random.uniform([]) > 0.5:
             max_delta = 0.1
             rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
 
@@ -326,7 +321,7 @@ class DataLoader(object):
             concat = tf.concat([rgb, depth], axis=-1)
             concat = tf.image.random_crop(concat, size=(self.image_size[0] - self.crop_size,
                                                     self.image_size[1] - self.crop_size, 4))
-            
+
             cropped_rgb = concat[:, :, :3]
             cropped_depth = concat[:, :, 3:]
 
