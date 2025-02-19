@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>WebCam</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                background: black;
+                overflow: hidden;
+            }
+            video,
+            canvas {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+            }
+            button {
+                position: absolute;
+                bottom: 2svh;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 1svh 2svh;
+                font-size: 2svh;
+                background: white;
+                border: none;
+                border-radius: 1svh;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        <button id="switchCam">카메라 전환</button>
+
+        <script>
+            let video = document.getElementById("video");
+            let canvas = document.getElementById("canvas");
+            let ctx = canvas.getContext("2d");
+            let currentFacingMode = "environment"; // 기본 후면 카메라
+            let stream = null;
+
+            async function startCamera(facingMode) {
+                if (stream) {
+                    stream.getTracks().forEach((track) => track.stop()); // 기존 스트림 종료
+                }
+
+                let constraints = {
+                    video: {
+                        facingMode: facingMode,
+                        width: { ideal: 9999 },
+                        height: { ideal: 9999 },
+                    }, // 최고 해상도로 조절
+                };
+
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(
+                        constraints
+                    );
+                    video.srcObject = stream;
+                } catch (err) {
+                    console.error("카메라 접근 오류:", err);
+                }
+            }
+
+            function updateCanvas() {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                requestAnimationFrame(updateCanvas);
+            }
+
+            document
+                .getElementById("switchCam")
+                .addEventListener("click", () => {
+                    currentFacingMode =
+                        currentFacingMode === "user" ? "environment" : "user";
+                    startCamera(currentFacingMode);
+                });
+
+            startCamera(currentFacingMode);
+            video.addEventListener("loadedmetadata", updateCanvas);
+        </script>
+    </body>
+</html>

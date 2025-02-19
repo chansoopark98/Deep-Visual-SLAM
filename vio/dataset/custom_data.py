@@ -47,7 +47,7 @@ class CustomDataHandler(object):
         intrinsic = self._rescale_intrinsic(raw_intrinsic, self.image_size, sample_img_size)
     
         samples = []
-        for t in range(self.num_source, length - self.num_source):
+        for t in range(self.num_source, length - self.num_source, 3):
             left_images = []
             right_images = []
 
