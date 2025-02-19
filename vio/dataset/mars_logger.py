@@ -83,9 +83,6 @@ class MarsLoggerHandler(object):
         return intrinsic_rescaled
 
     def _process(self, scene_dir: str):
-        # load csv imu file
-        imu_file = os.path.join(scene_dir, 'gyro_accel.csv')
-
         # load camera metadata
         camera_file = os.path.join(scene_dir, 'movie_metadata.csv')
         camera_data = pd.read_csv(camera_file)

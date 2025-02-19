@@ -9,8 +9,13 @@ assets/
 *.so
 
 # files
+*.pem
 *.h5
 *.mp4
+
+# web
+/web/modules/three.js/*
+/web/node_modules/*
 
 # tensorboard log
 /tensorboard/
