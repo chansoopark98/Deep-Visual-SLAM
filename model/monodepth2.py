@@ -1,22 +1,24 @@
 import tensorflow as tf
 try:
     from .model_utils import *
-    from .efficientnetv2 import EfficientNetV2Encoder
+    # from .efficientnetv2 import EfficientNetV2Encoder
     from .mobilenetv3 import MobilenetV3Large
-    from .resnet import resnet_18
+    # from .resnet import resnet_18
     from .resnet_tf import Resnet
-    from .raft.raft_backbone import CustomRAFT
+    from .mobilenetv4 import MobilenetV4
+    # from .raft.raft_backbone import CustomRAFT
     from .flownet import CustomFlow
-    from .mobilenetv4_test import MobileNetV4ConvSmall
+    # from .mobilenetv4_test import MobileNetV4ConvSmall
 except:
     from model_utils import *
-    from efficientnetv2 import EfficientNetV2Encoder
+    # from efficientnetv2 import EfficientNetV2Encoder
     from mobilenetv3 import MobilenetV3Large
-    from resnet import resnet_18
+    # from resnet import resnet_18
     from resnet_tf import Resnet
-    from raft.raft_backbone import CustomRAFT
+    from mobilenetv4 import MobilenetV4
+    # from raft.raft_backbone import CustomRAFT
     from flownet import CustomFlow
-    from mobilenetv4_test import MobileNetV4ConvSmall
+    # from mobilenetv4_test import MobileNetV4ConvSmall
     
 
 class ResNet18Encoder(tf.keras.Model):
@@ -119,6 +121,10 @@ class DispNet(tf.keras.Model):
                               pretrained=True,
                               prefix=prefix + '_resnet18').build_model()
         
+        # self.encoder = MobilenetV4(image_shape=(*image_shape, 3),
+        #             batch_size=batch_size,
+        #             prefix='mobilenetv4').build_model()
+        
         # Depth Decoder
         print('Building Depth Decoder Model')
         filters = [16, 32, 64, 128, 256]
@@ -184,6 +190,10 @@ class DispNet(tf.keras.Model):
         """
         # 1) 인코더
         x, skips = self.encoder(inputs, training=training)
+        # cast all tensor to float16
+        x = tf.cast(x, tf.float32)
+        for i in range(len(skips)):
+            skips[i] = tf.cast(skips[i], tf.float32)
 
         # disp5
         iconv5 = self.iconv5(x, training=training)  # [B,H/32, W/32, 256]
@@ -238,14 +248,19 @@ class PoseNet(tf.keras.Model):
         self.batch_size = batch_size
 
         # self.encoder = resnet_18()
-        # self.encoder = CustomFlow(image_shape=(*image_shape, 6),
-        #                           batch_size=batch_size,
-        #                           prefix='custom_flow').build_model()
-        self.encoder = MobilenetV3Large(image_shape=(*image_shape, 6),
-                                        batch_size=batch_size,
-                                        prefix='mobilenetv3_large',
-                                        pretrained=True,
-                                        return_skips=False).build_model()
+        self.encoder = CustomFlow(image_shape=(*image_shape, 6),
+                                  batch_size=batch_size,
+                                  prefix='custom_flow').build_model()
+        
+        # self.encoder = MobilenetV3Large(image_shape=(*image_shape, 6),
+        #                                 batch_size=batch_size,
+        #                                 prefix='mobilenetv3_large',
+        #                                 pretrained=True,
+        #                                 return_skips=False).build_model()
+
+        # self.encoder = MobilenetV4(image_shape=(*image_shape, 6),
+        #                            batch_size=batch_size,
+        #                            prefix='mobilenetv4').build_model()
         
         # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
@@ -298,7 +313,7 @@ class MonoDepth2Model(tf.keras.Model):
 
         self.depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
+        # self.depth_net.load_weights('./assets/weights/depth/nyu_diode_diml_metricDepth_ep30.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
 

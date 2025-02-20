@@ -1,7 +1,7 @@
 import tensorflow as tf, tf_keras
 import tensorflow_models as tfm
 import keras
-
+tf_keras.layers.ZeroPadding2D()
 small = [
     "block_group_convbn_0", # (H/2, W/2, 32)
     "block_group_convbn_2", # (H/4, W/4, 32)
@@ -56,7 +56,7 @@ class MobilenetV4:
         input_specs = tf_keras.layers.InputSpec(shape=[None, self.image_shape[0], self.image_shape[1], self.image_shape[2]])
         base_model = tfm.vision.backbones.MobileNet(model_id='MobileNetV4ConvMedium',
                                                input_specs=input_specs,)
-
+        
         layer_names = medium
 
         outputs = [base_model.get_layer(name).output for name in layer_names]

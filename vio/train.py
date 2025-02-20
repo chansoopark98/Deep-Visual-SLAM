@@ -1,7 +1,8 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-import tensorflow as tf
+import tensorflow as tf, tf_keras
+import keras
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
@@ -23,8 +24,8 @@ class Trainer(object):
         print('initialize')
    
     def configure_train_ops(self) -> None:
-        policy = tf.keras.mixed_precision.Policy('float32')
-        tf.keras.mixed_precision.set_global_policy(policy)
+        policy = tf_keras.mixed_precision.Policy('mixed_float16')
+        tf_keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
@@ -51,12 +52,14 @@ class Trainer(object):
         #                                           beta_1=self.config['Train']['beta1'],
         #                                           weight_decay=self.config['Train']['weight_decay'])
         
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
-                                                  beta_1=self.config['Train']['beta1'])
+        self.optimizer = keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
+                                                  beta_1=self.config['Train']['beta1'],
+                                                  weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None)
+        self.optimizer = keras.mixed_precision.LossScaleOptimizer(self.optimizer)
         
         all_variables = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        self.optimizer.build(all_variables)
-        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+        # self.optimizer.build(all_variables)
+        # self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Train Method
         self.learner = Learner(depth_model=self.depth_net,
@@ -96,20 +99,15 @@ class Trainer(object):
     def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
         with tf.GradientTape(persistent=True) as tape:
             total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
-            scaled_loss = self.optimizer.get_scaled_loss(total_loss)
+            scaled_loss = self.optimizer.scale_loss(total_loss)
 
         # loss update
-        depth_scale_grad = tape.gradient(scaled_loss, self.depth_net.trainable_variables)
-        pose_scale_grad = tape.gradient(scaled_loss, self.pose_net.trainable_variables)
-
-        depth_unscale_grad = self.optimizer.get_unscaled_gradients(depth_scale_grad)
-        pose_unscale_grad = self.optimizer.get_unscaled_gradients(pose_scale_grad)
-
-        self.optimizer.apply_gradients(zip(depth_unscale_grad, self.depth_net.trainable_variables))
-        self.optimizer.apply_gradients(zip(pose_unscale_grad, self.pose_net.trainable_variables))
+        vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
+        scale_grad = tape.gradient(scaled_loss, vars)
         
+        self.optimizer.apply_gradients(zip(scale_grad, vars))
         return total_loss, pixel_loss, smooth_loss, pred_depths
-    
+
     @tf.function(jit_compile=True)
     def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
         total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
@@ -123,7 +121,7 @@ class Trainer(object):
             self.optimizer.learning_rate = lr
             
             train_tqdm = tqdm(self.data_loader.train_dataset, total=self.data_loader.num_train_samples)
-            print(' LR : {0}'.format(self.optimizer.learning_rate))
+            print(' LR : {0}'.format(self.optimizer.learning_rate.numpy()))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
             for idx, (ref_images, target_image, intrinsic) in enumerate(train_tqdm):
