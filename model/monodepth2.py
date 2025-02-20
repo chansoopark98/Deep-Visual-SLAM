@@ -238,10 +238,15 @@ class PoseNet(tf.keras.Model):
         self.batch_size = batch_size
 
         # self.encoder = resnet_18()
-        self.encoder = CustomFlow(image_shape=(*image_shape, 6),
-                                  batch_size=batch_size,
-                                  prefix='custom_flow').build_model()
-
+        # self.encoder = CustomFlow(image_shape=(*image_shape, 6),
+        #                           batch_size=batch_size,
+        #                           prefix='custom_flow').build_model()
+        self.encoder = MobilenetV3Large(image_shape=(*image_shape, 6),
+                                        batch_size=batch_size,
+                                        prefix='mobilenetv3_large',
+                                        pretrained=True,
+                                        return_skips=False).build_model()
+        
         # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3

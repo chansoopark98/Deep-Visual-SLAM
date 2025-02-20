@@ -23,7 +23,7 @@ class Trainer(object):
         print('initialize')
    
     def configure_train_ops(self) -> None:
-        policy = tf.keras.mixed_precision.Policy('mixed_float16')
+        policy = tf.keras.mixed_precision.Policy('float32')
         tf.keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
@@ -32,7 +32,7 @@ class Trainer(object):
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        self.depth_net.load_weights('./assets/weights/depth/disp_with_custom.h5')
+        self.depth_net.load_weights('./assets/weights/depth/vo_pretrain_depth.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]

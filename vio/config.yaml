@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test_vo
+  exp_name: test_vo_mobilenetv3Large
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights

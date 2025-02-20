@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 class MobilenetV3Large:
-    def __init__(self, image_shape, batch_size, prefix='mobilenetv3'):
+    def __init__(self, image_shape, batch_size, prefix='mobilenetv3', pretrained=True, return_skips=False):
         """
         Initializes the MobilenetV3Large class.
 
@@ -16,6 +16,8 @@ class MobilenetV3Large:
         self.image_shape = image_shape
         self.batch_size = batch_size
         self.prefix = prefix
+        self.pretrained = pretrained
+        self.return_skips = return_skips
 
     def build_model(self) -> tf.keras.Model:
         """
@@ -24,13 +26,13 @@ class MobilenetV3Large:
         Returns:
             tf.keras.Model: Functional model.
         """
-        if self.image_shape[2] == 3:
+        if self.image_shape[2] == 3 and self.pretrained:
             pretrained_weights = 'imagenet'
         else:
             pretrained_weights = None
             
         base_model: tf.keras.Model = tf.keras.applications.MobileNetV3Large(
-            input_shape=(self.image_shape[0], self.image_shape[1], 3),
+            input_shape=(self.image_shape[0], self.image_shape[1], self.image_shape[2]),
             alpha=1.0,
             minimalistic=False,
             include_top=False,
@@ -71,8 +73,10 @@ class MobilenetV3Large:
             features[1],
             features[0],
         ]
-
-        return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_model")
+        if self.return_skips:
+            return tf.keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_model")
+        else:
+            return tf.keras.Model(inputs=inputs, outputs=x, name=f"{self.prefix}_model")
 
 if __name__ == '__main__':
     image_shape = (480, 640, 3)
