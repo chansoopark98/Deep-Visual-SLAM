@@ -165,21 +165,24 @@ class CustomFlow:
         self.prefix = prefix
 
     def build_model(self) -> tf.keras.Model:
-        base_model = Flownet(image_shape=self.image_shape, batch_size=self.batch_size, prefix=self.prefix)
+        # base_model = Flownet(image_shape=self.image_shape, batch_size=self.batch_size, prefix=self.prefix)
+        base_model = MobilenetV3Large(image_shape=self.image_shape, batch_size=self.batch_size, prefix='custom_flow_mobilenetv3').build_model()
         model_input_shape = (self.batch_size, *self.image_shape) # (batch_size, height, width, 6)
-        base_model.build(input_shape=model_input_shape)
+        
         dummy_input = tf.random.normal(model_input_shape)
         _ = base_model(dummy_input, training=False)
         
-        if self.pretrained:
-            pretrained_weights = './assets/weights/flow/Resnet_FlowV2_ep50_soft_augment_lr1e-4_norm1.0_decay1e-4/epoch_50_model.h5'
-            base_model.load_weights(pretrained_weights)
+        # if self.pretrained:
+        #     pretrained_weights = './assets/weights/flow/Resnet_FlowV2_ep50_soft_augment_lr1e-4_norm1.0_decay1e-4/epoch_50_model.h5'
+        #     base_model.load_weights(pretrained_weights)
+
         
         base_model.summary()
 
         new_input = tf.keras.layers.Input(shape=(self.image_shape[0], self.image_shape[1], 6),
                                           batch_size=self.batch_size)
-        outputs, _ = base_model.get_layer('custom_flow_resnet_resnet18')(new_input)
+        # outputs, _ = base_model.get_layer('custom_flow_resnet_resnet18')(new_input)
+        outputs, _ = base_model(new_input)
 
         partial_model = tf.keras.Model(
             inputs=new_input,
