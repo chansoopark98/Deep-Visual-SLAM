@@ -16,17 +16,27 @@ except:
     from resnet_tf import Resnet
     # from raft.raft_backbone import CustomRAFT
 
-class PredictFlow(tf.keras.layers.Layer):
-    def __init__(self, name=None):
+class PredictFlow(tf_keras.layers.Layer):
+    def __init__(self, input_filters, name=None):
         super(PredictFlow, self).__init__()
-        self.conv_out = tf.keras.layers.Conv2D(filters=2,
+        self.conv_3x3 = tf_keras.layers.Conv2D(filters=input_filters,
                                       kernel_size=3, 
                                       strides=1,
-                                      name=name,
+                                      name=name+'_3x3',
                                       padding='same')
+        self.activation = tf_keras.layers.LeakyReLU(name=name+'_leaky_relu', alpha=0.2)
+        self.conv_1x1 = tf_keras.layers.Conv2D(filters=2,
+                                        kernel_size=1, 
+                                        strides=1,
+                                        name=name+'_1x1',
+                                        padding='same')
+        
 
-    def call(self, inputs):
-        return self.conv_out(inputs)
+    def call(self, inputs, training=True):
+        x = self.conv_3x3(inputs)
+        x = self.activation(x)
+        x = self.conv_1x1(x)
+        return x
     
 class Flownet(tf_keras.Model):
     def __init__(self,
@@ -59,48 +69,48 @@ class Flownet(tf_keras.Model):
             interpolation='bilinear',
             name=prefix+'_iconv5_resize'
         )
-        self.upconv5 = reflect_conv(3, filters[4], 1, 'upconv5')
-        self.upflow5 = PredictFlow(name='upflow5')
+        self.upconv5 = reflect_conv(3, filters[4], 1, 'upconv5', activation_fn=tf.nn.leaky_relu)
+        self.upflow5 = PredictFlow(filters[4], name='upflow5')
 
-        self.conv4 = reflect_conv(3, filters[3], 1, 'conv4')
+        self.conv4 = reflect_conv(3, filters[3], 1, 'conv4', activation_fn=tf.nn.leaky_relu)
         self.iconv4_resize = tf.keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
             interpolation='bilinear',
             name=prefix+'_iconv4_resize'
         )
-        self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4')
-        self.upflow4 = PredictFlow(name='upflow4')
+        self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4', activation_fn=tf.nn.leaky_relu)
+        self.upflow4 = PredictFlow(filters[3], name='upflow4')
 
-        self.conv3 = reflect_conv(3, filters[2], 1, 'conv3')
+        self.conv3 = reflect_conv(3, filters[2], 1, 'conv3', activation_fn=tf.nn.leaky_relu)
         self.iconv3_resize = tf.keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
             interpolation='bilinear',
             name=prefix+'_iconv3_resize'
         )
-        self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3')
-        self.upflow3 = PredictFlow(name='upflow3')
+        self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3', activation_fn=tf.nn.leaky_relu)
+        self.upflow3 = PredictFlow(filters[2], name='upflow3')
 
-        self.conv2 = reflect_conv(3, filters[1], 1, 'conv2')
+        self.conv2 = reflect_conv(3, filters[1], 1, 'conv2', activation_fn=tf.nn.leaky_relu)
         self.iconv2_resize = tf.keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
             interpolation='bilinear',
             name=prefix+'_iconv2_resize'
         )
-        self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2')
-        self.upflow2 = PredictFlow(name='upflow2')
+        self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2', activation_fn=tf.nn.leaky_relu)
+        self.upflow2 = PredictFlow(filters[1], name='upflow2')
 
-        self.conv1 = reflect_conv(3, filters[0], 1, 'conv1')
+        self.conv1 = reflect_conv(3, filters[0], 1, 'conv1', activation_fn=tf.nn.leaky_relu)
         self.iconv1_resize = tf.keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
             interpolation='bilinear',
             name=prefix+'_iconv1_resize'
         )
-        self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1')
-        self.upflow1 = PredictFlow(name='upflow1')
+        self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1', activation_fn=tf.nn.leaky_relu)
+        self.upflow1 = PredictFlow(filters[0], name='upflow1')
 
     # @tf.function(jit_compile=True)
     def call(self, inputs, training=True):

@@ -38,7 +38,7 @@ class Trainer(object):
         model_input_shape = (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 6)
         self.model.build(model_input_shape)
         _ = self.model(tf.random.normal(model_input_shape))
-        self.model.summary(line_length=100)
+        # self.model.summary(line_length=100)
 
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
@@ -90,7 +90,7 @@ class Trainer(object):
             scaled_loss = self.optimizer.scale_loss(total_loss)
 
         gradients = tape.gradient(scaled_loss, self.model.trainable_variables)
-        gradients, _ = tf.clip_by_global_norm(gradients, self.config['Train']['clip_norm'])
+        # gradients, _ = tf.clip_by_global_norm(gradients, self.config['Train']['clip_norm'])
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return total_loss, pred_flows[-1]
     
