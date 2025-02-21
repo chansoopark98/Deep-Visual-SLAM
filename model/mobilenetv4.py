@@ -1,7 +1,6 @@
 import tensorflow as tf, tf_keras
 import tensorflow_models as tfm
-import keras
-tf_keras.layers.ZeroPadding2D()
+
 small = [
     "block_group_convbn_0", # (H/2, W/2, 32)
     "block_group_convbn_2", # (H/4, W/4, 32)
@@ -16,6 +15,30 @@ medium = [
     "block_group_uib_3", # (H/8, W/8, 80)
     "block_group_uib_11", # (H/16, W/16, 160)
     "block_group_uib_22"
+]
+
+medium_seg = [
+    "block_group_convbn_0",
+    "block_group_fused_ib_1",
+    "block_group_uib_3",
+    "block_group_uib_10",
+    "block_group_uib_18"
+]
+
+medium_hybrid = [
+    "block_group_convbn_0",
+    "block_group_fused_ib_1",
+    "block_group_uib_3",
+    "block_group_uib_15",
+    "block_group_uib_31"
+]
+
+large = [
+    "block_group_convbn_0",
+    "block_group_fused_ib_1",
+    "block_group_uib_3",
+    "block_group_uib_14",
+    "block_group_uib_27"
 ]
 
 class MobilenetV4:
@@ -48,15 +71,12 @@ class MobilenetV4:
         Returns:
             tf.keras.Model: Functional model.
         """
-        if self.image_shape[2] == 3:
-            pretrained_weights = 'imagenet'
-        else:
-            pretrained_weights = None
-        
         input_specs = tf_keras.layers.InputSpec(shape=[None, self.image_shape[0], self.image_shape[1], self.image_shape[2]])
-        base_model = tfm.vision.backbones.MobileNet(model_id='MobileNetV4ConvMedium',
-                                               input_specs=input_specs,)
-        
+        base_model = tfm.vision.backbones.MobileNet(model_id='MobileNetV4ConvMedium',  # MobileNetV4ConvMediumSeg
+                                                    input_specs=input_specs,
+                                                    )
+                                               
+        # base_model.summary()
         layer_names = medium
 
         outputs = [base_model.get_layer(name).output for name in layer_names]

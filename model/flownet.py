@@ -1,15 +1,17 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 try:
     from .model_utils import *
     from .efficientnetv2 import EfficientNetV2Encoder
     from .mobilenetv3 import MobilenetV3Large
     from .resnet import resnet_18
+    from .mobilenetv4 import MobilenetV4
     from .resnet_tf import Resnet
     # from .raft.raft_backbone import CustomRAFT
 except:
     from model_utils import *
     from efficientnetv2 import EfficientNetV2Encoder
     from mobilenetv3 import MobilenetV3Large
+    from mobilenetv4 import MobilenetV4
     from resnet import resnet_18
     from resnet_tf import Resnet
     # from raft.raft_backbone import CustomRAFT
@@ -26,7 +28,7 @@ class PredictFlow(tf.keras.layers.Layer):
     def call(self, inputs):
         return self.conv_out(inputs)
     
-class Flownet(tf.keras.Model):
+class Flownet(tf_keras.Model):
     def __init__(self,
                  image_shape: tuple,
                  batch_size: int,
@@ -39,20 +41,16 @@ class Flownet(tf.keras.Model):
         self.batch_size = batch_size
 
         # self.encoder = resnet_18()
-        self.encoder = Resnet(image_shape=(self.image_height, self.image_width, 6),
-                              batch_size=self.batch_size,
-                              pretrained=True,
-                              prefix=prefix+'_resnet').build_model()
+        # self.encoder = Resnet(image_shape=(self.image_height, self.image_width, 6),
+        #                       batch_size=self.batch_size,
+        #                       pretrained=True,
+        #                       prefix=prefix+'_resnet').build_model()
+        self.encoder = MobilenetV4(image_shape=(self.image_height, self.image_width, 6),
+                                   batch_size=self.batch_size,
+                                   prefix=prefix+'_mobilenetv4').build_model()
+        self.encoder.trainable = True
 
         filters = [16, 32, 64, 128, 256]
-
-        # base
-        self.common_resize = tf.keras.layers.Resizing(
-            height=self.image_height,
-            width=self.image_width,
-            interpolation='bilinear',
-            name=prefix+'_common_resize',
-        )
 
         self.conv5 = std_conv(3, 256, 1, name='conv5')
         self.iconv5_resize = tf.keras.layers.Resizing(
@@ -61,90 +59,94 @@ class Flownet(tf.keras.Model):
             interpolation='bilinear',
             name=prefix+'_iconv5_resize'
         )
-        self.upconv5 = reflect_conv(3, filters[4], 1, 'upconv5', activation_fn=tf.nn.leaky_relu)
+        self.upconv5 = reflect_conv(3, filters[4], 1, 'upconv5')
         self.upflow5 = PredictFlow(name='upflow5')
 
-        self.conv4 = reflect_conv(3, filters[3], 1, 'conv4', activation_fn=tf.nn.leaky_relu)
+        self.conv4 = reflect_conv(3, filters[3], 1, 'conv4')
         self.iconv4_resize = tf.keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
             interpolation='bilinear',
             name=prefix+'_iconv4_resize'
         )
-        self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4', activation_fn=tf.nn.leaky_relu)
+        self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4')
         self.upflow4 = PredictFlow(name='upflow4')
 
-        self.conv3 = reflect_conv(3, filters[2], 1, 'conv3', activation_fn=tf.nn.leaky_relu)
+        self.conv3 = reflect_conv(3, filters[2], 1, 'conv3')
         self.iconv3_resize = tf.keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
             interpolation='bilinear',
             name=prefix+'_iconv3_resize'
         )
-        self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3', activation_fn=tf.nn.leaky_relu)
+        self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3')
         self.upflow3 = PredictFlow(name='upflow3')
 
-        self.conv2 = reflect_conv(3, filters[1], 1, 'conv2', activation_fn=tf.nn.leaky_relu)
+        self.conv2 = reflect_conv(3, filters[1], 1, 'conv2')
         self.iconv2_resize = tf.keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
             interpolation='bilinear',
             name=prefix+'_iconv2_resize'
         )
-        self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2', activation_fn=tf.nn.leaky_relu)
+        self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2')
         self.upflow2 = PredictFlow(name='upflow2')
 
-        self.conv1 = reflect_conv(3, filters[0], 1, 'conv1', activation_fn=tf.nn.leaky_relu)
+        self.conv1 = reflect_conv(3, filters[0], 1, 'conv1')
         self.iconv1_resize = tf.keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
             interpolation='bilinear',
             name=prefix+'_iconv1_resize'
         )
-        self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1', activation_fn=tf.nn.leaky_relu)
+        self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1')
         self.upflow1 = PredictFlow(name='upflow1')
 
-    @tf.function(jit_compile=True)
-    def call(self, inputs, training=False):
+    # @tf.function(jit_compile=True)
+    def call(self, inputs, training=True):
         x, skips = self.encoder(inputs, training=training)
+
+        x = tf.cast(x, tf.float32)
+        skips = [tf.cast(skip, tf.float32) for skip in skips]
 
         x = self.conv5(x, training=training)  # [B,H/32, W/32, 256]
         x = self.iconv5_resize(x)
         x = tf.concat([x, skips[0]], axis=3)
         x = self.upconv5(x, training=training)
-        flow5 = self.common_resize(self.upflow5(x))
+        flow5 = self.upflow5(x)
+        flow5 = tf.image.resize(flow5, (self.image_height, self.image_width), method='bilinear')
 
         # disp4
         x = self.conv4(x, training=training)
         x = self.iconv4_resize(x)
         x = tf.concat([x, skips[1]], axis=3)
         x = self.upconv4(x, training=training)
-        flow4 = self.common_resize(self.upflow4(x))
-        flow4 += flow5
+        flow4 = self.upflow4(x)
+        flow4 = tf.image.resize(flow4, (self.image_height, self.image_width), method='bilinear')
         
         # disp3
         x = self.conv3(x, training=training)
         x = self.iconv3_resize(x)
         x = tf.concat([x, skips[2]], axis=3)
         x = self.upconv3(x, training=training)
-        flow3 = self.common_resize(self.upflow3(x))
-        flow3 += flow4
+        flow3 = self.upflow3(x)
+        flow3 = tf.image.resize(flow3, (self.image_height, self.image_width), method='bilinear')
         
         # disp2
         x = self.conv2(x, training=training)
         x = self.iconv2_resize(x)
         x = tf.concat([x, skips[3]], axis=3)
         x = self.upconv2(x, training=training)
-        flow2 = self.common_resize(self.upflow2(x))
-        flow2 += flow3
+        flow2 = self.upflow2(x)
+        flow2 = tf.image.resize(flow2, (self.image_height, self.image_width), method='bilinear')
         
         # disp1
         x = self.conv1(x, training=training)
         x = self.iconv1_resize(x)
         x = self.upconv1(x, training=training)
-        x = self.common_resize(self.upflow1(x))
-        x += flow2
-        return [flow4, flow3, flow2, x]
+        x = self.upflow1(x)
+
+        return [x, flow2, flow3, flow4, flow5]
 
 class CustomFlow:
     def __init__(self, image_shape, batch_size, pretrained=True, prefix='custom_flow'):

@@ -100,19 +100,37 @@ class DataLoader(object):
         image *= 255.0
         image = tf.cast(image, tf.uint8)
         return image
+    
+    @tf.function(jit_compile=True)
+    def make_valid_mask(self, flow):
+        """
+        flow: Optical flow tensor of shape [H, W, 2].
+        """
+        # Create validity mask
+        valid_cond_1 = tf.abs(flow[:, :, 0]) < 1000
+        valid_cond_2 = tf.abs(flow[:, :, 1]) < 1000
+        valid = valid_cond_1 & valid_cond_2
+
+        # Magnitude-based validity
+        mag = tf.sqrt(tf.reduce_sum(flow**2, axis=-1))
+        valid = valid & (mag < 400)
+        valid = tf.expand_dims(tf.cast(valid, tf.float32), axis=-1)
+        return valid
 
     @tf.function(jit_compile=True)
     def train_preprocess(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor) -> tuple:
         left, right, flow = self.augment(left, right, flow)
         left = self.normalize_image(left)
         right = self.normalize_image(right)
-        return left, right, flow
+        mask = self.make_valid_mask(flow)
+        return left, right, flow, mask
 
     @tf.function(jit_compile=True)
     def valid_preprocess(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor) -> tuple:
         left = self.normalize_image(left)
         right = self.normalize_image(right)
-        return left, right, flow
+        mask = self.make_valid_mask(flow)
+        return left, right, flow, mask
     
     @tf.function(jit_compile=True)
     def salt_and_pepper_noise(self, left: tf.Tensor, right: tf.Tensor, flow: tf.Tensor, prob: float = 0.05) -> tuple:
@@ -159,10 +177,15 @@ class DataLoader(object):
             right = tf.image.adjust_brightness(right, delta_brightness)
         
         if tf.random.uniform([]) > 0.5:
-            contrast_factor = tf.random.uniform([], 0.7, 1.3)
+            contrast_factor = tf.random.uniform([], 0.2, 1.2)
             left = tf.image.adjust_contrast(left, contrast_factor)
             right = tf.image.adjust_contrast(right, contrast_factor)
         
+        if tf.random.uniform([]) > 0.5:
+            saturation_factor = tf.random.uniform([], 0.8, 1.2)
+            left = tf.image.adjust_saturation(left, saturation_factor)
+            right = tf.image.adjust_saturation(right, saturation_factor)
+
         if tf.random.uniform([]) > 0.5:
             gamma = tf.random.uniform([], 0.8, 1.2)
             left = tf.image.adjust_gamma(left, gamma)
@@ -183,26 +206,26 @@ class DataLoader(object):
         #     left, right, flow = self.random_crop(left, right, flow)
 
         # flip left-right
-        if tf.random.uniform([]) > 0.5:
-            left = tf.image.flip_left_right(left)
-            right = tf.image.flip_left_right(right)
-            flow = tf.image.flip_left_right(flow)
+        # if tf.random.uniform([]) > 0.5:
+        #     left = tf.image.flip_left_right(left)
+        #     right = tf.image.flip_left_right(right)
+        #     flow = tf.image.flip_left_right(flow)
 
-            flow_x, flow_y = tf.split(flow, num_or_size_splits=2, axis=-1)  
-            flow_x = -flow_x
-            flow = tf.concat([flow_x, flow_y], axis=-1)
+        #     flow_x, flow_y = tf.split(flow, num_or_size_splits=2, axis=-1)  
+        #     flow_x = -flow_x
+        #     flow = tf.concat([flow_x, flow_y], axis=-1)
 
-        # flip up-down
-        if tf.random.uniform([]) > 0.5:
-            left = tf.image.flip_up_down(left)
-            right = tf.image.flip_up_down(right)
-            flow = tf.image.flip_up_down(flow)
+        # # flip up-down
+        # if tf.random.uniform([]) > 0.5:
+        #     left = tf.image.flip_up_down(left)
+        #     right = tf.image.flip_up_down(right)
+        #     flow = tf.image.flip_up_down(flow)
     
-            flow_x, flow_y = tf.split(flow, num_or_size_splits=2, axis=-1)
-            flow_y = -flow_y
+        #     flow_x, flow_y = tf.split(flow, num_or_size_splits=2, axis=-1)
+        #     flow_y = -flow_y
 
-            # 3) 다시 합치기
-            flow = tf.concat([flow_x, flow_y], axis=-1)  # shape [H, W, 2]
+        #     # 3) 다시 합치기
+        #     flow = tf.concat([flow_x, flow_y], axis=-1)  # shape [H, W, 2]
 
         left *= 255.
         right *= 255.
@@ -246,9 +269,9 @@ if __name__ == '__main__':
         }
     }
     data_loader = DataLoader(config)
-    for left, right, flow in data_loader.train_dataset.take(data_loader.num_train_samples):
+    for left, right, flow, mask in data_loader.train_dataset.take(data_loader.num_train_samples):
         # left, right, flow = data_loader.random_crop(left[0], right[0], flow[0])
-        left, right, flow = left[0], right[0], flow[0]
+        left, right, flow, mask = left[0], right[0], flow[0], mask[0]
         left = data_loader.denormalize_image(left)
         right = data_loader.denormalize_image(right)
         print(left.shape, right.shape, flow.shape)
@@ -259,4 +282,6 @@ if __name__ == '__main__':
         plt.imshow(flow[:, :, 0], cmap='plasma')
         plt.show()
         plt.imshow(flow[:, :, 1], cmap='plasma')
+        plt.show()
+        plt.imshow(mask)
         plt.show()
