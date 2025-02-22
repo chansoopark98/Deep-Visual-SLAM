@@ -1,4 +1,4 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 try:
     from .model_utils import *
     # from .efficientnetv2 import EfficientNetV2Encoder
@@ -100,7 +100,7 @@ class ResNet18Encoder(tf.keras.Model):
 
         return x, [skip1, skip2, skip3, skip4]
 
-class DispNet(tf.keras.Model):
+class DispNet(tf_keras.Model):
     """
     Encoder + Disp Decoder
     """
@@ -191,9 +191,9 @@ class DispNet(tf.keras.Model):
         # 1) 인코더
         x, skips = self.encoder(inputs, training=training)
         # cast all tensor to float16
-        x = tf.cast(x, tf.float32)
-        for i in range(len(skips)):
-            skips[i] = tf.cast(skips[i], tf.float32)
+        # x = tf.cast(x, tf.float32)
+        # for i in range(len(skips)):
+        #     skips[i] = tf.cast(skips[i], tf.float32)
 
         # disp5
         iconv5 = self.iconv5(x, training=training)  # [B,H/32, W/32, 256]
