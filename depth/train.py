@@ -59,7 +59,7 @@ class Trainer(object):
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
         self.model.build(model_input_shape)
         _ = self.model(tf.random.normal(model_input_shape))
-        # self.model.load_weights('./assets/weights/depth/epoch_35_model.h5') # Pretrained relative depth weights
+        self.model.load_weights('./assets/weights/depth/relative_nyu_pretrained.h5') # Pretrained relative depth weights
         # self.model.summary()
 
         # 2. Dataset
@@ -114,7 +114,7 @@ class Trainer(object):
             tensorboard_path + self.config['Directory']['exp_name'] + '/valid')
 
         os.makedirs(self.config['Directory']['weights'], exist_ok=True)
-        self.save_path = '{0}/flow/{1}'.format(self.config['Directory']['weights'],
+        self.save_path = '{0}/depth/{1}'.format(self.config['Directory']['weights'],
                                      self.config['Directory']['exp_name'])
         os.makedirs(self.save_path, exist_ok=True)
 
@@ -312,7 +312,7 @@ class Trainer(object):
                     tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=epoch)
 
             if epoch % 5 == 0:
-                self.model.save_weights(self.save_path + '/{0}epoch_{1}_model.weights.h5'.format(self.config['Train']['mode'],
+                self.model.save_weights(self.save_path + '/{0}/epoch_{1}_model.weights.h5'.format(self.config['Train']['mode'],
                                                                                                  epoch))
                 
             # Reset metrics

@@ -1,5 +1,5 @@
 Directory:
-  exp_name: nyu_relative #metric_tf2.18_nyu_diode_diml_custom_baseline_ep31
+  exp_name: nyu_diode_custom_480x640_lr2e-4_bs16_ep101 #
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -10,7 +10,7 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: True  
     valid: True  
   Diode:
-    train: False  
+    train: True  
     valid: False 
   DIML:
     train: False  
@@ -19,11 +19,11 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: False 
     valid: False 
   Custom:
-    train: False 
+    train: True 
     valid: False
 
 Train:
-  mode: 'relative' # 'relative' (normalized depth) or 'metric' (absolute depth)
+  mode: 'metric' # 'relative' (normalized depth) or 'metric' (absolute depth)
   use_shuffle: True # Whether to shuffle training data
   train_plot_interval: 200 # Interval for plotting during training
   valid_plot_interval: 20 # Interval for plotting during validation
@@ -35,7 +35,7 @@ Train:
   weight_decay: 0.0001 # Weight decay for AdamW optimizer
   batch_size: 16  # Training batch size
   epoch: 101  # Total number of epochs
-  init_lr: 0.0004  # Initial learning rate
+  init_lr: 0.0002  # Initial learning rate
   final_lr: 0.00001 # Final learning rate after warmup
   power: 0.9  # Learning rate scheduler power factor
 
