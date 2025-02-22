@@ -59,7 +59,7 @@ class Trainer(object):
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
         self.model.build(model_input_shape)
         _ = self.model(tf.random.normal(model_input_shape))
-        self.model.load_weights('./assets/weights/depth/epoch_35_model.h5') # Pretrained relative depth weights
+        # self.model.load_weights('./assets/weights/depth/epoch_35_model.h5') # Pretrained relative depth weights
         # self.model.summary()
 
         # 2. Dataset
