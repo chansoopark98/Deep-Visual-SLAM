@@ -312,7 +312,7 @@ class Trainer(object):
                     tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=epoch)
 
             if epoch % 5 == 0:
-                self.model.save_weights(self.save_path + '/{0}/epoch_{1}_model.weights.h5'.format(self.config['Train']['mode'],
+                self.model.save_weights(self.save_path + '/{0}_epoch_{1}_model.weights.h5'.format(self.config['Train']['mode'],
                                                                                                  epoch))
                 
             # Reset metrics
