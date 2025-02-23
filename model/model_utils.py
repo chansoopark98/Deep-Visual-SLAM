@@ -1,11 +1,11 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 
 batch_norm_decay = 0.95
 batch_norm_epsilon = 1e-5
 pose_scale = 0.01
 
 def std_conv(filter_size, out_channel, stride, pad='same', name='conv'):
-    return tf.keras.layers.Conv2D(out_channel, (filter_size, filter_size), strides=(stride, stride), padding=pad, name=name+'_'+'conv')
+    return tf_keras.layers.Conv2D(out_channel, (filter_size, filter_size), strides=(stride, stride), padding=pad, name=name+'_'+'conv')
 
 def hard_sigmoid(x):
     return tf.keras.layers.ReLU(6.0)(x + 3.0) * (1.0 / 6.0)
@@ -57,7 +57,7 @@ class ReflectionPadding2D(tf.keras.layers.Layer):
         w_pad,h_pad = self.padding
         return tf.pad(x, [[0,0], [h_pad,h_pad], [w_pad,w_pad], [0,0]], 'REFLECT')
 
-class ReduceMeanLayer(tf.keras.layers.Layer):
+class ReduceMeanLayer(tf_keras.layers.Layer):
     def __init__(self, prefix='unit', **kwargs):
         super(ReduceMeanLayer, self).__init__(**kwargs)
 

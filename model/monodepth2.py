@@ -230,7 +230,7 @@ class DispNet(tf_keras.Model):
 
         return disp1, disp2, disp3, disp4
 
-class PoseNet(tf.keras.Model):
+class PoseNet(tf_keras.Model):
     """
     - 입력: (B, H, W, 6)  (ex: 소스+타겟 concat)
     - 내부: ResNet-18 인코더 -> Conv/ReduceMean -> Reshape -> scale
@@ -250,20 +250,20 @@ class PoseNet(tf.keras.Model):
         # self.encoder = resnet_18()
         self.encoder = CustomFlow(image_shape=(*image_shape, 6),
                                   batch_size=batch_size,
-                                  prefix='custom_flow').build_model()
+                                  prefix='flownet').build_model()
            
         # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3
         self.pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')  # kernel=3
-        self.pose_conv3 = tf.keras.layers.Conv2D(
+        self.pose_conv3 = tf_keras.layers.Conv2D(
             filters=6, kernel_size=(1,1), strides=(1,1),
             activation=None, name='pose_conv3'
         )
 
         # 3) ReduceMeanLayer, Reshape
         self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
-        self.reshape_layer = tf.keras.layers.Reshape((6,), name='pose_reshape')
+        self.reshape_layer = tf_keras.layers.Reshape((6,), name='pose_reshape')
 
     def call(self, inputs, training=False):
         """

@@ -76,7 +76,6 @@ class MobilenetV4:
                                                     input_specs=input_specs,
                                                     )
                                                
-        # base_model.summary()
         layer_names = medium
 
         outputs = [base_model.get_layer(name).output for name in layer_names]

@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test_vo_mobilenetv3Large
+  exp_name: test_vo_mobilenetv4M_tf2.18
   data_dir: ./vio/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -32,6 +32,6 @@ Train:
   end_lr: 0.00001
 
 Experiment:
-  gpus: [0] # [0, 1]
+  gpus: [1] # [0, 1]
   gpu_vram: 24000
   gpu_vram_factor: 0.8
