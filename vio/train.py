@@ -33,11 +33,14 @@ class Trainer(object):
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
+        self.depth_net.trainable = True
         self.depth_net.load_weights('./assets/weights/depth/metric_epoch_80_model.weights.h5')
+
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
         self.pose_net.build(posenet_input_shape)
+        self.pose_net.trainable = True
         
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
@@ -55,10 +58,10 @@ class Trainer(object):
         self.optimizer = keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
                                                   weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None)
+        all_variables = self.depth_net.trainable_variables + self.pose_net.trainable_variables
+        self.optimizer.build(all_variables)
         self.optimizer = keras.mixed_precision.LossScaleOptimizer(self.optimizer)
         
-        # all_variables = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        # self.optimizer.build(all_variables)
         # self.optimizer = tf_keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Train Method
@@ -103,9 +106,9 @@ class Trainer(object):
 
         # loss update
         vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        scale_grad = tape.gradient(scaled_loss, vars)
+        grad = tape.gradient(scaled_loss, vars)
         
-        self.optimizer.apply_gradients(zip(scale_grad, vars))
+        self.optimizer.apply_gradients(zip(grad, vars))
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     @tf.function(jit_compile=True)
