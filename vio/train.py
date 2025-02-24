@@ -92,23 +92,38 @@ class Trainer(object):
                                      self.config['Directory']['exp_name']),
                     exist_ok=True)
     
-    @tf.function(jit_compile=True)
-    def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
-        with tf.GradientTape(persistent=True) as tape:
-            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
-            scaled_loss = self.optimizer.get_scaled_loss(total_loss)
+    # @tf.function(jit_compile=True)
+    # def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
+    #     with tf.GradientTape(persistent=True) as tape:
+    #         total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
+    #         scaled_loss = self.optimizer.get_scaled_loss(total_loss)
 
-        # loss update
-        depth_scale_grad = tape.gradient(scaled_loss, self.depth_net.trainable_variables)
-        pose_scale_grad = tape.gradient(scaled_loss, self.pose_net.trainable_variables)
+    #     # loss update
+    #     depth_scale_grad = tape.gradient(scaled_loss, self.depth_net.trainable_variables)
+    #     pose_scale_grad = tape.gradient(scaled_loss, self.pose_net.trainable_variables)
 
-        depth_unscale_grad = self.optimizer.get_unscaled_gradients(depth_scale_grad)
-        pose_unscale_grad = self.optimizer.get_unscaled_gradients(pose_scale_grad)
+    #     depth_unscale_grad = self.optimizer.get_unscaled_gradients(depth_scale_grad)
+    #     pose_unscale_grad = self.optimizer.get_unscaled_gradients(pose_scale_grad)
 
-        self.optimizer.apply_gradients(zip(depth_unscale_grad, self.depth_net.trainable_variables))
-        self.optimizer.apply_gradients(zip(pose_unscale_grad, self.pose_net.trainable_variables))
+    #     self.optimizer.apply_gradients(zip(depth_unscale_grad, self.depth_net.trainable_variables))
+    #     self.optimizer.apply_gradients(zip(pose_unscale_grad, self.pose_net.trainable_variables))
         
+    #     return total_loss, pixel_loss, smooth_loss, pred_depths
+    
+    @tf.function(jit_compile=True)
+    def train_step(self, ref_images, target_image, intrinsic):
+        with tf.GradientTape() as tape:
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(
+                ref_images, target_image, intrinsic, training=True)
+            scaled_loss = self.optimizer.get_scaled_loss(total_loss)
+        # 모든 변수에 대한 그래디언트 한 번에 계산
+        all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
+        scaled_grads = tape.gradient(scaled_loss, all_vars)
+        grads = self.optimizer.get_unscaled_gradients(scaled_grads)
+        # 한 번에 apply_gradients 적용
+        self.optimizer.apply_gradients(zip(grads, all_vars))
         return total_loss, pixel_loss, smooth_loss, pred_depths
+
     
     @tf.function(jit_compile=True)
     def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
