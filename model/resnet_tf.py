@@ -47,11 +47,5 @@ if __name__ == '__main__':
     batch_size = 4
     model_builder = Resnet(image_shape=image_shape, batch_size=batch_size)
     model = model_builder.build_model()
-    # model.summary()
-    # model.save(f'./assets/weights/backbone_resnet18.h5')
-    # tf.keras.models.save_model(model, 'assets/weigths/backbone_resnet18.h5')
-    # encoder = tf.keras.models.load_model('assets/weigths/backbone_resnet18.h5')
-    # encoder.summary()
-    # model.summary()
     test = model(tf.random.normal((batch_size, *image_shape)))
     print(f'outputs {len(test)}')

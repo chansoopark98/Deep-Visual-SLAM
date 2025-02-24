@@ -16,6 +16,7 @@ class DepthLearner:
         self.max_depth: float = config['Train']['max_depth']  # Maximum depth (e.g., 10.0)
         self.num_scales: int = 4  # Number of scales used
 
+    @tf.function()
     def disp_to_depth(self, disp: tf.Tensor) -> tf.Tensor:
         """
         Converts disparity to depth.
@@ -32,6 +33,7 @@ class DepthLearner:
         depth = 1.0 / scaled_disp
         return tf.cast(depth, tf.float32)
 
+    @tf.function()
     def scaled_depth_to_disp(self, depth: tf.Tensor) -> tf.Tensor:
         """
         Converts scaled depth to disparity.
@@ -48,6 +50,7 @@ class DepthLearner:
         disp = (scaled_disp - min_disp) / (max_disp - min_disp)
         return tf.cast(disp, tf.float32)
 
+    @tf.function()
     def get_smooth_loss(self, disp: tf.Tensor, img: tf.Tensor) -> tf.Tensor:
         """
         Computes the edge-aware smoothness loss.
@@ -62,8 +65,8 @@ class DepthLearner:
         disp_mean = tf.reduce_mean(disp, axis=[1, 2], keepdims=True) + 1e-7
         norm_disp = disp / disp_mean
 
-        disp_dx, disp_dy = self._compute_gradients(norm_disp)
-        img_dx, img_dy = self._compute_gradients(img)
+        disp_dx, disp_dy = self.compute_gradients(norm_disp)
+        img_dx, img_dy = self.compute_gradients(img)
 
         weight_x = tf.exp(-tf.reduce_mean(img_dx, axis=3, keepdims=True))
         weight_y = tf.exp(-tf.reduce_mean(img_dy, axis=3, keepdims=True))
@@ -73,8 +76,8 @@ class DepthLearner:
 
         return tf.reduce_mean(smoothness_x) + tf.reduce_mean(smoothness_y)
 
-    @staticmethod
-    def _compute_gradients(tensor: tf.Tensor) -> tf.Tensor:
+    @tf.function()
+    def compute_gradients(self, tensor: tf.Tensor) -> tf.Tensor:
         """
         Computes gradients in the x and y directions for a tensor.
 
@@ -88,6 +91,7 @@ class DepthLearner:
         tensor_dy = tf.abs(tensor[:, :, 1:, :] - tensor[:, :, :-1, :])
         return tensor_dx, tensor_dy
     
+    @tf.function()
     def l1_loss(self, pred: tf.Tensor, gt: tf.Tensor, valid_mask: tf.Tensor) -> tf.Tensor:
         """
         Computes the L1 loss for valid pixels only.
@@ -104,6 +108,7 @@ class DepthLearner:
         masked_abs_diff = tf.boolean_mask(abs_diff, valid_mask)
         return tf.reduce_mean(masked_abs_diff)
     
+    @tf.function()
     def silog_loss(self, prediction: tf.Tensor, target: tf.Tensor, valid_mask: tf.Tensor,
                    variance_focus: float = 0.5) -> tf.Tensor:
         """
@@ -131,6 +136,7 @@ class DepthLearner:
 
         return tf.sqrt(silog_expr)
     
+    @tf.function()
     def multi_scale_loss(self, pred_depths: List[tf.Tensor], gt_depth: tf.Tensor,
                          rgb: tf.Tensor, valid_mask: tf.Tensor) -> Dict[str, tf.Tensor]:
         """
