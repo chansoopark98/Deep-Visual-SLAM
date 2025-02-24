@@ -153,8 +153,7 @@ class DataLoader(object):
         depth = tf.image.resize(depth,
                                 self.image_size,
                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        depth = tf.clip_by_value(depth, 0., self.max_depth)
-        depth = tf.where(depth > self.max_depth, 0., depth)
+        depth = tf.where(depth >= self.max_depth, 0., depth)
         return depth
         
     @tf.function(jit_compile=True)
