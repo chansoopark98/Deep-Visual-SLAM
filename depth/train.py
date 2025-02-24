@@ -59,7 +59,7 @@ class Trainer(object):
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
         self.model.build(model_input_shape)
         _ = self.model(tf.random.normal(model_input_shape))
-        self.model.load_weights('./assets/weights/depth/epoch_35_model.h5') # Pretrained relative depth weights
+        self.model.load_weights('./assets/weights/depth/pretrain_relative_depth_ep35_resnet18.h5') # Pretrained relative depth weights
         self.model.summary()
 
         # 2. Dataset
@@ -118,9 +118,9 @@ class Trainer(object):
             tensorboard_path + self.config['Directory']['exp_name'] + '/valid')
 
         os.makedirs(self.config['Directory']['weights'], exist_ok=True)
-        os.makedirs('{0}/{1}'.format(self.config['Directory']['weights'],
-                                     self.config['Directory']['exp_name']),
-                    exist_ok=True)
+        self.save_path = '{0}/depth/{1}'.format(self.config['Directory']['weights'],
+                                     self.config['Directory']['exp_name'])
+        os.makedirs(self.save_path, exist_ok=True)
 
     @tf.function()
     def train_step(self, rgb: tf.Tensor, depth: tf.Tensor) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
@@ -366,10 +366,9 @@ class Trainer(object):
                 for metric_name, metric_value in metrics_dict.items():
                     tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=epoch)
 
-            if epoch % 5 == 0:
-                self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
-                                                                            self.config['Directory']['exp_name'],
-                                                                            epoch))
+            if epoch % self.config['Train']['save_freq'] == 0:
+                self.model.save_weights(self.save_path + '/{0}_epoch_{1}_model.h5'.format(self.config['Train']['mode'],
+                                                                                          epoch))
                 
             # Reset metrics
             self.train_total_loss.reset_states()

@@ -208,7 +208,7 @@ class DataLoader(object):
         normalized_depth = tf.clip_by_value(normalized_depth, 0., 1.0)
         return rgb, normalized_depth
 
-    # @tf.function(jit_compile=True)
+    @tf.function(jit_compile=True)
     def train_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
         """
         Preprocesses training data by applying data augmentation and normalization.
@@ -222,7 +222,6 @@ class DataLoader(object):
                 - rgb (tf.Tensor): Augmented and preprocessed RGB tensor.
                 - depth (tf.Tensor): Augmented and preprocessed depth tensor.
         """
-        print(rgb, depth)
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
         
@@ -354,7 +353,7 @@ class DataLoader(object):
         combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
             
         if use_shuffle:
-            combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 128, reshuffle_each_iteration=True)
+            combined_dataset = combined_dataset.shuffle(buffer_size=1024, reshuffle_each_iteration=True)
         if is_train:
             combined_dataset = combined_dataset.map(self.train_preprocess, num_parallel_calls=self.auto_opt)
         else:

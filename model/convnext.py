@@ -1,10 +1,6 @@
 import tensorflow as tf
-try:
-    from .resnet_original import resnet_18
-except:
-    from resnet_original import resnet_18
 
-class Resnet:
+class ConvNext:
     def __init__(self, image_shape, batch_size, pretrained=True, prefix='base'):
         """
         Initializes the Resnet18 class.
@@ -29,23 +25,28 @@ class Resnet:
         Returns:
             tf.keras.Model: Functional model.
         """
-        inputs = tf.keras.Input(shape=self.image_shape)
-        outputs = resnet_18(inputs=inputs, build_partial=True) # x, [skip4, skip3, skip2, skip1]
-        base_model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet18")
-
-        if self.pretrained:
-            pretrained_weights = './assets/weights/resnet18.h5'
-            base_model.load_weights(pretrained_weights, by_name=True, skip_mismatch=True)
+        input_tensor = tf.keras.Input(shape=self.image_shape, batch_size=self.batch_size)
+        base_model = tf.keras.applications.ConvNeXtTiny(
+                                           include_top=False,
+                                           weights='imagenet', 
+                                           
+                                           input_tensor=input_tensor,
+                                             classes=0, include_preprocessing=False)
+        base_model.summary()
         
+        """
+        tf.__operators__.add_2 # 1/4 96
+        tf.__operators__.add_5 # 1/8 192
+        tf.__operators__.add_14 # 1/16 384
+        layer_normalization # 1/32 768
+        """
         for layer in base_model.layers:
             layer._name = f"{self.prefix}_{layer.name}"        
 
         return base_model
-
+    
 if __name__ == '__main__':
-    image_shape = (480, 640, 6)
+    image_shape = (480, 640, 3)
     batch_size = 4
-    model_builder = Resnet(image_shape=image_shape, batch_size=batch_size)
+    model_builder = ConvNext(image_shape=image_shape, batch_size=batch_size, pretrained='base')
     model = model_builder.build_model()
-    test = model(tf.random.normal((batch_size, *image_shape)))
-    print(f'outputs {len(test)}')
