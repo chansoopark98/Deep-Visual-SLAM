@@ -159,7 +159,7 @@ class DataLoader(object):
             right = tf.image.adjust_brightness(right, delta_brightness)
         
         if tf.random.uniform([]) > 0.5:
-            contrast_factor = tf.random.uniform([], 0.7, 1.3)
+            contrast_factor = tf.random.uniform([], 0.2, 1.2)
             left = tf.image.adjust_contrast(left, contrast_factor)
             right = tf.image.adjust_contrast(right, contrast_factor)
         

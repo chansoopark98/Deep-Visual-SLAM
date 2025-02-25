@@ -1,4 +1,5 @@
-tensorflow==2.12.1
+tensorflow_hub
+tensorflow==2.16.1 #2.12.1
 tensorflow_datasets
 joblib
 tqdm
@@ -7,7 +8,7 @@ matplotlib
 pandas
 pydot
 graphviz
-opencv-python==4.6.0.66
+opencv-python #4.6.0.66
 pytransform3d
 pyvista
 imageio
