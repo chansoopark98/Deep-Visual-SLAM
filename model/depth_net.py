@@ -1,4 +1,4 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 try:
     from .model_utils import *
     from .resnet_tf import Resnet
@@ -7,7 +7,7 @@ except:
     from model_utils import *
     from resnet_tf import Resnet
 
-class DispNet(tf.keras.Model):
+class DispNet(tf_keras.Model):
     """
     Encoder + Disp Decoder
     """
@@ -34,7 +34,7 @@ class DispNet(tf.keras.Model):
 
         # disp 5
         self.iconv5 = reflect_conv(3, filters[4], 1, 'iconv5')
-        self.iconv5_resize = tf.keras.layers.Resizing(
+        self.iconv5_resize = tf_keras.layers.Resizing(
             height=self.image_height // 16,
             width=self.image_width // 16,
             interpolation='bilinear',
@@ -44,7 +44,7 @@ class DispNet(tf.keras.Model):
 
         # disp 4
         self.iconv4 = reflect_conv(3, filters[3], 1, 'iconv4')
-        self.iconv4_resize = tf.keras.layers.Resizing(
+        self.iconv4_resize = tf_keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
             interpolation='bilinear',
@@ -55,7 +55,7 @@ class DispNet(tf.keras.Model):
 
         # disp 3
         self.iconv3 = reflect_conv(3, filters[2], 1, 'iconv3')
-        self.iconv3_resize = tf.keras.layers.Resizing(
+        self.iconv3_resize = tf_keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
             interpolation='bilinear',
@@ -66,7 +66,7 @@ class DispNet(tf.keras.Model):
 
         # disp 2
         self.iconv2 = reflect_conv(3, filters[1], 1, 'iconv2')
-        self.iconv2_resize = tf.keras.layers.Resizing(
+        self.iconv2_resize = tf_keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
             interpolation='bilinear',
@@ -77,7 +77,7 @@ class DispNet(tf.keras.Model):
 
         # disp 1
         self.iconv1 = reflect_conv(3, filters[0], 1, 'iconv1')
-        self.iconv1_resize = tf.keras.layers.Resizing(
+        self.iconv1_resize = tf_keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
             interpolation='bilinear',
@@ -93,6 +93,9 @@ class DispNet(tf.keras.Model):
         """
         # 1) 인코더
         x, skips = self.encoder(inputs, training=training)
+
+        x = tf.cast(x, tf.float32)
+        skips = [tf.cast(skip, tf.float32) for skip in skips]
 
         # disp5
         iconv5 = self.iconv5(x, training=training)  # [B,H/32, W/32, 256]

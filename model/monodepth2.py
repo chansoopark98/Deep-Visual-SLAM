@@ -1,4 +1,4 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 try:
     from .model_utils import *
     from .efficientnetv2 import EfficientNetV2Encoder

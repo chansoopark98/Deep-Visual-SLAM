@@ -1,4 +1,4 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 try:
     from .resnet_original import resnet_18
 except:
@@ -22,16 +22,16 @@ class Resnet:
         self.pretrained = pretrained
         self.prefix = prefix
 
-    def build_model(self) -> tf.keras.Model:
+    def build_model(self) -> tf_keras.Model:
         """
         Builds a Resnet-based functional model with skip connections.
 
         Returns:
-            tf.keras.Model: Functional model.
+            tf_keras.Model: Functional model.
         """
-        inputs = tf.keras.Input(shape=self.image_shape)
+        inputs = tf_keras.Input(shape=self.image_shape)
         outputs = resnet_18(inputs=inputs, build_partial=True) # x, [skip4, skip3, skip2, skip1]
-        base_model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet18")
+        base_model = tf_keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet18")
 
         if self.pretrained:
             pretrained_weights = './assets/weights/resnet18.h5'
