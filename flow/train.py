@@ -1,14 +1,14 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-# from model.raft.raft import RAFT
 from model.flownet import Flownet
 from flow_learner import FlowLearner
 from util.metric import EndPointError
 from util.plot import plot_images
 from dataset.data_loader import DataLoader
 from datetime import datetime
-import tensorflow as tf
+import tensorflow as tf, tf_keras
+import keras
 from tqdm import tqdm
 import numpy as np
 import yaml
@@ -16,59 +16,55 @@ import yaml
 np.set_printoptions(suppress=True)
 
 class Trainer(object):
-    def __init__(self, config, strategy: tf.distribute.Strategy) -> None:
+    def __init__(self, config) -> None:
         self.config = config
-        self.strategy = strategy
         self.configure_train_ops()
         print('initialize')
 
     def configure_train_ops(self) -> None:
-        policy = tf.keras.mixed_precision.Policy('mixed_float16')
-        tf.keras.mixed_precision.set_global_policy(policy)
+        policy = keras.mixed_precision.Policy('mixed_float16')
+        keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
         
-        # self.model = RAFT()
         self.model = Flownet(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
                              batch_size=self.config['Train']['batch_size'],
-                             prefix='flownet'
-                             )
+                             prefix='flownet')
         model_input_shape = (self.config['Train']['batch_size'], self.config['Train']['img_h'], self.config['Train']['img_w'], 6)
-        self.model.build(model_input_shape)
+        _ = self.model(tf.zeros(model_input_shape))
+        self.model.build(input_shape=model_input_shape)
+        
         self.model.summary()
-        # self.model.load_weights('./assets/weights/raft/model')
 
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
         self.train_dataset = self.data_loader.train_dataset
-        self.train_dataset = self.strategy.experimental_distribute_dataset(self.train_dataset)
         self.train_samples = self.data_loader.num_train_samples
 
         self.valid_dataset = self.data_loader.valid_dataset
-        self.valid_dataset = self.strategy.experimental_distribute_dataset(self.valid_dataset)
         self.valid_samples = self.data_loader.num_valid_samples
         
         # 3. Optimizer
-        self.warmup_scheduler = tf.keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
+        self.warmup_scheduler = keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
                                                                               self.config['Train']['final_lr'],
                                                                               power=self.config['Train']['power'])
         
-        self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
+        self.optimizer = keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
-                                                  weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None
+                                                  weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None,
+                                                  clipnorm=self.config['Train']['clip_norm'] if self.config['Train']['clip_norm'] > 0 else None
                                                   ) # 
-        
-        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+        self.optimizer = keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Learner
         self.learner = FlowLearner(model=self.model, config=self.config)
 
         # 5. Metrics
-        self.train_total_loss = tf.keras.metrics.Mean(name='train_total_loss')
+        self.train_total_loss = tf_keras.metrics.Mean(name='train_total_loss')
 
-        self.valid_total_loss = tf.keras.metrics.Mean(name='valid_total_loss')
+        self.valid_total_loss = tf_keras.metrics.Mean(name='valid_total_loss')
 
         self.valid_flow_metrics = EndPointError(max_flow=self.config['Train']['max_flow'])
         
@@ -82,20 +78,18 @@ class Trainer(object):
             tensorboard_path + self.config['Directory']['exp_name'] + '/valid')
 
         os.makedirs(self.config['Directory']['weights'], exist_ok=True)
-        os.makedirs('{0}/{1}'.format(self.config['Directory']['weights'],
-                                     self.config['Directory']['exp_name']),
-                    exist_ok=True)
+        self.save_path = '{0}/flow/{1}'.format(self.config['Directory']['weights'],
+                                     self.config['Directory']['exp_name'])
+        os.makedirs(self.save_path, exist_ok=True)
 
-    @tf.function()
+    @tf.function(jit_compile=True)
     def train_step(self, left, right, flow):
         with tf.GradientTape() as tape:
             loss_dict, pred_flows = self.learner.forward_step(left, right, flow, training=True)
             total_loss = sum(loss_dict.values())
-            scaled_loss = self.optimizer.get_scaled_loss(total_loss)
+            scaled_loss = self.optimizer.scale_loss(total_loss)
 
-        scaled_gradients = tape.gradient(scaled_loss, self.model.trainable_variables)
-        scaled_gradients, _ = tf.clip_by_global_norm(scaled_gradients, self.config['Train']['clip_norm'])
-        gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
+        gradients = tape.gradient(scaled_loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         return loss_dict, pred_flows[-1]
     
@@ -103,26 +97,6 @@ class Trainer(object):
     def validation_step(self, left, right, flow):
         loss_dict, pred_flows = self.learner.forward_step(left, right, flow, training=False)
         return loss_dict, pred_flows[-1]
-    
-    @tf.function()
-    def distributed_train_step(self, left, right, flow):
-        loss_dict, pred_flow = self.strategy.run(self.train_step, args=(left, right, flow,))
-        
-        reduced_loss_dict = {
-            key: self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value, axis=None)
-            for key, value in loss_dict.items()
-            }
-        return reduced_loss_dict, pred_flow
-    
-    @tf.function()
-    def distributed_valid_step(self, left, right, flow):
-        loss_dict, pred_flow = self.strategy.run(self.validation_step, args=(left, right, flow,))
-        
-        reduced_loss_dict = {
-            key: self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value, axis=None)
-            for key, value in loss_dict.items()
-            }
-        return reduced_loss_dict, pred_flow
     
     @tf.function()
     def update_train_metric(self, loss_dict):
@@ -148,24 +122,19 @@ class Trainer(object):
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
             for idx, (left, right, flow) in enumerate(train_tqdm):
-                train_loss_result, pred_train_flow = self.distributed_train_step(left, right, flow)
+                train_loss_result, pred_train_flow = self.train_step(left, right, flow)
                 
                 # Update train metrics
-                self.strategy.run(self.update_train_metric, args=(train_loss_result,))
+                self.update_train_metric(train_loss_result)
 
                 current_step = self.train_samples * epoch + idx
 
                 if current_step % self.config['Train']['train_plot_interval'] == 0:
                     # Draw flow plot
-                    local_left = self.strategy.experimental_local_results(left)[0]
-                    local_right = self.strategy.experimental_local_results(right)[0]
-                    local_flow = self.strategy.experimental_local_results(flow)[0]
-                    local_pred_flow = self.strategy.experimental_local_results(pred_train_flow)[0]
-
-                    train_flow_plot = plot_images(left=local_left,
-                                                  right=local_right,
-                                                  gt_flow=local_flow,
-                                                  pred_flow=local_pred_flow,
+                    train_flow_plot = plot_images(left=left,
+                                                  right=right,
+                                                  gt_flow=flow,
+                                                  pred_flow=pred_train_flow,
                                                   denorm_func=self.data_loader.denormalize_image)
     
                     with self.train_summary_writer.as_default():
@@ -191,22 +160,19 @@ class Trainer(object):
                               total=self.valid_samples)
             valid_tqdm.set_description('Validation || ')
             for idx, (left, right, flow) in enumerate(valid_tqdm):
-                valid_loss_result, pred_valid_flow = self.distributed_valid_step(left, right, flow)
+                valid_loss_result, pred_valid_flow = self.validation_step(left, right, flow)
+
                 # Update valid metrics
-                self.strategy.run(self.update_valid_metric, args=(valid_loss_result, pred_valid_flow, flow))
+                self.update_valid_metric(valid_loss_result, pred_valid_flow, flow)
 
                 current_step = self.valid_samples * epoch + idx
                     
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
-                    local_left = self.strategy.experimental_local_results(left)[0]
-                    local_right = self.strategy.experimental_local_results(right)[0]
-                    local_flow = self.strategy.experimental_local_results(flow)[0]
-                    local_pred_flow = self.strategy.experimental_local_results(pred_valid_flow)[0]
-
-                    valid_flow_plot = plot_images(left=local_left,
-                                right=local_right,
-                                gt_flow=local_flow,
-                                pred_flow=local_pred_flow,
+                    # Draw flow plot
+                    valid_flow_plot = plot_images(left=left,
+                                right=right,
+                                gt_flow=flow,
+                                pred_flow=pred_valid_flow,
                                 denorm_func=self.data_loader.denormalize_image)
 
                     with self.valid_summary_writer.as_default():
@@ -215,9 +181,7 @@ class Trainer(object):
                                          valid_flow_plot, step=current_step)
                         del valid_flow_plot
 
-                valid_tqdm.set_postfix(
-                    total_loss=self.valid_total_loss.result().numpy(),
-                )
+                valid_tqdm.set_postfix(total_loss=self.valid_total_loss.result().numpy())
             
             # End valid session
             with self.valid_summary_writer.as_default():
@@ -230,10 +194,8 @@ class Trainer(object):
                 for metric_name, metric_value in metrics_dict.items():
                     tf.summary.scalar(f"Eval/{metric_name}", metric_value, step=epoch)
 
-            if epoch % 5 == 0:
-                self.model.save_weights('{0}/{1}/epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
-                                                                            self.config['Directory']['exp_name'],
-                                                                            epoch))
+            if epoch % self.config['Train']['save_freq'] == 0:
+                self.model.save_weights(self.save_path + '/epoch_{0}_model.weights.h5'.format(epoch))
                 
             # Reset metrics
             self.train_total_loss.reset_states()
@@ -275,8 +237,5 @@ if __name__ == '__main__':
         print('No GPU devices found')
         raise SystemExit
 
-    strategy = tf.distribute.MirroredStrategy()
-
-    with strategy.scope():
-        trainer = Trainer(config=config, strategy=strategy)
-        trainer.train()
+    trainer = Trainer(config=config)
+    trainer.train()

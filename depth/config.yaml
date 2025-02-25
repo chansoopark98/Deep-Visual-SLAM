@@ -1,5 +1,5 @@
 Directory:
-  exp_name: dispnet_nyu-diode-custom-adam-lr0.0001_epoch101_bs32_singleGPU
+  exp_name: dispnet_nyu-custom-adam-lr0.0002_epoch101_bs32_singleGPU
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -10,7 +10,7 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: True  
     valid: True  
   Diode:
-    train: True  
+    train: False  
     valid: False 
   DIML:
     train: False  
@@ -35,7 +35,7 @@ Train:
   beta1: 0.9  # Beta1 for Adam optimizer
   weight_decay: 0.001 # Weight decay for AdamW optimizer
   batch_size: 32  # Training batch size
-  epoch: 101  # Total number of epochs
+  epoch: 51  # Total number of epochs
   init_lr: 0.0002  # Initial learning rate
   final_lr: 0.00001 # Final learning rate after warmup
   power: 0.9  # Learning rate scheduler power factor

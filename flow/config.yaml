@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Resnet_FlowV2_ep50_soft_augment_lr1e-4_norm1.0_decay1e-4_v2
+  exp_name: tf2.16_eff-lite-b0_ep101_bs8_lr0.001-0.0001
   data_dir: ./flow/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -10,18 +10,19 @@ Dataset:
 
 Train:
   use_shuffle: True
-  train_plot_interval: 200
+  train_plot_interval: 100
   valid_plot_interval: 10
+  save_freq: 5
   img_w: 496 # 720
   img_h: 368
   max_flow: 400
   clip_norm: 1.0
   beta1: 0.9
   weight_decay: 0.0001
-  batch_size: 32 # 1
+  batch_size: 8 # 1
   epoch: 101
-  init_lr: 0.0004
-  final_lr: 0.00001
+  init_lr: 0.001
+  final_lr: 0.0001
   power: 0.9
 
 Experiment:
