@@ -1,5 +1,5 @@
 Directory:
-  exp_name: tf2.16_dispnet_nyu-diode-diml-custom-adam-lr0.0002_epoch101_bs32_singleGPU
+  exp_name: tf2.16_nyu_diode_custom_ep51_bs32_lr0.0002-0.00001
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -13,8 +13,8 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: True  
     valid: False 
   DIML:
-    train: True  
-    valid: False 
+    train: False
+    valid: False
   Hypersim:
     train: False 
     valid: False 

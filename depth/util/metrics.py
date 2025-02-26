@@ -1,6 +1,6 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 
-class DepthMetrics(tf.keras.metrics.Metric):
+class DepthMetrics(tf_keras.metrics.Metric):
     def __init__(self, mode, min_depth, max_depth, name='depth_metrics', **kwargs):
         """
         Initializes DepthMetrics to evaluate depth estimation models.
@@ -32,7 +32,7 @@ class DepthMetrics(tf.keras.metrics.Metric):
 
         self.total_count = self.add_weight(name='total_count', initializer='zeros', dtype=tf.float32)
 
-    @tf.function
+    # @tf.function
     def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor, sample_weight=None) -> None:
         """
         Updates the metric states based on ground truth and predictions.
@@ -152,3 +152,16 @@ class DepthMetrics(tf.keras.metrics.Metric):
         """
         for var in self.variables:
             var.assign(tf.zeros_like(var))
+
+# test
+if __name__ == '__main__':
+    depth_metrics = DepthMetrics(mode='metric', min_depth=0.1, max_depth=100.0)
+    y_true = tf.random.uniform((4, 256, 256, 1), 0.1, 100.0)
+    y_pred = tf.random.uniform((4, 256, 256, 1), 0.1, 100.0)
+    depth_metrics.update_state(y_true, y_pred)
+    print(depth_metrics.result())
+    print(depth_metrics.get_all_metrics())
+    depth_metrics.reset_states()
+    print(depth_metrics.result())
+    print(depth_metrics.get_all_metrics())
+    print
