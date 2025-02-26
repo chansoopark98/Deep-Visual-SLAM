@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 from model.monodepth2 import build_posenet
-from vio.utils.projection_utils import pose_vec2mat
+from vo.utils.projection_utils import pose_vec2mat
 
 # 카메라 궤적을 저장할 리스트
 trajectory = []
