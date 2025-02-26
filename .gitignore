@@ -35,9 +35,9 @@ assets/
 /flow/tensorboard/
 
 # vio ignore files and directories
-/vio/data/
-/vio/weights/
-/vio/tensorboard/
+/vo/data/
+/vo/weights/
+/vo/tensorboard/
 
 # Distribution / packaging
 .Python

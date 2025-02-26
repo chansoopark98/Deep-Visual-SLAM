@@ -1,5 +1,8 @@
 import tensorflow as tf, tf_keras
-from .efficientnet_lite import efficientnet_lite_b0
+try:
+    from .efficientnet_lite import efficientnet_lite_b0
+except:
+    from efficientnet_lite import efficientnet_lite_b0
 
 eff_lite_b0_layers = [
         "block1a_project_bn", # 1/2@ 16
@@ -32,7 +35,7 @@ class EfficientNet:
                                       weights=weights, 
                                       classes=0)
 
-        base_model.summary() 
+        # base_model.summary() 
         outputs = [base_model.get_layer(name).output for name in eff_lite_b0_layers]
         partial_model = tf_keras.Model(inputs=base_model.inputs, outputs=outputs, name=f"{self.prefix}_partial")
 

@@ -1,11 +1,13 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-import tensorflow as tf
+import tensorflow as tf, tf_keras
+import keras
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
-from model.monodepth2 import DispNet, PoseNet
+from model.pose_net import PoseNet
+from model.depth_net import DispNet
 # from monodepth_learner import Learner
 from monodepth_learner_new import Learner
 from tqdm import tqdm
@@ -23,8 +25,8 @@ class Trainer(object):
         print('initialize')
    
     def configure_train_ops(self) -> None:
-        policy = tf.keras.mixed_precision.Policy('float32')
-        tf.keras.mixed_precision.set_global_policy(policy)
+        policy = keras.mixed_precision.Policy('float32')
+        keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
@@ -32,7 +34,7 @@ class Trainer(object):
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
         self.depth_net(tf.random.normal((1, *image_shape, 3)))
-        self.depth_net.load_weights('./assets/weights/depth/vo_pretrain_depth.h5')
+        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_45_model.weights.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
@@ -42,21 +44,16 @@ class Trainer(object):
         self.data_loader = DataLoader(config=self.config)
         
         # 3. Optimizer
-        self.warmup_scheduler = tf.keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
+        self.warmup_scheduler = keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
                                                                               self.config['Train']['end_lr'],
                                                                               power=0.9)
         
-        # self.optimizer = tf.keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
-        #                                           beta_1=self.config['Train']['beta1'],
-        #                                           weight_decay=self.config['Train']['weight_decay'])
-        
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
-                                                  beta_1=self.config['Train']['beta1'])
-        
-        all_variables = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        self.optimizer.build(all_variables)
-        self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+        self.optimizer = keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
+                                                  beta_1=self.config['Train']['beta1'],
+                                                  weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None,
+                                                  ) # 
+        self.optimizer = keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Train Method
         self.learner = Learner(depth_model=self.depth_net,
@@ -69,16 +66,16 @@ class Trainer(object):
         self.plot_tool = PlotTool(config=self.config)
 
         # 5. Metrics
-        self.train_total_loss = tf.keras.metrics.Mean(name='train_total_loss')
-        self.train_pixel_loss = tf.keras.metrics.Mean(name='train_pixel_loss')
-        self.train_smooth_loss = tf.keras.metrics.Mean(name='train_smooth_loss')
-        self.valid_total_loss = tf.keras.metrics.Mean(name='valid_total_loss')
-        self.valid_pixel_loss = tf.keras.metrics.Mean(name='valid_pixel_loss')
-        self.valid_smooth_loss = tf.keras.metrics.Mean(name='valid_smooth_loss')
+        self.train_total_loss = tf_keras.metrics.Mean(name='train_total_loss')
+        self.train_pixel_loss = tf_keras.metrics.Mean(name='train_pixel_loss')
+        self.train_smooth_loss = tf_keras.metrics.Mean(name='train_smooth_loss')
+        self.valid_total_loss = tf_keras.metrics.Mean(name='valid_total_loss')
+        self.valid_pixel_loss = tf_keras.metrics.Mean(name='valid_pixel_loss')
+        self.valid_smooth_loss = tf_keras.metrics.Mean(name='valid_smooth_loss')
 
         # 6. Logger
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-        tensorboard_path = os.path.join('vio', self.config['Directory']['log_dir'] + \
+        tensorboard_path = os.path.join('vo', self.config['Directory']['log_dir'] + \
             '/' + current_time + '_')
         self.train_summary_writer = tf.summary.create_file_writer(
             tensorboard_path + self.config['Directory']['exp_name'] + '/train')
@@ -88,9 +85,9 @@ class Trainer(object):
             tensorboard_path + self.config['Directory']['exp_name'] + '/test')
 
         os.makedirs(self.config['Directory']['weights'], exist_ok=True)
-        os.makedirs('{0}/{1}'.format(self.config['Directory']['weights'],
-                                     self.config['Directory']['exp_name']),
-                    exist_ok=True)
+        self.save_path = '{0}/vo/{1}'.format(self.config['Directory']['weights'],
+                                     self.config['Directory']['exp_name'])
+        os.makedirs(self.save_path, exist_ok=True)
     
     # @tf.function(jit_compile=True)
     # def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
@@ -115,16 +112,13 @@ class Trainer(object):
         with tf.GradientTape() as tape:
             total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(
                 ref_images, target_image, intrinsic, training=True)
-            scaled_loss = self.optimizer.get_scaled_loss(total_loss)
-        # 모든 변수에 대한 그래디언트 한 번에 계산
+            scaled_loss = self.optimizer.scale_loss(total_loss)
+        
         all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        scaled_grads = tape.gradient(scaled_loss, all_vars)
-        grads = self.optimizer.get_unscaled_gradients(scaled_grads)
-        # 한 번에 apply_gradients 적용
+        grads = tape.gradient(scaled_loss, all_vars)
         self.optimizer.apply_gradients(zip(grads, all_vars))
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
-    
     @tf.function(jit_compile=True)
     def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
         total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
@@ -221,12 +215,11 @@ class Trainer(object):
                 # Logging eval images
                 tf.summary.image('Eval/Trajectory', eval_plot, step=epoch)
             
-            self.depth_net.save_weights('{0}/{1}/depth_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
-                                                                                          self.config['Directory']['exp_name'],
-                                                                                          epoch))
-            self.pose_net.save_weights('{0}/{1}/pose_net_epoch_{2}_model.h5'.format(self.config['Directory']['weights'],
-                                                                                        self.config['Directory']['exp_name'],
-                                                                                        epoch))
+            if epoch % self.config['Train']['save_freq'] == 0:
+                self.depth_net.save_weights(self.save_path + '/depth_net_epoch_{0}_model.weights.h5'.format(epoch))
+                self.pose_net.save_weights(self.save_path + '/pose_net_epoch_{0}_model.weights.h5'.format(epoch))
+            
+            # Reset metrics        
             self.train_total_loss.reset_states()
             self.train_pixel_loss.reset_states()
             self.train_smooth_loss.reset_states()
@@ -235,7 +228,7 @@ class Trainer(object):
             self.valid_smooth_loss.reset_states()
 
 if __name__ == '__main__':
-    with open('./vio/config.yaml', 'r') as file:
+    with open('./vo/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
     # Get GPU configuration and set visible GPUs
@@ -268,8 +261,6 @@ if __name__ == '__main__':
     else:
         print('No GPU devices found')
         raise SystemExit
-
-    # strategy = tf.distribute.MirroredStrategy()
 
     # with strategy.scope():
     trainer = Trainer(config=config)

@@ -5,7 +5,13 @@ batch_norm_epsilon = 1e-5
 pose_scale = 0.01
 
 def std_conv(filter_size, out_channel, stride, pad='same', name='conv'):
-    return tf_keras.layers.Conv2D(out_channel, (filter_size, filter_size), strides=(stride, stride), padding=pad, name=name+'_'+'conv')
+    conv_layer = tf_keras.layers.Conv2D(out_channel,
+                                        (filter_size, filter_size),
+                                         strides=(stride, stride), 
+                                         padding=pad,
+                                         name=name+'_'+'conv')
+    return conv_layer
+    
 
 def hard_sigmoid(x):
     return tf_keras.layers.ReLU(6.0)(x + 3.0) * (1.0 / 6.0)
