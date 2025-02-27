@@ -29,10 +29,16 @@ class PoseNet(tf_keras.Model):
         
         # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
+        self.pose_act0 = tf_keras.layers.ReLU(name='pose_relu')
+
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3
+        self.pose_act1 = tf_keras.layers.ReLU(name='pose_relu1')
+
         self.pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')  # kernel=3
+        self.pose_act2 = tf_keras.layers.ReLU(name='pose_relu2')
+    
         self.pose_conv3 = tf_keras.layers.Conv2D(
-            filters=6, kernel_size=(1,1), strides=(1,1),
+            filters=6, kernel_size=(1, 1), strides=(1, 1),
             activation=None, name='pose_conv3'
         )
 
@@ -51,8 +57,14 @@ class PoseNet(tf_keras.Model):
 
         # 2) pose_conv0 -> pose_conv1 -> pose_conv2 -> pose_conv3
         x = self.pose_conv0(x)
+        x = self.pose_act0(x)
+
         x = self.pose_conv1(x)
+        x = self.pose_act1(x)
+
         x = self.pose_conv2(x)
+        x = self.pose_act2(x)
+            
         x = self.pose_conv3(x)  # [B, H/32, W/32, 6]
 
         # 3) reduce_mean -> reshape -> scale

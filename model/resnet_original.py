@@ -1,6 +1,6 @@
 import tensorflow as tf, tf_keras
 
-BATCH_NORM_DECAY = 0.9
+BATCH_NORM_DECAY = 0.95
 
 def basic_block(inputs, num_channels, kernel_size, num_blocks, skip_blocks, name):
     """Basic residual block"""

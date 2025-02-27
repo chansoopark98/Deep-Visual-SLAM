@@ -58,8 +58,6 @@ class Learner(object):
         SSIM_d = (mu_x**2 + mu_y**2 + C1)*(sigma_x + sigma_y + C2)
         SSIM_raw = SSIM_n / (SSIM_d + 1e-10)  # +1e-10 to avoid /0
 
-        # Monodepth2: return (1-SSIM)/2 => [0..1] 범위
-        # clip to avoid negative
         SSIM_loss = tf.clip_by_value((1.0 - SSIM_raw)*0.5, 0.0, 1.0)
         return SSIM_loss
 
