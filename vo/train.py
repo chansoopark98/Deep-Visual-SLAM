@@ -25,7 +25,7 @@ class Trainer(object):
         print('initialize')
    
     def configure_train_ops(self) -> None:
-        policy = keras.mixed_precision.Policy('float32')
+        policy = keras.mixed_precision.Policy('mixed_float16')
         keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
@@ -49,7 +49,7 @@ class Trainer(object):
                                                                               self.config['Train']['end_lr'],
                                                                               power=0.9)
         
-        self.optimizer = keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
+        self.optimizer = keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
                                                   weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None,
                                                   ) # 
