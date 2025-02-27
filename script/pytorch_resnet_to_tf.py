@@ -1,4 +1,4 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 import os, sys
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import model.resnet_original as resnet
@@ -8,17 +8,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import PIL
 
-model_name = '18'
-inputs = tf.keras.Input((None, None,3))
+model_name = '34'
+inputs = tf_keras.Input((None, None,3))
 if model_name ==  '18':
     resnet_torch = models.resnet18(pretrained=True)
-    resnet_tf = resnet.resnet_18(inputs)
+    resnet_tf = resnet.resnet_18(inputs, build_partial=False)
 elif model_name == '34':
     resnet_torch = models.resnet34(pretrained=True)
-    resnet_tf = resnet.resnet_34(inputs)
+    resnet_tf = resnet.resnet_34(inputs, build_partial=False)
 
-model = tf.keras.Model(inputs, resnet_tf)
-tf.keras.utils.plot_model(model, to_file=f'assets/resnet{model_name}_model.png', show_layer_names=True)
+model = tf_keras.Model(inputs, resnet_tf)
+tf_keras.utils.plot_model(model, to_file=f'assets/resnet{model_name}_model.png', show_layer_names=True)
 
 # place all variables in list
 tf_layer_names = [layer.name for layer in model.layers]
@@ -127,7 +127,7 @@ layer = tf_layer_names[layer_idx]
 activations = SaveFeatures(layers[layer_idx])
 torch_output = resnet_torch(img_torch)
 torch_layer_output = activations.features.permute(0, 2, 3, 1)
-intermediate_model = tf.keras.Model(inputs, model.get_layer(layer).output)
+intermediate_model = tf_keras.Model(inputs, model.get_layer(layer).output)
 tf_layer_output = intermediate_model.predict(img) 
 max_diff = np.amax(np.abs(tf_layer_output - torch_layer_output.detach().numpy()))
 print(layer, ':', max_diff)

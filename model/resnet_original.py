@@ -59,29 +59,40 @@ def resnet_18(inputs, build_partial=True):
         return x
     
 
-def resnet_34(inputs):
+def resnet_34(inputs, build_partial=True):
+    x = tf_keras.layers.ZeroPadding2D(padding=(3,3), name='pad')(inputs)
+    x = tf_keras.layers.Conv2D(filters=64, kernel_size=7, strides=2, padding='valid', activation='linear', use_bias=False, name='conv1')(x)
+    x = tf_keras.layers.BatchNormalization(momentum=BATCH_NORM_DECAY, epsilon=1e-5, name='bn1')(x)
+    x = tf_keras.layers.Activation('relu', name='relu')(x)
 
-        x = tf_keras.layers.ZeroPadding2D(padding=(3,3), name='pad')(inputs)
-        x = tf_keras.layers.Conv2D(filters=64, kernel_size=7, strides=2, padding='valid', activation='linear', use_bias=False, name='conv1')(x)
-        x = tf_keras.layers.BatchNormalization(momentum=BATCH_NORM_DECAY, epsilon=1e-5, name='bn1')(x)
-        x = tf_keras.layers.Activation('relu', name='relu')(x)
-        x = tf_keras.layers.ZeroPadding2D(padding=(1,1), name='pad1')(x)
-        x = tf_keras.layers.MaxPool2D(pool_size=3, strides=2, padding='valid', name='maxpool')(x)
+    skip1 = x # H/2
+    
+    x = tf_keras.layers.ZeroPadding2D(padding=(1,1), name='pad1')(x)
+    x = tf_keras.layers.MaxPool2D(pool_size=3, strides=2, padding='valid', name='maxpool')(x)
 
-        x = basic_block(x, num_channels=64, kernel_size=3, num_blocks=3, skip_blocks=[], name='layer1')
+    x = basic_block(x, num_channels=64, kernel_size=3, num_blocks=3, skip_blocks=[], name='layer1')
 
-        x = basic_block_down(x, num_channels=128, kernel_size=3, name='layer2')       
-        x = basic_block(x, num_channels=128, kernel_size=3, num_blocks=4, skip_blocks=[0], name='layer2')       
+    skip2 = x # H/4
 
-        x = basic_block_down(x, num_channels=256, kernel_size=3, name='layer3')       
-        x = basic_block(x, num_channels=256, kernel_size=3, num_blocks=6, skip_blocks=[0], name='layer3')  
+    x = basic_block_down(x, num_channels=128, kernel_size=3, name='layer2')       
+    x = basic_block(x, num_channels=128, kernel_size=3, num_blocks=4, skip_blocks=[0], name='layer2')       
 
-        x = basic_block_down(x, num_channels=512, kernel_size=3, name='layer4')       
-        x = basic_block(x, num_channels=512, kernel_size=3, num_blocks=3, skip_blocks=[0], name='layer4')  
+    skip3 = x # H/8
 
+    x = basic_block_down(x, num_channels=256, kernel_size=3, name='layer3')       
+    x = basic_block(x, num_channels=256, kernel_size=3, num_blocks=6, skip_blocks=[0], name='layer3')  
+
+    skip4 = x # H/16
+
+    x = basic_block_down(x, num_channels=512, kernel_size=3, name='layer4')       
+    x = basic_block(x, num_channels=512, kernel_size=3, num_blocks=3, skip_blocks=[0], name='layer4')  
+
+    if build_partial:
+        return x, [skip4, skip3, skip2, skip1]
+    else:
         x = tf_keras.layers.GlobalAveragePooling2D(name='avgpool')(x)
         x = tf_keras.layers.Dense(units=1000, use_bias=True, activation='linear', name='fc')(x)
-        return x
+    return x
 
 def conv_bn_relu(x, num_channels, kernel_size, strides, name):
     """Layer consisting of 2 consecutive batch normalizations with 1 first relu"""

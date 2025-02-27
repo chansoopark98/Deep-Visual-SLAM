@@ -1,11 +1,11 @@
 import tensorflow as tf, tf_keras
 try:
     from .model_utils import *
-    from .resnet_tf import Resnet
+    from .resnet_tf import Resnet, Resnet34
 
 except:
     from model_utils import *
-    from resnet_tf import Resnet
+    from resnet_tf import Resnet, Resnet34
 
 class DispNet(tf_keras.Model):
     """

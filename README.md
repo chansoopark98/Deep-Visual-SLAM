@@ -39,6 +39,8 @@ This repository implements a deep learning-based Monocular Visual SLAM. The key 
 Future work
 
 
-## Visual Odometry (with Inertial)
+## Visual Odometry
 
-Future work
+http://redwood-data.org/indoor_lidar_rgbd/download.html
+
+The focal length is 525 for both axes and the principal point is (319.5, 239.5)
