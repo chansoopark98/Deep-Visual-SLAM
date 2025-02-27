@@ -3,15 +3,27 @@ from tensorflow.python.framework.convert_to_constants import convert_variables_t
 from model.pose_net import PoseNet
 import os
 import tensorflowjs as tfjs
+import argparse
 
-# tfjs.converters.convert_tf_saved_model()
+parser = argparse.ArgumentParser()
+parser.add_argument('--img_h', type=str, default=240, help='Image height')
+parser.add_argument('--img_w', type=str, default=320, help='Image width')
+parser.add_argument('--batch_size', type=int, default=1, help='Batch size for the model')
+parser.add_argument('--pretrained_dir', type=str, default='./weights/vo/tf2.16_vo_bs8_ep21_lr1e-4_1e-5_240x320_/pose_net_epoch_18_model.weights.h5')
+parser.add_argument('--saved_model_dir', type=str, default='./assets/saved_models/', help='Output directory for the model')
+parser.add_argument('--tfjs_dir', type=str, default='./assets/tfjs_models/', help='Output directory for the tfjs model')
+args = parser.parse_args()
 
 class ExportWrapper(tf_keras.Model):
     def __init__(self, model: tf_keras.Model, image_shape):
         super(ExportWrapper, self).__init__()
         self.model = model
-        self.model.build(input_shape=(1, *image_shape, 6))
-        self.model.load_weights('test_posenet.weights.h5')
+        # rename model 
+        self.model._name = 'export_model'
+
+        # rename model layers
+        for layer in self.model.layers:
+            layer._name = f"export_{layer.name}"
 
         self.image_shape = image_shape
         self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
@@ -44,22 +56,40 @@ class ExportWrapper(tf_keras.Model):
         })
         return config
 
-image_shape = (480, 640)
-base_model = PoseNet(image_shape=image_shape, batch_size=1)
+if __name__ == '__main__':
+    os.makedirs(args.saved_model_dir, exist_ok=True)
+    os.makedirs(args.tfjs_dir, exist_ok=True)
+    image_shape = (args.img_h, args.img_w)
+    base_model = PoseNet(image_shape=image_shape, batch_size=1)
+    base_model.build(input_shape=(1, *image_shape, 6))
+    base_model.load_weights(args.pretrained_dir)
 
-wrapped_model = ExportWrapper(model=base_model, image_shape=image_shape)
-wrapped_model.build(input_shape=(1, *image_shape, 6))
-outputs = wrapped_model(tf.random.normal((1, *image_shape, 6)))
-print(outputs.shape)
+    wrapped_model = ExportWrapper(model=base_model, image_shape=image_shape)
+    wrapped_model.build(input_shape=(1, *image_shape, 6))
+    outputs = wrapped_model(tf.random.normal((1, *image_shape, 6)))
+    print(outputs.shape)
 
-wrapped_model.save('./assets/export_model_with_preprocess', save_format='tf')
-#path of the directory where you want to save your model
+    # rename all layers
+    for layer in wrapped_model.layers:
+        layer._name = f"a_export_{layer.name}"
+
+    # wrapped_model.save(args.saved_model_dir, save_format='tf')
+
+    tf.saved_model.save(wrapped_model, args.saved_model_dir)
 
 
+    #path of the directory where you want to save your model
+
+    tfjs.converters.convert_tf_saved_model(args.saved_model_dir,
+                                        args.tfjs_dir,
+                                        quantization_dtype_map=tfjs.quantization.QUANTIZATION_DTYPE_FLOAT16,
+                                            control_flow_v2=True, 
+                                            )
+    
 
 #  --control_flow_v2 True 
 
-# tensorflowjs_converter --input_format tf_saved_model --output_format tfjs_graph_model --quantize_float16 --control_flow_v2 True ./assets/export_model_with_preprocess ./assets/export_model_with_preprocess_js_fp16
+# tensorflowjs_converter --input_format tf_saved_model --output_format tfjs_graph_model --quantize_float16 --control_flow_v2 True ./assets/saved_models ./assets/export_model_with_preprocess_js_fp16
 
 #   --input_format {tf_hub,keras_saved_model,tfjs_layers_model,keras_keras,tf_saved_model,keras,tf_frozen_model}
 #                         Input format. For "keras", the input path can be one of the two following formats: - A topology+weights combined HDF5 (e.g., generated with

@@ -1,5 +1,5 @@
 Directory:
-  exp_name: tf2.16_vo_bs8_ep21_lr1e-4_1e-5_240x320_
+  exp_name: tf2.16_vo_bs8_ep21_lr1e-4_1e-5_240x320_euler
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -10,6 +10,7 @@ Dataset:
   mars_logger: True
 
 Train:
+  mode: axisAngle # axisAngle, euler
   use_shuffle: True
   train_plot_interval: 100 # 100
   valid_plot_interval: 20

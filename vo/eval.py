@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import yaml
 from monodepth_learner import Learner
-from utils.projection_utils import pose_axis_angle_vec2mat
+from utils.projection_utils import pose_axis_angle_vec2mat, pose_vec2mat
 import pytransform3d.camera as pc
 
 def euler_to_rotation_matrix(rx, ry, rz):
@@ -62,6 +62,15 @@ class EvalTrajectory(Learner):
         self.pred_pose_list = []
         self.intrinsic_list = []
 
+        if self.config['Train']['mode'] in ['axisAngle', 'euler']:
+            self.pose_mode = self.config['Train']['mode']
+            if self.pose_mode == 'axisAngle':
+                self.is_euler = False
+            else:
+                self.is_euler = True
+        else:
+            raise ValueError('Invalid pose mode')
+
     def update_state(self, ref_images, tgt_image, intrinsic: tf.Tensor):
         """
         images: List of RGB images
@@ -105,7 +114,11 @@ class EvalTrajectory(Learner):
         )
 
         batch_poses = batch_poses[:, 0, :]  # split left
-        batch_poses = pose_axis_angle_vec2mat(batch_poses)  # shape: (b, 4, 4)
+        
+        if self.is_euler:
+            batch_poses = pose_vec2mat(batch_poses)
+        else:
+            batch_poses = pose_axis_angle_vec2mat(batch_poses)  # shape: (b, 4, 4)
 
         batch_size = batch_depths.shape[0]
 

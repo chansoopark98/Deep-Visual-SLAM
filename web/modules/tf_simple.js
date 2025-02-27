@@ -1,4 +1,13 @@
 // inferenceManager.js
+
+importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs'); //tfjs-backend-webgl
+importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl'); //tfjs-backend-webgl
+
+
+{/* <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js"> </script>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/tf-backend-wasm.js"></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script> */}
+
 // 메모리 모니터링
 setInterval(() => {
     const memoryInfo = tf.memory();
@@ -12,25 +21,22 @@ setInterval(() => {
   class InferenceManager {
     /**
      * @param {tf.GraphModel} model - TensorFlow.js GraphModel (inference 전용)
-     * @param {HTMLCanvasElement} canvas - 카메라 영상이 그려진 canvas 요소
      * @param {Array<number>} inputSize - 모델이 기대하는 [height, width] (예: [224, 224])
-     * @param {number} inferenceInterval - 추론 사이의 시간 간격 (ms)
      */
-    constructor(model, canvas, inputSize = [224, 224], inferenceInterval = 100) {
+    constructor(model, inputSize = [240, 320]) {
       this.model = model;
-      this.canvas = canvas;
       this.inputSize = inputSize;
-      this.inferenceInterval = inferenceInterval;
       this.prevFrame = null; // 이전 프레임을 저장하여 두 프레임을 이어붙임
-      this.isRunning = false;
     }
   
     // canvas의 현재 프레임을 캡처하고 전처리합니다.
-    captureFrame() {
+    captureFrame(imageData) {
       const startTime = performance.now();  // 시작 시간 기록
       const imgTensor = tf.tidy(() => {
         // tf.browser.fromPixels: canvas를 [height, width, 3] 텐서로 변환
-        let tensor = tf.browser.fromPixels(this.canvas);
+        const { buffer, width, height } = imageData;
+        const pixelData = new Uint8ClampedArray(buffer);
+        let tensor = tf.browser.fromPixels(new ImageData(pixelData, width, height));
         // 모델에서 요구하는 크기로 리사이즈 (예: [224, 224])
         tensor = tf.image.resizeNearestNeighbor(tensor, this.inputSize);
         tensor = tensor.toFloat();
@@ -42,10 +48,10 @@ setInterval(() => {
     }
   
     // 이전 프레임과 현재 프레임을 이어붙여 모델 입력 텐서를 준비합니다.
-    prepareInput() {
+    prepareInput(imageData) {
       const startTime = performance.now();
       // 현재 프레임 캡처
-      const currFrame = this.captureFrame(); // shape: [h, w, 3]
+      const currFrame = this.captureFrame(imageData); // shape: [h, w, 3]
       let combined;
       if (this.prevFrame == null) {
         // 첫 실행 시에는 현재 프레임을 두 번 이어붙여 사용
@@ -69,9 +75,9 @@ setInterval(() => {
     }
   
     // 준비된 입력 텐서를 사용하여 모델 추론을 실행합니다.
-    async runInference() {
+    async runInference(imageData) {
       const startTime = performance.now();
-      const inputTensor = this.prepareInput();
+      const inputTensor = this.prepareInput(imageData);
       let output;
       try {
         // GraphModel의 경우 executeAsync를 사용하여 비동기로 실행합니다.
@@ -86,58 +92,28 @@ setInterval(() => {
       console.log(`runInference 시간: ${endTime - startTime} ms`);
       return output;
     }
-  
-    // 주어진 간격으로 반복 추론을 수행합니다.
-    // callback(result)는 추론 결과를 처리하는 사용자 정의 함수입니다.
-    startContinuousInference(callback) {
-      this.isRunning = true;
-      const inferLoop = async () => {
-        if (!this.isRunning) return;
-        const loopStartTime = performance.now();
-        const result = await this.runInference();
-        if (callback) {
-          callback(result);
-        }
-        const loopEndTime = performance.now();
-        console.log(`한 사이클 추론 전체 시간: ${loopEndTime - loopStartTime} ms`);
-        // 추론 결과를 사용한 후, 결과 텐서들의 메모리를 관리해 주세요.
-        // 예를 들어, 단일 텐서인 경우 result.dispose(), 배열인 경우 각각 dispose()
-        setTimeout(inferLoop, this.inferenceInterval);
-      };
-      inferLoop();
-    }
-  
-    // 반복 추론을 중지합니다.
-    stopContinuousInference() {
-      this.isRunning = false;
-    }
   }
+
+const modelPath = '../assets/tfjs/model.json';
+tf.setBackend('webgl');
+
+async function init() {
+  const vo_model = await tf.loadGraphModel(modelPath);
+  console.log('Model loaded successfully.');
   
-  // 사용 예시 (예: main.js)
-  const modelPath = '../assets/tfjs/model.json';
-  tf.setBackend('webgl');
+  // InferenceManager 인스턴스 생성 (inputSize는 모델에 맞게 조정)
+  const inferenceManager = new InferenceManager(vo_model, [240, 320]);
   
-  tf.loadGraphModel(modelPath)
-    .then(model => {
-      console.log('Model loaded successfully.');
-      const canvas = document.getElementById('canvas');
-      // InferenceManager 인스턴스 생성 (inputSize는 모델에 맞게 조정)
-      const inferenceManager = new InferenceManager(model, canvas, [240, 320], 100);
-  
-      // 추론 결과를 처리할 콜백 함수 예시
-      const handleResult = result => {
-        console.log('Inference result:', result);
-        // 결과 텐서가 단일 텐서인 경우:
-        if (result instanceof tf.Tensor) {
-          result.dispose();
-        }
-        // 또는 여러 텐서가 반환되면 배열 형태로 각 텐서를 dispose해야 합니다.
-      };
-  
-      // 연속 추론 시작
-      inferenceManager.startContinuousInference(handleResult);
-    })
-    .catch(error => {
-      console.error('Error loading the model:', error);
-    });
-  
+  // worker 메시지 처리: 'frame' 타입의 메시지 처리
+  onmessage = async (event) => {
+    const msg = event.data;
+    if (msg.type === 'frame') {
+      // msg.data: { buffer, width, height }
+      const imageData = msg.data;
+      const result = await inferenceManager.runInference(imageData);
+      // 추론 결과를 메인 스레드로 전송 (간단한 JSON 직렬화 가능한 형태)
+      postMessage({ type: 'result', result });
+    }
+  };
+}
+init();
