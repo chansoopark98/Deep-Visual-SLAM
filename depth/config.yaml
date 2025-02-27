@@ -1,5 +1,5 @@
 Directory:
-  exp_name: tf2.16_nyu_diode_custom_ep51_bs32_lr0.0002-0.00001
+  exp_name: Resnet34_nyu_diode_custom_adam_ep51_bs32_lr0.0002-0.00001
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
