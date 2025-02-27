@@ -122,7 +122,7 @@ setInterval(() => {
       console.log('Model loaded successfully.');
       const canvas = document.getElementById('canvas');
       // InferenceManager 인스턴스 생성 (inputSize는 모델에 맞게 조정)
-      const inferenceManager = new InferenceManager(model, canvas, [480, 640], 100);
+      const inferenceManager = new InferenceManager(model, canvas, [240, 320], 100);
   
       // 추론 결과를 처리할 콜백 함수 예시
       const handleResult = result => {

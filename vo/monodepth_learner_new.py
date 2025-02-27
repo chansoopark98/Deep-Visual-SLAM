@@ -1,10 +1,10 @@
-import tensorflow as tf
+import tensorflow as tf, tf_keras
 from utils.projection_utils import projective_inverse_warp
 
 class Learner(object):
     def __init__(self,
-                 depth_model: tf.keras.Model,
-                 pose_model: tf.keras.Model,
+                 depth_model: tf_keras.Model,
+                 pose_model: tf_keras.Model,
                  config: dict):
         self.depth_net = depth_model
         self.pose_net = pose_model
@@ -20,6 +20,15 @@ class Learner(object):
         self.ssim_ratio = self.config['Train']['ssim_ratio'] # 0.85
         self.min_depth = self.config['Train']['min_depth'] # 0.1
         self.max_depth = self.config['Train']['max_depth'] # 10.0
+
+        if self.config['Train']['mode'] in ['axisAngle', 'euler']:
+            self.pose_mode = self.config['Train']['mode']
+            if self.pose_mode == 'axisAngle':
+                self.is_euler = False
+            else:
+                self.is_euler = True
+        else:
+            raise ValueError('Invalid pose mode')
 
     @tf.function() # ok
     def disp_to_depth(self, disp, min_depth, max_depth):
@@ -203,7 +212,8 @@ class Learner(object):
                         tf.squeeze(curr_depth, axis=3),
                         curr_pose,
                         intrinsics=intrinsic,
-                        invert=(j == 0)
+                        invert=(j == 0),
+                        euler=self.is_euler
                     )
                     # photometric
                     curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, tgt_image)
