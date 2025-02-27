@@ -206,7 +206,7 @@ class DataLoader(object):
 if __name__ == '__main__':
     import yaml
     import matplotlib.pyplot as plt
-    with open('./vio/config.yaml', 'r') as file:
+    with open('./vo/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
     data_loader = DataLoader(config)

@@ -32,8 +32,8 @@ class MarsLoggerHandler(object):
         resized_intrinsic = self._rescale_intrinsic(current_intrinsic, self.save_image_size, self.original_image_size)
 
         # Read metadata
-        timestamps_ns = camera_data['Timestamp[nanosec]'].values  # Extract timestamps in nanoseconds
-        timestamps_s = timestamps_ns / 1e9  # Convert to seconds
+        # timestamps_ns = camera_data['Timestamp[nanosec]'].values  # Extract timestamps in nanoseconds
+        # timestamps_s = timestamps_ns / 1e9  # Convert to seconds
 
         # Ensure output directory exists
         if not os.path.exists(rgb_save_path):
@@ -44,28 +44,17 @@ class MarsLoggerHandler(object):
             if not cap.isOpened():
                 raise ValueError(f"Failed to open video file: {video_file}")
 
-            # Get video properties
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            video_start_time = timestamps_s[0]  # Assume the first timestamp aligns with the video's start
-
-            for idx, timestamp in enumerate(timestamps_s):
-                # Calculate frame number for the timestamp
-                relative_time = timestamp - video_start_time
-                frame_number = int(relative_time * fps)
-
-                # Set the video to the calculated frame number
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            idx = 0
+            while True:
                 ret, frame = cap.read()
-
                 if not ret:
-                    print(f"Error: Unable to read frame for timestamp {timestamp}")
-                    continue
-
-                # Process and save the frame
+                    break
+                
                 rgb_name = os.path.join(rgb_save_path, f'rgb_{str(idx).zfill(6)}.jpg')
                 frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 frame = cv2.resize(frame, (self.save_image_size[1], self.save_image_size[0]))
                 cv2.imwrite(rgb_name, frame)
+                idx += 1
 
             cap.release()
             cv2.destroyAllWindows()
@@ -100,7 +89,7 @@ class MarsLoggerHandler(object):
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
         samples = []
-        for t in range(self.num_source, length - self.num_source, 3):
+        for t in range(self.num_source, length - self.num_source, 2):
             left_images = []
             right_images = []
 
