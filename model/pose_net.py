@@ -37,7 +37,7 @@ class PoseNet(tf_keras.Model):
         )
 
         # 3) ReduceMeanLayer, Reshape
-        self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
+        # self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
         self.reshape_layer = tf_keras.layers.Reshape((6,), name='pose_reshape')
 
     def call(self, inputs, training=False):
@@ -56,7 +56,8 @@ class PoseNet(tf_keras.Model):
         x = self.pose_conv3(x)  # [B, H/32, W/32, 6]
 
         # 3) reduce_mean -> reshape -> scale
-        x = self.reduce_mean_layer(x)  # [B, 1, 1, 6] => keepdims=True
+        # x = self.reduce_mean_layer(x)  # [B, 1, 1, 6] => keepdims=True
+        x = tf.reduce_mean(x, axis=[1, 2], keepdims=True)
         x = self.reshape_layer(x)      # [B, 6]
         x = x * 0.01 # scale
         return x

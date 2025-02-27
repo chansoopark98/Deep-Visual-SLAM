@@ -1,5 +1,5 @@
 Directory:
-  exp_name: tf2.16_vo_bs8_ep51_lr1e-4_1e-5_480x640_2src_10seq_4scale_0.85ssim_0.001smoothness
+  exp_name: tf2.16_vo_bs8_ep51_lr1e-4_1e-5_480x640_2src_10seq_4scale_0.85ssim_0.001smoothness_adam0.9_0.001wd
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -25,7 +25,7 @@ Train:
   auto_mask: True
   img_w: 640
   img_h: 480
-  weight_decay: 0.0001
+  weight_decay: 0.001
   beta1: 0.9
   batch_size: 8 # 1
   epoch: 51
