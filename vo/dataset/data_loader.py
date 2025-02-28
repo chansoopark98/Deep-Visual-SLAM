@@ -3,10 +3,12 @@ import tensorflow as tf
 try:
     from .custom_data import CustomDataHandler
     from .mars_logger import MarsLoggerHandler
+    from .redwood import RedwoodHandler
     from .augmentation_tool import Augmentations
 except:
     from custom_data import CustomDataHandler
     from mars_logger import MarsLoggerHandler
+    from redwood import RedwoodHandler
     from augmentation_tool import Augmentations
 
 class DataLoader(object):
@@ -67,6 +69,15 @@ class DataLoader(object):
             self.num_train_samples += dataset.train_data.shape[0]
             self.num_valid_samples += dataset.valid_data.shape[0]
             self.num_test_samples += dataset.test_data.shape[0]
+
+        if self.config['Dataset']['redwood']:
+            dataset = RedwoodHandler(config=self.config)
+            train_dataset = self._build_generator(np_samples=dataset.train_data)
+
+            train_datasets.append(train_dataset)
+    
+            self.num_train_samples += dataset.train_data.shape[0]
+            
         return train_datasets, valid_datasets, test_datasets
 
     def _build_generator(self, np_samples: np.ndarray) -> tf.data.Dataset:
@@ -192,7 +203,7 @@ class DataLoader(object):
         return left_image, right_image, target_image, intrinsic
     
     def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool, is_train: bool = True) -> tf.data.Dataset:
-        combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
+        combined_dataset = tf.data.Dataset.sample_from_datasets(datasets)
         if use_shuffle:
             combined_dataset = combined_dataset.shuffle(buffer_size=batch_size * 256, reshuffle_each_iteration=True)
         if is_train:

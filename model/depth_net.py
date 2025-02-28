@@ -23,7 +23,7 @@ class DispNet(tf_keras.Model):
         self.batch_size = batch_size
         self.prefix_str = prefix
 
-        self.encoder = Resnet(image_shape=(*image_shape, 3),
+        self.encoder = Resnet(image_shape=(*image_shape, 5),
                               batch_size=batch_size,
                               pretrained=True,
                               prefix=prefix + '_resnet18').build_model()
@@ -92,6 +92,7 @@ class DispNet(tf_keras.Model):
         returns: disp1, disp2, disp3, disp4
         """
         # 1) 인코더
+        # rgb, intrinsic = inputs
         x, skips = self.encoder(inputs, training=training)
 
         x = tf.cast(x, tf.float32)

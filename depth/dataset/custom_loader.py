@@ -20,11 +20,15 @@ class CustomLoader(object):
     def _process(self, scene_dir: str):
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*')))
         depth_files = sorted(glob.glob(os.path.join(scene_dir, 'depth', '*')))
+        intrinsic = np.load(os.path.join(scene_dir, 'sensor', 'intrinsics.npy'))
+        intrinsic = tf.convert_to_tensor(intrinsic, dtype=tf.float32)
+
         samples = []
         for idx in range(len(rgb_files)):
             sample = {
                 'image': rgb_files[idx],
-                'depth': depth_files[idx]
+                'depth': depth_files[idx],
+                'intrinsic': intrinsic
             }
             samples.append(sample)
         return samples
@@ -46,7 +50,8 @@ class CustomLoader(object):
             lambda: raw_datasets,
             output_signature={
                 'image': tf.TensorSpec(shape=(), dtype=tf.string),
-                'depth': tf.TensorSpec(shape=(), dtype=tf.string)
+                'depth': tf.TensorSpec(shape=(), dtype=tf.string),
+                'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32)
             }
         )
         tf_dataset = tf_dataset.map(self.parse_function)
@@ -74,10 +79,46 @@ class CustomLoader(object):
         return depth_image
     
     @tf.function()
+    def resize_intrinsic(self, intrinsic: tf.Tensor, original_size: tuple, new_size: tuple) -> tf.Tensor:
+        """
+        original_size: (H, W)
+        new_size: (H, W)
+        """
+        intrinsic = tf.cast(intrinsic, tf.float64)
+
+        scale_x = new_size[1] / original_size[1]
+        scale_y = new_size[0] / original_size[0]
+
+        intrinsic_scaled = tf.identity(intrinsic)
+
+        # focal lengths scaling
+        intrinsic_scaled = tf.tensor_scatter_nd_update(
+            intrinsic_scaled,
+            indices=[[0,0], [1,1]],
+            updates=[
+                intrinsic[0,0] * scale_x,  # fx'
+                intrinsic[1,1] * scale_y   # fy'
+            ]
+        )
+
+        # principal point scaling
+        intrinsic_scaled = tf.tensor_scatter_nd_update(
+            intrinsic_scaled,
+            indices=[[0,2], [1,2]],
+            updates=[
+                intrinsic[0,2] * scale_x,  # cx'
+                intrinsic[1,2] * scale_y   # cy'
+            ]
+        )
+        intrinsic_scaled = tf.cast(intrinsic_scaled, tf.float32)
+        return intrinsic_scaled
+    
+    @tf.function()
     def parse_function(self, sample):
         image = self._read_image(sample['image'])
         depth = self._read_depth(sample['depth'])
-        return (image, depth)
+        intrinsic = self.resize_intrinsic(sample['intrinsic'], (1080, 1920), self.image_size)
+        return (image, depth, intrinsic)
 
 if __name__ == '__main__':
     root_dir = './depth/data/'
@@ -101,6 +142,7 @@ if __name__ == '__main__':
     dataset = CustomLoader(config)
     data_len = dataset.train_samples
     data = dataset.train_dataset
-    for rgb, depth in dataset.train_dataset.take(100):
-        print(rgb.shape, depth.shape)
+    for rgb, depth, intrinsic in dataset.train_dataset.take(100):
+        print(rgb.shape, depth.shape, intrinsic.shape)
+        print(intrinsic)
     
