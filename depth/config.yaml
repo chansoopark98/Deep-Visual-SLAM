@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Resnet18_intrinsicTest_nyu_diode_custom_redwood_adam_ep51_bs32_lr0.0002-0.00001_
+  exp_name: resnet18_intrinsicTest_nyu-diode-custom-redwood
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -39,7 +39,7 @@ Train:
   weight_decay: 0.001 # Weight decay for AdamW optimizer
   batch_size: 16  # Training batch size
   epoch: 31  # Total number of epochs
-  init_lr: 0.0001  # Initial learning rate
+  init_lr: 0.0002  # Initial learning rate
   final_lr: 0.00001 # Final learning rate after warmup
   power: 0.9  # Learning rate scheduler power factor
 

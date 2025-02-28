@@ -201,7 +201,7 @@ class DataLoader(object):
         return image
 
     @tf.function(jit_compile=True)
-    def get_relative_depth(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
+    def get_relative_depth(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic) -> tuple:
         """
         Normalizes the input depth map to a relative range [0, 1].
 
@@ -216,7 +216,7 @@ class DataLoader(object):
         """
         normalized_depth = (depth - self.min_depth) / (self.max_depth - self.min_depth)
         normalized_depth = tf.clip_by_value(normalized_depth, 0., 1.0)
-        return rgb, normalized_depth
+        return rgb, normalized_depth, intrinsic
 
     @tf.function(jit_compile=True)
     def resize_intrinsic(self, intrinsic: tf.Tensor, original_size: tuple, new_size: tuple) -> tf.Tensor:

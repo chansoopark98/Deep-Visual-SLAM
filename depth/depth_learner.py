@@ -1,10 +1,6 @@
 from typing import Dict, Any, List, Tuple
 import tensorflow as tf, tf_keras
 
-"""
-
-"""
-
 class DepthLearner:
     def __init__(self, model: tf_keras.Model, config: Dict[str, Any]) -> None:
         """
@@ -112,7 +108,7 @@ class DepthLearner:
         masked_abs_diff = tf.boolean_mask(abs_diff, valid_mask)
         return tf.reduce_mean(masked_abs_diff)
 
-    @tf.function(jit_compile=True)
+    # @tf.function(jit_compile=True)
     def silog_loss(self, prediction: tf.Tensor, target: tf.Tensor, valid_mask: tf.Tensor,
                    variance_focus: float = 0.5) -> tf.Tensor:
         """
@@ -140,7 +136,7 @@ class DepthLearner:
 
         return tf.sqrt(silog_expr)
 
-    @tf.function(jit_compile=True)
+    # @tf.function(jit_compile=True)
     def multi_scale_loss(self, pred_depths: List[tf.Tensor], gt_depth: tf.Tensor,
                          rgb: tf.Tensor, valid_mask: tf.Tensor) -> Dict[str, tf.Tensor]:
         """
@@ -226,6 +222,30 @@ class DepthLearner:
         # concat하여 (B,H,W,2)
         coords = tf.concat([x_normalized, y_normalized], axis=-1)
         return coords
+    
+    def build_coord_channels(self, img, K):
+        H = tf.shape(img)[1]
+        W = tf.shape(img)[2]
+        # 픽셀 그리드 생성 (0 ~ W-1, 0 ~ H-1)
+        x_coords = tf.linspace(0.0, tf.cast(W-1, tf.float32), W)
+        y_coords = tf.linspace(0.0, tf.cast(H-1, tf.float32), H)
+        X, Y = tf.meshgrid(x_coords, y_coords)
+        X = tf.expand_dims(X, axis=0)  # (1,H,W)
+        Y = tf.expand_dims(Y, axis=0)
+        # K에서 focal length와 principal point 추출
+        fx = K[0,0]; fy = K[1,1]
+        cx = K[0,2]; cy = K[1,2]
+        # Centered Coordinate: (u-cx), (v-cy)
+        cc_x = (X - cx) / fx   # fx로 나눠서 정규화 (라디안당 픽셀)
+        cc_y = (Y - cy) / fy
+        # 화각 기반 각도 맵 (atan 사용)
+        fov_x = tf.math.atan(cc_x)
+        fov_y = tf.math.atan(cc_y)
+        # -1~1 정규화 좌표 (CoordConv 용)
+        X_norm = (X / tf.cast(W-1, tf.float32)) * 2.0 - 1.0
+        Y_norm = (Y / tf.cast(H-1, tf.float32)) * 2.0 - 1.0
+        # 채널 스택: [cc_x, cc_y, fov_x, fov_y, X_norm, Y_norm]
+        return tf.stack([cc_x, cc_y, fov_x, fov_y, X_norm, Y_norm], axis=-1)
 
     def forward_step(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic, training: bool = True
                     ) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
@@ -242,9 +262,10 @@ class DepthLearner:
                 - Loss dictionary containing smoothness, SILog, and L1 losses.
                 - List of predicted depth maps at different scales.
         """
-        coord_map = self.create_normalized_coords(rgb, intrinsic)
-        model_input = tf.concat([rgb, coord_map], axis=-1)
-        pred_disps = self.model(model_input, training=training)
+        # coord_map = self.create_normalized_coords(rgb, intrinsic)
+        # test_coord_map = self.build_coord_channels(rgb, intrinsic)
+        # model_input = tf.concat([rgb, coord_map], axis=-1)
+        pred_disps = self.model([rgb, intrinsic], training=training)
 
         valid_mask = (depth > 0.) & (depth < (1. if self.train_mode == 'relative' else self.max_depth))
 
