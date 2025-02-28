@@ -52,7 +52,7 @@ class Trainer(object):
         self.batch_size = self.config['Train']['batch_size']
         self.model = DispNet(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
                              batch_size=self.batch_size)
-
+        
         model_input_shape = [(self.config['Train']['batch_size'],
                              self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
                              (self.config['Train']['batch_size'], 3, 3)]

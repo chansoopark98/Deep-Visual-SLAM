@@ -1,5 +1,5 @@
 Directory:
-  exp_name: resnet18_intrinsicTest_nyu-diode-custom-redwood
+  exp_name: resnet18_intrinsicTest_nyu-diode-custom-redwood_newCH
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory

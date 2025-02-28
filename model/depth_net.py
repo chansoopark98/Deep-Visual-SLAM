@@ -25,19 +25,22 @@ class DispNet(tf_keras.Model):
         self.batch_size = batch_size
         self.prefix_str = prefix
 
-        self.encoder = Resnet(image_shape=(*image_shape, 14),
-                              batch_size=batch_size,
-                              pretrained=True,
-                              prefix=prefix + '_resnet18').build_model()
+        
         
         self.add_coord = AddCAMCoords(coord_maps=False,
                                       centered_coord=True,
                                       norm_coord_maps=True,
-                                      with_r=True,
-                                      bord_dist=True,
+                                      with_r=False,
+                                      bord_dist=False,
                                       scale_centered_coord=(self.image_height, self.image_width),
                                       fov_maps=True,
                                       data_format='channels_last')
+        
+        self.channels = self.add_coord.additional_channels() + 3
+        self.encoder = Resnet(image_shape=(*image_shape, self.channels),
+                              batch_size=batch_size,
+                              pretrained=True,
+                              prefix=prefix + '_resnet18').build_model()
         
         # Depth Decoder
         print('Building Depth Decoder Model')
