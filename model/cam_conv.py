@@ -173,11 +173,14 @@ if __name__ == '__main__':
     add_coord = AddCAMCoords(coord_maps=False,
                              centered_coord=True,
                              norm_coord_maps=True,
-                             with_r=True,
-                             bord_dist=True,
+                             with_r=False,
+                             bord_dist=False,
                              scale_centered_coord=(100, 100),
                              fov_maps=True,
                              data_format='channels_last')
+    channels = add_coord.additional_channels() 
+    print(channels)
+
     dummy_input = tf.random.normal((1,100,100,3))
     dummy_intrinsics = tf.random.normal((1,3, 3))
     dummy_image_shape = tf.TensorShape([1,100,100,3])
