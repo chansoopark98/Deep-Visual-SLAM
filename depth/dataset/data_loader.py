@@ -4,10 +4,12 @@ try:
     from .tfrecord_loader import TFRecordLoader
     from .nyu_handler import NyuHandler
     from .custom_loader import CustomLoader
+    from .redwood_handler import RedwoodLoader
 except:
     from tfrecord_loader import TFRecordLoader
     from nyu_handler import NyuHandler
     from custom_loader import CustomLoader
+    from redwood_handler import RedwoodLoader
 
 class DataLoader(object):
     def __init__(self, config: dict) -> None:
@@ -53,7 +55,8 @@ class DataLoader(object):
         if self.config['Dataset']['Nyu_depth_v2']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'nyu_depth_v2_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
-                                     is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
+                                     is_valid=True, image_size=(None, None), depth_dtype=tf.float32,
+                                     use_intrinsic=True)
             handler = NyuHandler()
 
             if self.config['Dataset']['Nyu_depth_v2']['train']:
@@ -71,7 +74,8 @@ class DataLoader(object):
         if self.config['Dataset']['Diode']:
             dataset_name = os.path.join(self.config['Directory']['data_dir'], 'diode_tfrecord')
             dataset = TFRecordLoader(root_dir=dataset_name, is_train=True,
-                                     is_valid=True, image_size=(None, None), depth_dtype=tf.float32)
+                                     is_valid=True, image_size=(None, None), depth_dtype=tf.float32,
+                                     use_intrinsic=True)
             if self.config['Dataset']['Diode']['train']:
                 train_datasets.append(dataset.train_dataset)
                 self.num_train_samples += dataset.train_samples
@@ -111,6 +115,13 @@ class DataLoader(object):
             if self.config['Dataset']['Custom']['valid']:
                 valid_datasets.append(dataset.valid_dataset)
                 self.num_valid_samples += dataset.valid_samples
+
+        if self.config['Dataset']['Redwood']:
+            dataset_name = os.path.join(self.config['Directory']['data_dir'], 'redwood_tfrecord')
+            dataset = RedwoodLoader(config=self.config)
+            if self.config['Dataset']['Redwood']['train']:
+                train_datasets.append(dataset.train_dataset)
+                self.num_train_samples += dataset.train_samples
         return train_datasets, valid_datasets
 
     @tf.function(jit_compile=True)
@@ -208,7 +219,42 @@ class DataLoader(object):
         return rgb, normalized_depth
 
     @tf.function(jit_compile=True)
-    def train_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
+    def resize_intrinsic(self, intrinsic: tf.Tensor, original_size: tuple, new_size: tuple) -> tf.Tensor:
+        """
+        original_size: (H, W)
+        new_size: (H, W)
+        """
+        intrinsic = tf.cast(intrinsic, tf.float64)
+
+        scale_x = new_size[1] / original_size[1]
+        scale_y = new_size[0] / original_size[0]
+
+        intrinsic_scaled = tf.identity(intrinsic)
+
+        # focal lengths scaling
+        intrinsic_scaled = tf.tensor_scatter_nd_update(
+            intrinsic_scaled,
+            indices=[[0,0], [1,1]],
+            updates=[
+                intrinsic[0,0] * scale_x,  # fx'
+                intrinsic[1,1] * scale_y   # fy'
+            ]
+        )
+
+        # principal point scaling
+        intrinsic_scaled = tf.tensor_scatter_nd_update(
+            intrinsic_scaled,
+            indices=[[0,2], [1,2]],
+            updates=[
+                intrinsic[0,2] * scale_x,  # cx'
+                intrinsic[1,2] * scale_y   # cy'
+            ]
+        )
+        intrinsic_scaled = tf.cast(intrinsic_scaled, tf.float32)
+        return intrinsic_scaled
+
+    @tf.function(jit_compile=True)
+    def train_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic: tf.Tensor) -> tuple:
         """
         Preprocesses training data by applying data augmentation and normalization.
 
@@ -221,16 +267,21 @@ class DataLoader(object):
                 - rgb (tf.Tensor): Augmented and preprocessed RGB tensor.
                 - depth (tf.Tensor): Augmented and preprocessed depth tensor.
         """
+
+        current_rgb_shape = tf.shape(rgb)
+        target_shape = tf.constant([self.image_size[0], self.image_size[1]], dtype=tf.int32)
+        intrinsic = self.resize_intrinsic(intrinsic, current_rgb_shape[:2], target_shape[:2])
+
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
-        
+
         rgb, depth = self.augment(rgb, depth)
     
         rgb = self.normalize_image(rgb)
-        return rgb, depth
+        return rgb, depth, intrinsic
 
     @tf.function(jit_compile=True)
-    def valid_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
+    def valid_preprocess(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic) -> tuple:
         """
         Preprocesses validation data by applying normalization without augmentation.
 
@@ -243,11 +294,15 @@ class DataLoader(object):
                 - rgb (tf.Tensor): Preprocessed RGB tensor.
                 - depth (tf.Tensor): Preprocessed depth tensor.
         """
+        current_rgb_shape = tf.shape(rgb)
+        target_shape = tf.constant([self.image_size[0], self.image_size[1], 3], dtype=tf.int32)
+        intrinsic = self.resize_intrinsic(intrinsic, current_rgb_shape[:2], target_shape[:2])
+
         rgb = self.preprocess_image(rgb)
         depth = self.preprocess_depth(depth)
 
         rgb = self.normalize_image(rgb)
-        return rgb, depth
+        return rgb, depth, intrinsic
     
     @tf.function(jit_compile=True)
     def salt_and_pepper_noise(self, image: tf.Tensor, prob: float = 0.05) -> tf.Tensor:
@@ -315,16 +370,16 @@ class DataLoader(object):
             rgb = tf.image.adjust_hue(rgb, tf.random.uniform([], -max_delta, max_delta))
 
         # random crop
-        if tf.random.uniform([]) > 0.5:
-            concat = tf.concat([rgb, depth], axis=-1)
-            concat = tf.image.random_crop(concat, size=(self.image_size[0] - self.crop_size,
-                                                    self.image_size[1] - self.crop_size, 4))
+        # if tf.random.uniform([]) > 0.5:
+        #     concat = tf.concat([rgb, depth], axis=-1)
+        #     concat = tf.image.random_crop(concat, size=(self.image_size[0] - self.crop_size,
+        #                                             self.image_size[1] - self.crop_size, 4))
 
-            cropped_rgb = concat[:, :, :3]
-            cropped_depth = concat[:, :, 3:]
+        #     cropped_rgb = concat[:, :, :3]
+        #     cropped_depth = concat[:, :, 3:]
 
-            rgb = tf.image.resize(cropped_rgb, self.image_size, method=tf.image.ResizeMethod.BILINEAR)
-            depth = tf.image.resize(cropped_depth, self.image_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        #     rgb = tf.image.resize(cropped_rgb, self.image_size, method=tf.image.ResizeMethod.BILINEAR)
+        #     depth = tf.image.resize(cropped_depth, self.image_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
         # flip left-right
         if tf.random.uniform([]) > 0.5:
@@ -368,32 +423,25 @@ class DataLoader(object):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import yaml
-    import tensorflow_probability as tfp
 
     root_dir = './depth/data/'
     with open('./depth/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
+    config['Train']['batch_size'] = 1
     data_loader = DataLoader(config)
     import os, sys
     sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-    # from depth_learner import DepthLearner
-    # learner = DepthLearner(None, None)
+
 
     for idx, samples in enumerate(data_loader.train_dataset.take(data_loader.num_train_samples)):
-        rgb, depth = samples
+        rgb, depth, intrinsic = samples
         print(rgb.shape)
         print(depth.shape)
-        
+        print(intrinsic.shape)
+        print(intrinsic)
         rgb = data_loader.denormalize_image(rgb)
         plt.imshow(rgb[0])
         plt.show()
         plt.imshow(depth[0], cmap='plasma')
-        plt.show()
-    
-
-        m_gt   = tf.maximum(tfp.stats.percentile(depth,   50.0, interpolation='nearest'), 1e-6)
-        gt_norm   = depth   / m_gt
-
-        plt.imshow(gt_norm[0], cmap='plasma')
         plt.show()

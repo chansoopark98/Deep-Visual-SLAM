@@ -1,5 +1,5 @@
 Directory:
-  exp_name: tf2.16_vo_bs8_ep21_lr1e-4_1e-5_240x320_euler
+  exp_name: tf2.16_vo_bs8_ep21_lr1e-4_1e-5_480x640_mars-redwood_intrinsic
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -8,6 +8,7 @@ Directory:
 Dataset:
   custom_data: False
   mars_logger: True
+  redwood: False
 
 Train:
   mode: axisAngle # axisAngle, euler
@@ -24,12 +25,12 @@ Train:
   ssim_ratio: 0.85
   smoothness_ratio: 0.001
   auto_mask: True
-  img_w: 320 #640
-  img_h: 240 #480
+  img_w: 640 #640
+  img_h: 480 #480
   weight_decay: 0.001
   beta1: 0.9
   batch_size: 8 # 1
-  epoch: 51
+  epoch: 31
   init_lr: 0.0001
   end_lr: 0.00001
 

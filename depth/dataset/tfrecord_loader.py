@@ -1,6 +1,7 @@
 import tensorflow as tf
 import json
 import os
+import numpy as np
 
 class TFRecordLoader:
     def __init__(self, root_dir: str,
@@ -8,7 +9,8 @@ class TFRecordLoader:
                  is_valid: bool = True,
                  is_test: bool = False,
                  image_size: tuple = (None, None),
-                 depth_dtype: tf.dtypes.DType = tf.float32) -> None:
+                 depth_dtype: tf.dtypes.DType = tf.float32,
+                 use_intrinsic: bool = False) -> None:
         """
         Initializes the TFRecordLoader class for loading TFRecord datasets.
 
@@ -26,10 +28,15 @@ class TFRecordLoader:
         self.is_test = is_test
         self.image_size = image_size
         self.depth_dtype = depth_dtype
+        self.use_intrinsic = use_intrinsic
 
         metadata_path = os.path.join(self.root_dir, 'metadata.json')
         if not os.path.exists(metadata_path):
             raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+        
+        if self.use_intrinsic:
+            self.intrinsic = np.load(os.path.join(self.root_dir, 'intrinsic.npy'))
+            self.intrinsic = tf.convert_to_tensor(self.intrinsic, dtype=tf.float32)
 
         self.train_samples, self.valid_samples, self.test_samples = self._load_metadata(metadata_path)
 
@@ -89,8 +96,12 @@ class TFRecordLoader:
         """
         feature_description = {
             'rgb': tf.io.FixedLenFeature([], tf.string),
-            'depth': tf.io.FixedLenFeature([], tf.string)
+            'depth': tf.io.FixedLenFeature([], tf.string),
         }
+        # if self.use_intrinsic:
+        #     # self.intrinsic == tf.float32 (3, 3)
+        #     feature_description['intrinsic'] = tf.io.FixedLenFeature([], tf.string)
+
         parsed_features = tf.io.parse_single_example(example_proto, feature_description)
 
         rgb = tf.image.decode_jpeg(parsed_features['rgb'], channels=3)
@@ -100,6 +111,12 @@ class TFRecordLoader:
 
         rgb = tf.ensure_shape(rgb, [self.image_size[0], self.image_size[1], 3])
         depth = tf.ensure_shape(depth, [self.image_size[0], self.image_size[1], 1])
+        
+        if self.use_intrinsic:
+            intrinsic = self.intrinsic
+            # intrinsic = tf.io.parse_tensor(parsed_features['intrinsic'], out_type=tf.float32)
+            intrinsic = tf.reshape(intrinsic, (3, 3))
+            return rgb, depth, intrinsic
         return rgb, depth
     
 if __name__ == '__main__':
@@ -108,7 +125,8 @@ if __name__ == '__main__':
     diode_dataset = TFRecordLoader(diode_path,
                                    is_train=True,
                                    is_valid=True,
-                                   depth_dtype=tf.float32)
+                                   depth_dtype=tf.float32,
+                                   use_intrinsic=True)
     print(diode_dataset.train_dataset)
     print(diode_dataset.valid_dataset)
 
@@ -120,14 +138,14 @@ if __name__ == '__main__':
     print(nyu_dataset.train_dataset)
     print(nyu_dataset.valid_dataset)
 
-    diml_path = './depth/data/diml_tfrecord'
-    diml_dataset = TFRecordLoader(diml_path,
-                                  is_train=True,
-                                  is_valid=False,
-                                  depth_dtype=tf.float16)
-    print(diml_dataset.train_dataset)
+    # diml_path = './depth/data/diml_tfrecord'
+    # diml_dataset = TFRecordLoader(diml_path,
+    #                               is_train=True,
+    #                               is_valid=False,
+    #                               depth_dtype=tf.float16)
+    # print(diml_dataset.train_dataset)
 
-    for rgb, depth in diml_dataset.train_dataset:
+    for rgb, depth, intrinsic in diode_dataset.train_dataset:
         print(depth.shape)
         plt.imshow(depth)
         plt.show()

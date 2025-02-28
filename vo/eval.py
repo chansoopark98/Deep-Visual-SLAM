@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import yaml
-from monodepth_learner import Learner
+from monodepth_learner_new import Learner
 from utils.projection_utils import pose_axis_angle_vec2mat, pose_vec2mat
 import pytransform3d.camera as pc
 
@@ -83,7 +83,10 @@ class EvalTrajectory(Learner):
         left_image = left_images[:, 0] # [B, H, W, 3]
         right_image = right_images[:, 0] # [B, H, W, 3]
 
-        disp_raw = self.depth_net(tgt_image, training=False)
+        coord_map = self.create_normalized_coords(tgt_image, intrinsic)
+        model_input = tf.concat([tgt_image, coord_map], axis=-1)
+        
+        disp_raw = self.depth_net(model_input, training=False)
 
         batch_disps = []
         for s in range(self.num_scales):
@@ -114,7 +117,7 @@ class EvalTrajectory(Learner):
         )
 
         batch_poses = batch_poses[:, 0, :]  # split left
-        
+
         if self.is_euler:
             batch_poses = pose_vec2mat(batch_poses)
         else:

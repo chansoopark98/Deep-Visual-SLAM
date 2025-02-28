@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Resnet34_nyu_diode_custom_adam_ep51_bs32_lr0.0002-0.00001
+  exp_name: Resnet18_intrinsicTest_nyu_diode_custom_redwood_adam_ep51_bs32_lr0.0002-0.00001_
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -8,7 +8,7 @@ Directory:
 Dataset: # True is using the dataset, False is not using the dataset
   Nyu_depth_v2:
     train: True  
-    valid: False  
+    valid: True  
   Diode:
     train: True  
     valid: False 
@@ -20,23 +20,26 @@ Dataset: # True is using the dataset, False is not using the dataset
     valid: False 
   Custom:
     train: True 
-    valid: True
+    valid: False
+  Redwood:
+    train: True
+    valid: False
 
 Train:
   mode: 'metric' # 'relative' (normalized depth) or 'metric' (absolute depth)
   use_shuffle: True # Whether to shuffle training data
   train_plot_interval: 200 # Interval for plotting during training
   valid_plot_interval: 10 # Interval for plotting during validation
-  save_freq: 5 # Frequency for saving checkpoints
+  save_freq: 2 # Frequency for saving checkpoints
   min_depth: 0.1  # Minimum depth value for normalization
   max_depth: 10.0 # Maximum depth value for normalization
   img_w: 640  # Image width
   img_h: 480  # Image height
   beta1: 0.9  # Beta1 for Adam optimizer
   weight_decay: 0.001 # Weight decay for AdamW optimizer
-  batch_size: 32  # Training batch size
-  epoch: 51  # Total number of epochs
-  init_lr: 0.0002  # Initial learning rate
+  batch_size: 16  # Training batch size
+  epoch: 31  # Total number of epochs
+  init_lr: 0.0001  # Initial learning rate
   final_lr: 0.00001 # Final learning rate after warmup
   power: 0.9  # Learning rate scheduler power factor
 

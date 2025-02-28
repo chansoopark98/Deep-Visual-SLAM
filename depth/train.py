@@ -45,12 +45,12 @@ class Trainer(object):
                              batch_size=self.batch_size)
 
         model_input_shape = (self.config['Train']['batch_size'],
-                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
+                             self.config['Train']['img_h'], self.config['Train']['img_w'], 5)
         self.model.build(model_input_shape)
         _ = self.model(tf.random.normal(model_input_shape))
 
-        # if self.config['Train']['mode'] == 'metric':
-            # self.model.load_weights('./assets/weights/depth/pretrain_relative_depth_ep35_resnet18.h5') # Pretrained relative depth weights
+        if self.config['Train']['mode'] == 'metric':
+            self.model.load_weights('./assets/weights/depth/metric_epoch_45_model.weights.h5', skip_mismatch=True) # Pretrained relative depth weights
         self.model.summary()
 
         # 2. Dataset
@@ -112,7 +112,7 @@ class Trainer(object):
         os.makedirs(self.save_path, exist_ok=True)
 
     @tf.function(jit_compile=True)
-    def train_step(self, rgb: tf.Tensor, depth: tf.Tensor) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+    def train_step(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
         """
         Executes a single training step with backpropagation.
 
@@ -126,7 +126,7 @@ class Trainer(object):
                 - List of predicted depth tensors at different scales.
         """
         with tf.GradientTape() as tape:
-            loss_dict, pred_depths = self.learner.forward_step(rgb, depth, training=True)
+            loss_dict, pred_depths = self.learner.forward_step(rgb, depth, intrinsic, training=True)
             total_loss = sum(loss_dict.values())
             scaled_loss = self.optimizer.scale_loss(total_loss)
 
@@ -135,7 +135,7 @@ class Trainer(object):
         return loss_dict, pred_depths
     
     @tf.function(jit_compile=True)
-    def validation_step(self, rgb: tf.Tensor, depth: tf.Tensor) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+    def validation_step(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
         """
         Computes loss and predicted depths for validation data.
 
@@ -148,7 +148,7 @@ class Trainer(object):
                 - Loss dictionary containing smooth, log, and L1 losses.
                 - List of predicted depth tensors at different scales.
         """
-        loss_dict, pred_depths = self.learner.forward_step(rgb, depth, training=False)
+        loss_dict, pred_depths = self.learner.forward_step(rgb, depth, intrinsic, training=False)
         return loss_dict, pred_depths
     
     @tf.function()
@@ -213,8 +213,8 @@ class Trainer(object):
             print(' LR : {0}'.format(self.optimizer.learning_rate))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
-            for idx, (rgb, depth) in enumerate(train_tqdm):
-                train_loss_result, pred_train_depths = self.train_step(rgb, depth)
+            for idx, (rgb, depth, intrinsic) in enumerate(train_tqdm):
+                train_loss_result, pred_train_depths = self.train_step(rgb, depth, intrinsic)
 
                 # Update train metrics
                 self.update_train_metric(train_loss_result)
@@ -258,8 +258,8 @@ class Trainer(object):
             valid_tqdm = tqdm(self.valid_dataset,
                               total=self.valid_samples)
             valid_tqdm.set_description('Validation || ')
-            for idx, (rgb, depth) in enumerate(valid_tqdm):
-                valid_loss_result, pred_valid_depths = self.validation_step(rgb, depth)
+            for idx, (rgb, depth, intrinsic) in enumerate(valid_tqdm):
+                valid_loss_result, pred_valid_depths = self.validation_step(rgb, depth, intrinsic)
 
                 # Update valid metrics
                 self.update_valid_metric(valid_loss_result, pred_valid_depths[0], depth)

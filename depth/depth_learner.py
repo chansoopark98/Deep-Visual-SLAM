@@ -1,8 +1,12 @@
 from typing import Dict, Any, List, Tuple
-import tensorflow as tf
+import tensorflow as tf, tf_keras
+
+"""
+
+"""
 
 class DepthLearner:
-    def __init__(self, model: tf.keras.Model, config: Dict[str, Any]) -> None:
+    def __init__(self, model: tf_keras.Model, config: Dict[str, Any]) -> None:
         """
         Initializes the DepthLearner class.
 
@@ -179,8 +183,51 @@ class DepthLearner:
             'log_loss': log_losses * log_loss_factor,
             'l1_loss': l1_losses * l1_loss_factor
         }
+    
+    def create_normalized_coords(self, rgb_tensor, K_tensor):
+        """
+        rgb_tensor: (B, H, W, 3)
+        K_tensor:   (B, 3, 3)
+        return:     (B, H, W, 2) normalized xy
+        """
+        # 현재 텐서플로 그래프 상에서 동적으로 shape을 추출
+        shape = tf.shape(rgb_tensor)
+        b = shape[0]
+        h = shape[1]
+        w = shape[2]
 
-    def forward_step(self, rgb: tf.Tensor, depth: tf.Tensor, training: bool = True
+        # 픽셀 그리드 생성 (y, x)
+        # meshgrid() -> shape=(H, W)
+        # tf.range를 사용해 0..H-1, 0..W-1
+        y_coords = tf.linspace(0.0, tf.cast(h - 1, tf.float32), h)
+        x_coords = tf.linspace(0.0, tf.cast(w - 1, tf.float32), w)
+        # shape=(H, W)
+        xx, yy = tf.meshgrid(x_coords, y_coords, indexing='xy')
+
+        # (H, W, 1) -> (1, H, W, 1) batch broadcast를 위해
+        yy = yy[tf.newaxis, ..., tf.newaxis]
+        xx = xx[tf.newaxis, ..., tf.newaxis]
+
+        # Intrinsics로부터 focal, principal point 추출
+        # tf.split 등으로 fx, fy, cx, cy를 구해서 shape=(B,1,1,1)로 만듦
+        fx = K_tensor[:, 0, 0][:, tf.newaxis, tf.newaxis, tf.newaxis]  # (B,1,1,1)
+        fy = K_tensor[:, 1, 1][:, tf.newaxis, tf.newaxis, tf.newaxis]
+        cx = K_tensor[:, 0, 2][:, tf.newaxis, tf.newaxis, tf.newaxis]
+        cy = K_tensor[:, 1, 2][:, tf.newaxis, tf.newaxis, tf.newaxis]
+
+        # 모든 batch에 대해 동일한 (xx, yy)를 사용해야 하므로 tile
+        xx_tiled = tf.tile(xx, [b, 1, 1, 1])  # (B,H,W,1)
+        yy_tiled = tf.tile(yy, [b, 1, 1, 1])  # (B,H,W,1)
+
+        # 정규화 (x - cx) / fx, (y - cy) / fy
+        x_normalized = (xx_tiled - cx) / fx
+        y_normalized = (yy_tiled - cy) / fy
+
+        # concat하여 (B,H,W,2)
+        coords = tf.concat([x_normalized, y_normalized], axis=-1)
+        return coords
+
+    def forward_step(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic, training: bool = True
                     ) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
         """
         Performs a forward step, predicting depth and calculating losses.
@@ -195,7 +242,9 @@ class DepthLearner:
                 - Loss dictionary containing smoothness, SILog, and L1 losses.
                 - List of predicted depth maps at different scales.
         """
-        pred_disps = self.model(rgb, training=training)
+        coord_map = self.create_normalized_coords(rgb, intrinsic)
+        model_input = tf.concat([rgb, coord_map], axis=-1)
+        pred_disps = self.model(model_input, training=training)
 
         valid_mask = (depth > 0.) & (depth < (1. if self.train_mode == 'relative' else self.max_depth))
 

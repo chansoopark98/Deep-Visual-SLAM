@@ -12,7 +12,7 @@ class NyuHandler:
         self.bound_bottom = 472
 
     @tf.function(jit_compile=True)
-    def nyu_crop_resize(self, rgb: tf.Tensor, depth: tf.Tensor) -> tuple:
+    def nyu_crop_resize(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic: tf.Tensor) -> tuple:
         """
         Crops the valid region of the NYU dataset without resizing.
 
@@ -24,20 +24,47 @@ class NyuHandler:
             tuple: Cropped RGB and depth tensors.
         """
         # Crop the valid region
-        cropped_image = rgb[self.bound_top:self.bound_bottom, self.bound_left:self.bound_right, :]
-        cropped_depth = depth[self.bound_top:self.bound_bottom, self.bound_left:self.bound_right, :]
+        # cropped_image = rgb[self.bound_top:self.bound_bottom, self.bound_left:self.bound_right, :]
+        depth_shape = tf.shape(depth)
+        height = depth_shape[0]
+        width = depth_shape[1]
+        # Create a mask with ones in the valid region and zeros elsewhere
+        valid_region = tf.ones(
+            (self.bound_bottom - self.bound_top, self.bound_right - self.bound_left, 1),
+            dtype=depth.dtype
+        )
+        mask = tf.pad(
+            valid_region,
+            paddings=[
+            [self.bound_top, height - self.bound_bottom],
+            [self.bound_left, width - self.bound_right],
+            [0, 0]
+            ],
+            constant_values=0
+        )
+        cropped_rgb = tf.cast(rgb, tf.float32) * mask
+        print(mask.shape)
+        cropped_rgb =tf.cast(rgb, tf.uint8)
+        cropped_depth = depth * mask
 
-        # Type casting
-        cropped_image = tf.cast(cropped_image, tf.uint8)
-        cropped_depth = tf.cast(cropped_depth, tf.float32)
+        # # Type casting
+        # cropped_image = tf.cast(cropped_image, tf.uint8)
+        # cropped_depth = tf.cast(cropped_depth, tf.float32)
 
-        # Ensure shapes for compatibility
-        cropped_image = tf.ensure_shape(cropped_image, [self.bound_bottom - self.bound_top, 
-                                                        self.bound_right - self.bound_left, 3])
-        cropped_depth = tf.ensure_shape(cropped_depth, [self.bound_bottom - self.bound_top, 
-                                                        self.bound_right - self.bound_left, 1])
+        # # Ensure shapes for compatibility
+        # cropped_image = tf.ensure_shape(cropped_image, [self.bound_bottom - self.bound_top, 
+        #                                                 self.bound_right - self.bound_left, 3])
+        # cropped_depth = tf.ensure_shape(cropped_depth, [self.bound_bottom - self.bound_top, 
+        #                                                 self.bound_right - self.bound_left, 1])
+        
+        # cropped_intrinsic = tf.identity(intrinsic)
+        # cropped_intrinsic = tf.tensor_scatter_nd_sub(
+        #     cropped_intrinsic,
+        #     indices=[[0, 2], [1, 2]],
+        #     updates=[tf.cast(self.bound_left, intrinsic.dtype), tf.cast(self.bound_top, intrinsic.dtype)]
+        # )
 
-        return cropped_image, cropped_depth
+        return cropped_rgb, cropped_depth, intrinsic
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
