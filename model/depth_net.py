@@ -2,10 +2,12 @@ import tensorflow as tf, tf_keras
 try:
     from .model_utils import *
     from .resnet_tf import Resnet, Resnet34
+    from .cam_conv import AddCAMCoords
 
 except:
     from model_utils import *
     from resnet_tf import Resnet, Resnet34
+    from cam_conv import AddCAMCoords
 
 class DispNet(tf_keras.Model):
     """
@@ -23,10 +25,19 @@ class DispNet(tf_keras.Model):
         self.batch_size = batch_size
         self.prefix_str = prefix
 
-        self.encoder = Resnet(image_shape=(*image_shape, 5),
+        self.encoder = Resnet(image_shape=(*image_shape, 14),
                               batch_size=batch_size,
                               pretrained=True,
                               prefix=prefix + '_resnet18').build_model()
+        
+        self.add_coord = AddCAMCoords(coord_maps=False,
+                                      centered_coord=True,
+                                      norm_coord_maps=True,
+                                      with_r=True,
+                                      bord_dist=True,
+                                      scale_centered_coord=(self.image_height, self.image_width),
+                                      fov_maps=True,
+                                      data_format='channels_last')
         
         # Depth Decoder
         print('Building Depth Decoder Model')
@@ -92,8 +103,9 @@ class DispNet(tf_keras.Model):
         returns: disp1, disp2, disp3, disp4
         """
         # 1) 인코더
-        # rgb, intrinsic = inputs
-        x, skips = self.encoder(inputs, training=training)
+        rgb, intrinsic = inputs
+        input_tensors = self.add_coord(rgb, intrinsic, training=training)
+        x, skips = self.encoder(input_tensors, training=training)
 
         x = tf.cast(x, tf.float32)
         skips = [tf.cast(skip, tf.float32) for skip in skips]

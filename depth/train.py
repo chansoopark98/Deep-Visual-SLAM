@@ -20,6 +20,15 @@ np.set_printoptions(suppress=True)
 class Trainer(object):
     def __init__(self, config: dict) -> None:
         self.config = config
+
+        self.config['Directory']['exp_name'] = 'mode={0}_res={1}_ep={2}_bs={3}_initLR={4}_endLR={5}'.format(self.config['Train']['mode'],
+                                                                    (self.config['Train']['img_h'], self.config['Train']['img_w']),
+                                                                    self.config['Train']['epoch'],
+                                                                    self.config['Train']['batch_size'],
+                                                                    self.config['Train']['init_lr'],
+                                                                    self.config['Train']['final_lr']
+                                                                    )
+        
         self.configure_train_ops()
         print('initialize')
 
@@ -44,10 +53,11 @@ class Trainer(object):
         self.model = DispNet(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
                              batch_size=self.batch_size)
 
-        model_input_shape = (self.config['Train']['batch_size'],
-                             self.config['Train']['img_h'], self.config['Train']['img_w'], 5)
+        model_input_shape = [(self.config['Train']['batch_size'],
+                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
+                             (self.config['Train']['batch_size'], 3, 3)]
         self.model.build(model_input_shape)
-        _ = self.model(tf.random.normal(model_input_shape))
+        _ = self.model([tf.random.normal(model_input_shape[0]), tf.random.normal(model_input_shape[1])])
 
         if self.config['Train']['mode'] == 'metric':
             self.model.load_weights('./assets/weights/depth/metric_epoch_45_model.weights.h5', skip_mismatch=True) # Pretrained relative depth weights
