@@ -20,7 +20,14 @@ np.set_printoptions(suppress=True)
 class Trainer(object):
     def __init__(self, config, ) -> None:
         self.config = config
-        
+
+        self.config['Directory']['exp_name'] = 'mode={0}_res={1}_ep={2}_bs={3}_initLR={4}_endLR={5}'.format(self.config['Train']['mode'],
+                                                                    (self.config['Train']['img_h'], self.config['Train']['img_w']),
+                                                                    self.config['Train']['epoch'],
+                                                                    self.config['Train']['batch_size'],
+                                                                    self.config['Train']['init_lr'],
+                                                                    self.config['Train']['final_lr']
+                                                                    )
         self.configure_train_ops()
         print('initialize')
    
@@ -33,8 +40,13 @@ class Trainer(object):
 
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
-        self.depth_net(tf.random.normal((1, *image_shape, 5)))
-        self.depth_net.load_weights('./assets/weights/depth/metric_intrinsic_epoch_4_model.weights.h5')
+        dispnet_input_shape = [(self.config['Train']['batch_size'],
+                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
+                             (self.config['Train']['batch_size'], 3, 3)]
+        self.depth_net.build(dispnet_input_shape)
+        _ = self.depth_net([tf.random.normal(dispnet_input_shape[0]), tf.random.normal(dispnet_input_shape[1])])
+
+        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model_full.weights.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
@@ -46,10 +58,10 @@ class Trainer(object):
         # 3. Optimizer
         self.warmup_scheduler = keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
-                                                                              self.config['Train']['end_lr'],
+                                                                              self.config['Train']['final_lr'],
                                                                               power=0.9)
         
-        self.optimizer = keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
+        self.optimizer = keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
                                                   beta_1=self.config['Train']['beta1'],
                                                   weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None,
                                                   ) # 
