@@ -82,11 +82,8 @@ class EvalTrajectory(Learner):
 
         left_image = left_images[:, 0] # [B, H, W, 3]
         right_image = right_images[:, 0] # [B, H, W, 3]
-
-        coord_map = self.create_normalized_coords(tgt_image, intrinsic)
-        model_input = tf.concat([tgt_image, coord_map], axis=-1)
         
-        disp_raw = self.depth_net(model_input, training=False)
+        disp_raw = self.depth_net([tgt_image, intrinsic], training=False)
 
         batch_disps = []
         for s in range(self.num_scales):
