@@ -25,8 +25,6 @@ class DispNet(tf_keras.Model):
         self.batch_size = batch_size
         self.prefix_str = prefix
 
-        
-        
         self.add_coord = AddCAMCoords(coord_maps=False,
                                       centered_coord=True,
                                       norm_coord_maps=True,

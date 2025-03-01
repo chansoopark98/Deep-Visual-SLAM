@@ -205,9 +205,7 @@ class Learner(object):
         pred_poses = []
         scaled_tgts = []
 
-        coord_map = self.create_normalized_coords(tgt_image, intrinsic)
-        model_input = tf.concat([tgt_image, coord_map], axis=-1)
-        disp_raw = self.depth_net(model_input, training=training) # disp raw result (H, W, 1)
+        disp_raw = self.depth_net([tgt_image, intrinsic], training=training) # disp raw result (H, W, 1)
 
         for scale_idx in range(self.num_scales):
             resized_disp = tf.image.resize(disp_raw[scale_idx], [H, W], method=tf.image.ResizeMethod.BILINEAR)
