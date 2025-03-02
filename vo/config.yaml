@@ -37,4 +37,4 @@ Train:
 Experiment:
   gpus: [1] # [0, 1]
   gpu_vram: 24000
-  gpu_vram_factor: 0.8
+  gpu_vram_factor: 0.9
