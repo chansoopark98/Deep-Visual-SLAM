@@ -22,14 +22,19 @@ if __name__ == '__main__':
         batch_size = config['Train']['batch_size']
 
         depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='disp_resnet')
-        depth_net(tf.random.normal((1, *image_shape, 3)))
-        exp_name = 'tf2.16_vo_bs8_ep21_lr1e-4_1e-5_240x320_'
-        depth_net.load_weights(f'./weights/vo/{exp_name}/depth_net_epoch_18_model.weights.h5')
+        dispnet_input_shape = [(config['Train']['batch_size'],
+                             config['Train']['img_h'], config['Train']['img_w'], 3),
+                             (config['Train']['batch_size'], 3, 3)]
+        # depth_net(tf.random.normal((1, *image_shape, 3)))
+        depth_net.build(dispnet_input_shape)
+        _ = depth_net([tf.random.normal(dispnet_input_shape[0]), tf.random.normal(dispnet_input_shape[1])])
+        exp_name = 'mode=axisAngle_res=(480, 640)_ep=31_bs=8_initLR=0.0001_endLR=1e-05'
+        depth_net.load_weights(f'./weights/vo/{exp_name}/depth_net_epoch_30_model.weights.h5')
 
         pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
         posenet_input_shape = [(batch_size, *image_shape, 6)]
         pose_net.build(posenet_input_shape)
-        pose_net.load_weights(f'./weights/vo/{exp_name}/pose_net_epoch_18_model.weights.h5')
+        pose_net.load_weights(f'./weights/vo/{exp_name}/pose_net_epoch_30_model.weights.h5')
 
         eval_tool = EvalTrajectory(depth_model=depth_net, pose_model=pose_net, config=config)
 
@@ -45,7 +50,7 @@ if __name__ == '__main__':
             intrinsic = intrinsics[0]
             fx, fy, cx, cy = intrinsic[0, 0], intrinsic[1, 1], intrinsic[0, 2], intrinsic[1, 2]
 
-            disp_raw = depth_net(target_image, training=False)
+            disp_raw = depth_net([target_image, intrinsics], training=False)
 
             depth_map = eval_tool.disp_to_depth(disp=disp_raw[0],
                                             min_depth=config['Train']['min_depth'],
