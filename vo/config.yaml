@@ -1,5 +1,5 @@
 Directory:
-  exp_name: CoorConv_Pretrained_custom_adamW
+  exp_name: CoorConv_Pretrained_custom_adamW_240x320
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -8,7 +8,7 @@ Directory:
 Dataset:
   custom_data: False
   mars_logger: True
-  redwood: False
+  redwood: True
 
 Train:
   mode: axisAngle # axisAngle, euler
@@ -25,8 +25,8 @@ Train:
   ssim_ratio: 0.85
   smoothness_ratio: 0.001
   auto_mask: True
-  img_w: 640 #640
-  img_h: 480 #480
+  img_w: 320 #640
+  img_h: 240 #480
   weight_decay: 0.001
   beta1: 0.9
   batch_size: 8 # 1

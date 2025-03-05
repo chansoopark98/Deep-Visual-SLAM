@@ -172,7 +172,8 @@ def pose_axis_angle_vec2mat(vec, invert=False):
     :param vec: [B,1,6] with former 3 vec is axis angle
     :return:
     """
-    batch_size, _ = vec.get_shape().as_list()
+    # batch_size, _ = vec.get_shape().as_list()
+    batch_size = vec.shape[0]
 
     axisvec = tf.slice(vec, [0, 0], [-1, 3])
     axisvec = tf.reshape(axisvec, [batch_size, 1, 3])
