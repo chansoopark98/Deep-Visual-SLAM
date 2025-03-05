@@ -31,9 +31,10 @@ async function startCamera(facingMode) {
 function updateCanvas() {
   if (video.readyState === video.HAVE_ENOUGH_DATA) {
     if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth; // 1280
+      canvas.height = video.videoHeight; // 960
     }
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   }
   requestAnimationFrame(updateCanvas);
