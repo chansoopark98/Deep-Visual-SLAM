@@ -1,5 +1,5 @@
 Directory:
-  exp_name: CoorConv_Pretrained_custom_adamW_240x320
+  exp_name: test
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
