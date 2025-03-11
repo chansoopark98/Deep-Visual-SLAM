@@ -25,17 +25,7 @@ class DispNet(tf_keras.Model):
         self.batch_size = batch_size
         self.prefix_str = prefix
 
-        self.add_coord = AddCAMCoords(coord_maps=False,
-                                      centered_coord=True,
-                                      norm_coord_maps=True,
-                                      with_r=False,
-                                      bord_dist=False,
-                                      scale_centered_coord=(self.image_height, self.image_width),
-                                      fov_maps=True,
-                                      data_format='channels_last')
-        
-        self.channels = self.add_coord.additional_channels() + 3
-        self.encoder = Resnet(image_shape=(*image_shape, self.channels),
+        self.encoder = Resnet(image_shape=(*image_shape, 3),
                               batch_size=batch_size,
                               pretrained=True,
                               prefix=prefix + '_resnet18').build_model()
@@ -63,7 +53,7 @@ class DispNet(tf_keras.Model):
             name='iconv4_resize'
         )
         self.upconv4 = reflect_conv(3, filters[3], 1, 'upconv4')
-        self.disp4 = reflect_conv(3, 1, 1, 'disp4', activation_fn=tf.nn.sigmoid)
+        self.out_4 = reflect_conv(3, 2, 1, 'disp4', activation_fn=tf.nn.sigmoid)
 
         # disp 3
         self.iconv3 = reflect_conv(3, filters[2], 1, 'iconv3')
@@ -74,7 +64,7 @@ class DispNet(tf_keras.Model):
             name='iconv3_resize'
         )
         self.upconv3 = reflect_conv(3, filters[2], 1, 'upconv3')
-        self.disp3 = reflect_conv(3, 1, 1, 'disp3', activation_fn=tf.nn.sigmoid)
+        self.out_3 = reflect_conv(3, 2, 1, 'disp3', activation_fn=tf.nn.sigmoid)
 
         # disp 2
         self.iconv2 = reflect_conv(3, filters[1], 1, 'iconv2')
@@ -85,7 +75,7 @@ class DispNet(tf_keras.Model):
             name='iconv2_resize'
         )
         self.upconv2 = reflect_conv(3, filters[1], 1, 'upconv2')
-        self.disp2 = reflect_conv(3, 1, 1, 'disp2', activation_fn=tf.nn.sigmoid)
+        self.out_2 = reflect_conv(3, 2, 1, 'disp2', activation_fn=tf.nn.sigmoid)
 
         # disp 1
         self.iconv1 = reflect_conv(3, filters[0], 1, 'iconv1')
@@ -96,17 +86,14 @@ class DispNet(tf_keras.Model):
             name='iconv1_resize'
         )
         self.upconv1 = reflect_conv(3, filters[0], 1, 'upconv1')
-        self.disp1 = reflect_conv(3, 1, 1, 'disp1', activation_fn=tf.nn.sigmoid)
+        self.out_1 = reflect_conv(3, 2, 1, 'disp1', activation_fn=tf.nn.sigmoid)
 
     def call(self, inputs, training=False):
         """
         inputs: [B, image_height, image_width, 3]
         returns: disp1, disp2, disp3, disp4
         """
-        # 1) 인코더
-        rgb, intrinsic = inputs
-        input_tensors = self.add_coord(rgb, intrinsic, training=training)
-        x, skips = self.encoder(input_tensors, training=training)
+        x, skips = self.encoder(inputs, training=training)
 
         x = tf.cast(x, tf.float32)
         skips = [tf.cast(skip, tf.float32) for skip in skips]
@@ -122,38 +109,50 @@ class DispNet(tf_keras.Model):
         iconv4_upsample = self.iconv4_resize(iconv4)
         iconv4_concat = tf.concat([iconv4_upsample, skips[1]], axis=3)
         upconv4 = self.upconv4(iconv4_concat, training=training)
-        disp4 = self.disp4(upconv4, training=training)
-
+        out_4 = self.out_4(upconv4, training=training)
+        # Split keeping the last channel dimension
+        disp_4 = out_4[:, :, :, 0:1]  # Shape will be [B, H, W, 1]
+        sigma_4 = out_4[:, :, :, 1:2]  # Shape will be [B, H, W, 1]
+    
         # disp3
         iconv3 = self.iconv3(upconv4, training=training)
         iconv3_upsample = self.iconv3_resize(iconv3)
         iconv3_concat = tf.concat([iconv3_upsample, skips[2]], axis=3)
         upconv3 = self.upconv3(iconv3_concat, training=training)
-        disp3 = self.disp3(upconv3, training=training)
+        out_3 = self.out_3(upconv3, training=training)
+        disp_3 = out_3[:, :, :, 0:1]
+        sigma_3 = out_3[:, :, :, 1:2]
 
         # disp2
         iconv2 = self.iconv2(upconv3, training=training)
         iconv2_upsample = self.iconv2_resize(iconv2)
         iconv2_concat = tf.concat([iconv2_upsample, skips[3]], axis=3)
         upconv2 = self.upconv2(iconv2_concat, training=training)
-        disp2 = self.disp2(upconv2, training=training)
+        out_2 = self.out_2(upconv2, training=training)
+        disp_2 = out_2[:, :, :, 0:1]
+        sigma_2 = out_2[:, :, :, 1:2]
 
         # disp1
         iconv1 = self.iconv1(upconv2, training=training)
         iconv1_upsample = self.iconv1_resize(iconv1)
         upconv1 = self.upconv1(iconv1_upsample, training=training)
-        disp1 = self.disp1(upconv1, training=training)
+        out_1 = self.out_1(upconv1, training=training)
+        disp_1 = out_1[:, :, :, 0:1]
+        sigma_1 = out_1[:, :, :, 1:2]
 
-        return disp1, disp2, disp3, disp4
+        disp = [disp_1, disp_2, disp_3, disp_4]
+        sigma = [sigma_1, sigma_2, sigma_3, sigma_4]
+        return  disp, sigma
 
 
 if __name__ == '__main__':
     dispnet = DispNet(image_shape=(256, 256), batch_size=1, prefix='disp_resnet')
-    monodepth = MonoDepth2Model(image_shape=(256, 256), batch_size=1)
+    
     dummy = tf.random.normal((1, 256, 256, 3))
-    dummy_src = tf.random.normal((1, 256, 256, 6))
-    imu_src = tf.random.normal((1, 10, 6))
-
+    
     # test
-    disp1, disp2, disp3, disp4 = dispnet(dummy, True)
-    print(disp1.shape, disp2.shape, disp3.shape, disp4.shape)
+    disp, sigma = dispnet(dummy)
+    for d in disp:
+        print(d.shape)
+    for s in sigma:
+        print(s.shape)

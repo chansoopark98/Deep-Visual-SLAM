@@ -40,13 +40,12 @@ class Trainer(object):
 
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
-        dispnet_input_shape = [(self.config['Train']['batch_size'],
-                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
-                             (self.config['Train']['batch_size'], 3, 3)]
+        dispnet_input_shape = (self.config['Train']['batch_size'],
+                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
         self.depth_net.build(dispnet_input_shape)
-        _ = self.depth_net([tf.random.normal(dispnet_input_shape[0]), tf.random.normal(dispnet_input_shape[1])])
+        _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
-        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model_full.weights.h5')
+        # self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model_full.weights.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]

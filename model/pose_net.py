@@ -29,50 +29,64 @@ class PoseNet(tf_keras.Model):
         
         # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
-        self.pose_act0 = tf_keras.layers.ReLU(name='pose_relu')
-
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3
-        self.pose_act1 = tf_keras.layers.ReLU(name='pose_relu1')
-
         self.pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')  # kernel=3
-        self.pose_act2 = tf_keras.layers.ReLU(name='pose_relu2')
-    
         self.pose_conv3 = tf_keras.layers.Conv2D(
             filters=6, kernel_size=(1, 1), strides=(1, 1),
             activation=None, name='pose_conv3'
         )
 
-        # 3) ReduceMeanLayer, Reshape
-        # self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
-        self.reshape_layer = tf_keras.layers.Reshape((6,), name='pose_reshape')
+        self.conv_a = tf_keras.layers.Conv2D(
+            filters=1, kernel_size=(1, 1), strides=(1, 1),
+            activation=None, name='conv_a'
+        )
+        self.conv_b = tf_keras.layers.Conv2D(
+            filters=1, kernel_size=(1, 1), strides=(1, 1),
+            activation=None, name='conv_b'
+        )
+
+        self.relu = tf.nn.relu
+        self.tanh = tf.nn.tanh
+        self.softplus = tf.nn.softplus
 
     def call(self, inputs, training=False):
         """
-        inputs: [B, H, W, 6]
+        inputs: [B, H, W, 6] (source + target image concat)
         return: [B, 1, 6]
         """
-        # 1) ResNet 인코더
-        x = self.encoder(inputs, training=training) 
-        # x: 최종 conv5_x 특징맵, shape [B, H/32, W/32, 512]
-
-        # 2) pose_conv0 -> pose_conv1 -> pose_conv2 -> pose_conv3
+        # PoseNet Forward
+        x = self.encoder(inputs, training=training) # [B, H/32, W/32, 512]
+        
         x = self.pose_conv0(x)
-        x = self.pose_act0(x)
+        x = self.relu(x)
 
         x = self.pose_conv1(x)
-        x = self.pose_act1(x)
+        x = self.relu(x)
 
         x = self.pose_conv2(x)
-        x = self.pose_act2(x)
+        x = self.relu(x)
             
         x = self.pose_conv3(x)  # [B, H/32, W/32, 6]
 
-        # 3) reduce_mean -> reshape -> scale
-        # x = self.reduce_mean_layer(x)  # [B, 1, 1, 6] => keepdims=True
-        x = tf.reduce_mean(x, axis=[1, 2], keepdims=True)
-        x = self.reshape_layer(x)      # [B, 6]
-        x = x * 0.01 # scale
-        return x
+        out_pose = self.relu(x)
+        out_pose = tf.reduce_mean(out_pose, axis=[1, 2], keepdims=False)
+
+        out_a = self.conv_a(x)
+        out_a = self.softplus(out_a)
+        out_a = tf.reduce_mean(out_a, axis=[1, 2], keepdims=False)
+
+        out_b = self.conv_b(x)
+        out_b = self.tanh(out_b)
+        out_b = tf.reduce_mean(out_b, axis=[1, 2], keepdims=False)
+
+        # scaling
+        out_pose = out_pose * 0.01
+        out_a = out_a * 0.01
+        out_b = out_b * 0.01
+
+        a = tf.reshape(out_a, (-1, 1, 1, 1))
+        b = tf.reshape(out_b, (-1, 1, 1, 1))
+        return out_pose, a, b
     
 if __name__ == '__main__':
     # Test PoseNet
@@ -84,5 +98,7 @@ if __name__ == '__main__':
     
     # Test forward
     inputs = tf.random.normal((batch_size, image_shape[0], image_shape[1], 6))
-    outputs = posenet(inputs)
-    print(outputs.shape)  # [B, 6]
+    pose, a, b = posenet(inputs)
+    print(pose)
+    print('a:', a.shape)
+    print('b:', b.shape)

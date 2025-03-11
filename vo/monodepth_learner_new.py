@@ -38,7 +38,7 @@ class Learner(object):
         depth = tf.cast(1., tf.float32) / scaled_disp
         return depth
     
-    def compute_reprojection_loss(self, reproj_image, tgt_image):
+    def compute_reprojection_loss(self, reproj_image, tgt_image, curr_sigma):
         """
         L1 + SSIM photometric loss
         """
@@ -46,6 +46,7 @@ class Learner(object):
         ssim_loss = tf.reduce_mean(self.ssim(reproj_image, tgt_image), axis=3, keepdims=True)
 
         loss = self.ssim_ratio * ssim_loss + (1. - self.ssim_ratio) * l1_loss
+        loss *= curr_sigma
         return loss
 
     def ssim(self, x, y):
@@ -203,12 +204,14 @@ class Learner(object):
         # Generate Depth and Pose Results
         pred_depths = []
         pred_poses = []
+        pred_ab = []
         scaled_tgts = []
 
-        disp_raw = self.depth_net([tgt_image, intrinsic], training=training) # disp raw result (H, W, 1)
+        disp_raws, sigma = self.depth_net(tgt_image, training=training) # disp raw result (H, W, 1)
 
         for scale_idx in range(self.num_scales):
-            resized_disp = tf.image.resize(disp_raw[scale_idx], [H, W], method=tf.image.ResizeMethod.BILINEAR)
+            resized_disp = tf.image.resize(disp_raws[scale_idx], [H, W], method=tf.image.ResizeMethod.BILINEAR)
+            resized_sigma = tf.image.resize(sigma[scale_idx], [H, W], method=tf.image.ResizeMethod.BILINEAR)
             resized_depth = self.disp_to_depth(resized_disp, self.min_depth, self.max_depth)
             pred_depths.append(resized_depth)
 
@@ -226,13 +229,17 @@ class Learner(object):
             cat_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
 
             # no use imu
-            pose_left = self.pose_net(cat_left, training=training)    # [B,6]
-            pose_right = self.pose_net(cat_right, training=training)  # [B,6]
+            pose_left, left_a, left_b = self.pose_net(cat_left, training=training)    # [B,6]
+            pose_right, right_a, right_b = self.pose_net(cat_right, training=training)  # [B,6]
 
             pose_left = tf.cast(pose_left, tf.float32)
             pose_right = tf.cast(pose_right, tf.float32)
+
+            left_ab = tf.concat([left_a, left_b], axis=-1)  # [B,2]         
+            right_ab = tf.concat([right_a, right_b], axis=-1)  # [B,2]
             
             pred_poses.append([pose_left, pose_right])
+            pred_ab.append([left_ab, right_ab])
 
         for s in range(self.num_scales):
             # reprojection loss
@@ -244,12 +251,20 @@ class Learner(object):
                 src_image_stack = [left_image, right_image]
 
                 current_poses = pred_poses[i]  # shape [B, 2, 6]
+                current_ab_pair = pred_ab[i]
 
                 # left-right and right-left
                 for j in range(2): # j=0: left, j=1: right
                     curr_depth = pred_depths[s]
+                    curr_sigma = resized_sigma[s]
+
                     curr_src = src_image_stack[j]
                     curr_pose = current_poses[j] # shape [B,6]
+                    curr_ab = current_ab_pair[j] # shape [B,2]
+                    curr_a = curr_ab[:, :, :, 0:1]
+                    curr_b = curr_ab[:, :, :, 1:2]
+                    
+                    target_frame = tgt_image * curr_a + curr_b
 
                     curr_proj_image = projective_inverse_warp(
                         curr_src,
@@ -259,8 +274,9 @@ class Learner(object):
                         invert=(j == 0),
                         euler=self.is_euler
                     )
+
                     # photometric
-                    curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, tgt_image)
+                    curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, target_frame, curr_sigma)
 
                     # for loss
                     reprojection_list.append(curr_reproj_loss)
@@ -276,11 +292,20 @@ class Learner(object):
                     left_image = left_images[:, i]  # [B, H, W, 3]
                     right_image = right_images[:, i]  # [B, H, W, 3]
                     src_image_stack = [left_image, right_image]
+                    
+                    curr_sigma = resized_sigma[s]
+                    current_ab_pair = pred_ab[i]
 
                     for j in range(2):
+                        curr_ab = current_ab_pair[j] # shape [B,2]
+                        curr_a = curr_ab[:, :, :, 0:1]
+                        curr_b = curr_ab[:, :, :, 1:2]
+
+                        target_frame = tgt_image * curr_a + curr_b
+
                         # identity reprojection => src==tgt scaled
                         identity_loss = self.compute_reprojection_loss(
-                            src_image_stack[j], tgt_image)
+                            src_image_stack[j], target_frame, curr_sigma)
                         identity_list.append(identity_loss)
                 identity_losses = tf.concat(identity_list, axis=3)
                 # random noise
@@ -292,7 +317,7 @@ class Learner(object):
             reprojection_loss = tf.reduce_mean(tf.reduce_min(combined, axis=3))
 
             # smoothness loss
-            smooth_loss = self.get_smooth_loss(disp_raw[s], scaled_tgts[s])
+            smooth_loss = self.get_smooth_loss(disp_raws[s], scaled_tgts[s])
             smooth_loss = smooth_loss / (2.0**s)
 
             pixel_losses += reprojection_loss
