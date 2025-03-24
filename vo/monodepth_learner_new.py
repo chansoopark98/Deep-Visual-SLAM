@@ -197,6 +197,8 @@ class Learner(object):
 
         pixel_losses = 0.
         smooth_losses = 0.
+        sigma_losses = 0.
+        ab_losses = []
         
         H = tf.shape(tgt_image)[1]
         W = tf.shape(tgt_image)[2]
@@ -278,6 +280,10 @@ class Learner(object):
                     # photometric
                     curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, target_frame, curr_sigma)
 
+                    # uncertain loss
+                    ab_loss = (curr_a - 1) ** 2 + curr_b ** 2
+                    ab_losses.append(ab_loss)
+
                     # for loss
                     reprojection_list.append(curr_reproj_loss)
 
@@ -313,20 +319,25 @@ class Learner(object):
 
                 combined = tf.concat([identity_losses, reprojection_losses], axis=3)
 
-            # min across channel => pick best
+            # reprojection loss
             reprojection_loss = tf.reduce_mean(tf.reduce_min(combined, axis=3))
+            pixel_losses += reprojection_loss
 
-            # smoothness loss
+            # smoothness loss (reg loss)
             smooth_loss = self.get_smooth_loss(disp_raws[s], scaled_tgts[s])
             smooth_loss = smooth_loss / (2.0**s)
+            ab_loss_mean = smooth_loss  + tf.reduce_mean(ab_losses) * 1e-2
 
-            pixel_losses += reprojection_loss
-            smooth_losses += smooth_loss * self.smoothness_ratio
+            # sigma loss
+            sigma_losses += tf.reduce_mean((resized_sigma[s] - 1) ** 2) 
+
+            smooth_losses += self.smoothness_ratio * ab_loss_mean / (2.0**s) # # self.opt.disparity_smoothness * reg_loss / (2 ** scale)
             
         # total loss
         num_scales_f = tf.cast(self.num_scales, tf.float32)
         pixel_losses = pixel_losses / num_scales_f
         smooth_losses = smooth_losses / num_scales_f
-        total_loss = pixel_losses + smooth_losses
+        sigma_losses = sigma_losses / num_scales_f
+        total_loss = pixel_losses + smooth_losses + sigma_losses
 
         return total_loss, pixel_losses, smooth_losses, pred_depths

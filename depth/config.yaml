@@ -1,5 +1,5 @@
 Directory:
-  exp_name: resnet18_intrinsicTest_nyu-diode-custom-redwood_newCH
+  exp_name: resnet18_intrinsicTest_nyu-custom-redwood_newCH_uncertain
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -10,7 +10,7 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: True  
     valid: True  
   Diode:
-    train: True  
+    train: False  
     valid: False 
   DIML:
     train: False

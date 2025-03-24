@@ -265,7 +265,7 @@ class DepthLearner:
         # coord_map = self.create_normalized_coords(rgb, intrinsic)
         # test_coord_map = self.build_coord_channels(rgb, intrinsic)
         # model_input = tf.concat([rgb, coord_map], axis=-1)
-        pred_disps = self.model([rgb, intrinsic], training=training)
+        pred_disps, _ = self.model(rgb, training=training)
 
         valid_mask = (depth > 0.) & (depth < (1. if self.train_mode == 'relative' else self.max_depth))
 

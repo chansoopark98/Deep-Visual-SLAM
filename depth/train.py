@@ -53,11 +53,10 @@ class Trainer(object):
         self.model = DispNet(image_shape=(self.config['Train']['img_h'], self.config['Train']['img_w']),
                              batch_size=self.batch_size)
         
-        model_input_shape = [(self.config['Train']['batch_size'],
-                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
-                             (self.config['Train']['batch_size'], 3, 3)]
+        model_input_shape = (self.config['Train']['batch_size'],
+                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3)
         self.model.build(model_input_shape)
-        _ = self.model([tf.random.normal(model_input_shape[0]), tf.random.normal(model_input_shape[1])])
+        _ = self.model(tf.random.normal(model_input_shape))
 
         if self.config['Train']['mode'] == 'metric':
             self.model.load_weights('./assets/weights/depth/metric_epoch_45_model.weights.h5', skip_mismatch=True) # Pretrained relative depth weights
