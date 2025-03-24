@@ -164,7 +164,9 @@ class DataLoader(object):
         depth = tf.image.resize(depth,
                                 self.image_size,
                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        depth = tf.where(depth >= self.max_depth, 0., depth)
+        valid_mask = tf.cast(tf.logical_and(depth > 0, depth < self.max_depth), tf.float32)
+        valid_mask = tf.cast(valid_mask, tf.bool)
+        depth = tf.where(valid_mask, depth, 0.0)
         return depth
         
     @tf.function(jit_compile=True)
@@ -202,20 +204,15 @@ class DataLoader(object):
 
     @tf.function(jit_compile=True)
     def get_relative_depth(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic) -> tuple:
-        """
-        Normalizes the input depth map to a relative range [0, 1].
+        # Get valid mask using max_depth
+        valid_mask = tf.cast(tf.logical_and(depth > 0, depth <= self.max_depth), tf.float32)
+        valid_mask = tf.cast(valid_mask, tf.bool)
 
-        Args:
-            rgb (tf.Tensor): Input RGB image tensor of shape [H, W, 3].
-            depth (tf.Tensor): Input depth map tensor of shape [H, W, 1].
-
-        Returns:
-            tuple: Tuple containing:
-                - rgb (tf.Tensor): Unchanged input RGB tensor.
-                - normalized_depth (tf.Tensor): Depth tensor normalized to the range [0, 1].
-        """
         normalized_depth = (depth - self.min_depth) / (self.max_depth - self.min_depth)
-        normalized_depth = tf.clip_by_value(normalized_depth, 0., 1.0)
+
+        # set invalid depth to 0
+        normalized_depth = tf.where(valid_mask, normalized_depth, 0.0)
+        
         return rgb, normalized_depth, intrinsic
 
     @tf.function(jit_compile=True)
@@ -404,7 +401,7 @@ class DataLoader(object):
         Returns:
             tf.data.Dataset: Compiled and optimized dataset ready for training or validation.
         """
-        combined_dataset = tf.data.Dataset.sample_from_datasets(datasets, rerandomize_each_iteration=True)
+        combined_dataset = tf.data.Dataset.sample_from_datasets(datasets)
             
         if use_shuffle:
             combined_dataset = combined_dataset.shuffle(buffer_size=2048, reshuffle_each_iteration=True)

@@ -12,7 +12,7 @@ class RedwoodLoader(object):
         self.valid_dir = os.path.join(self.root_dir, 'valid')
         self.intrinsic = np.load(os.path.join(self.root_dir, 'intrinsic.npy'))
         self.intrinsic = tf.convert_to_tensor(self.intrinsic, dtype=tf.float32)
-        
+        self.data_step = 10 # 10 steps for each scene
         self.train_dataset, self.train_samples = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
         # self.valid_dataset, self.valid_samples = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
 
@@ -20,7 +20,7 @@ class RedwoodLoader(object):
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'image', '*')))
         depth_files = sorted(glob.glob(os.path.join(scene_dir, 'depth', '*')))
         samples = []
-        for idx in range(len(rgb_files)):
+        for idx in range(0, len(rgb_files), self.data_step):
             sample = {
                 'image': rgb_files[idx],
                 'depth': depth_files[idx],

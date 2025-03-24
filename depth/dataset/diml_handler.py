@@ -8,6 +8,22 @@ class DimlHandler:
         Args:
             image_size (tuple): Target resolution (height, width) for resized images and depth maps.
         """
+        # Define Kinect v2 camera intrinsic parameters (resolution: 480x640)
+        self.kinect_intrinsic = {
+            'fx': 366.0,
+            'fy': 366.0,
+            'cx': 320.0,
+            'cy': 240.0,
+            'width': 640,
+            'height': 480
+        }
+        
+        # Create intrinsic matrix as tensor
+        self.K = tf.constant([
+            [self.kinect_intrinsic['fx'], 0, self.kinect_intrinsic['cx']],
+            [0, self.kinect_intrinsic['fy'], self.kinect_intrinsic['cy']],
+            [0, 0, 1]
+        ], dtype=tf.float32)
         self.image_size = image_size
 
     @tf.function(jit_compile=True)
@@ -34,7 +50,7 @@ class DimlHandler:
         resized_rgb = tf.ensure_shape(resized_rgb, [*self.image_size, 3])
         resized_depth = tf.ensure_shape(resized_depth, [*self.image_size, 1])
 
-        return resized_rgb, resized_depth
+        return resized_rgb, resized_depth, self.K
 
     def _resize_image(self, image: tf.Tensor, method: tf.image.ResizeMethod) -> tf.Tensor:
         """

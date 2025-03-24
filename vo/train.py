@@ -40,13 +40,14 @@ class Trainer(object):
 
         image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.depth_net = DispNet(image_shape=image_shape, batch_size=self.batch_size, prefix='disp_resnet')
-        dispnet_input_shape = [(self.config['Train']['batch_size'],
-                             self.config['Train']['img_h'], self.config['Train']['img_w'], 3),
-                             (self.config['Train']['batch_size'], 3, 3)]
+        dispnet_input_shape = (self.config['Train']['batch_size'],
+                               self.config['Train']['img_h'],
+                               self.config['Train']['img_w'],
+                               3)
         self.depth_net.build(dispnet_input_shape)
-        _ = self.depth_net([tf.random.normal(dispnet_input_shape[0]), tf.random.normal(dispnet_input_shape[1])])
+        _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
-        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model_full.weights.h5')
+        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_45_model.weights.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
@@ -100,24 +101,6 @@ class Trainer(object):
         self.save_path = '{0}/vo/{1}'.format(self.config['Directory']['weights'],
                                      self.config['Directory']['exp_name'])
         os.makedirs(self.save_path, exist_ok=True)
-    
-    # @tf.function(jit_compile=True)
-    # def train_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
-    #     with tf.GradientTape(persistent=True) as tape:
-    #         total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=True)
-    #         scaled_loss = self.optimizer.get_scaled_loss(total_loss)
-
-    #     # loss update
-    #     depth_scale_grad = tape.gradient(scaled_loss, self.depth_net.trainable_variables)
-    #     pose_scale_grad = tape.gradient(scaled_loss, self.pose_net.trainable_variables)
-
-    #     depth_unscale_grad = self.optimizer.get_unscaled_gradients(depth_scale_grad)
-    #     pose_unscale_grad = self.optimizer.get_unscaled_gradients(pose_scale_grad)
-
-    #     self.optimizer.apply_gradients(zip(depth_unscale_grad, self.depth_net.trainable_variables))
-    #     self.optimizer.apply_gradients(zip(pose_unscale_grad, self.pose_net.trainable_variables))
-        
-    #     return total_loss, pixel_loss, smooth_loss, pred_depths
     
     @tf.function(jit_compile=True)
     def train_step(self, ref_images, target_image, intrinsic):
