@@ -2,12 +2,10 @@ import tensorflow as tf, tf_keras
 try:
     from .model_utils import *
     from .resnet_tf import Resnet, Resnet34
-    from .cam_conv import AddCAMCoords
 
 except:
     from model_utils import *
     from resnet_tf import Resnet, Resnet34
-    from cam_conv import AddCAMCoords
 
 class DispNet(tf_keras.Model):
     """
@@ -24,22 +22,12 @@ class DispNet(tf_keras.Model):
         self.image_width = image_shape[1]
         self.batch_size = batch_size
         self.prefix_str = prefix
-
-        self.add_coord = AddCAMCoords(coord_maps=False,
-                                      centered_coord=True,
-                                      norm_coord_maps=True,
-                                      with_r=False,
-                                      bord_dist=False,
-                                      scale_centered_coord=(self.image_height, self.image_width),
-                                      fov_maps=True,
-                                      data_format='channels_last')
         
-        self.channels = self.add_coord.additional_channels() + 3
-        self.encoder = Resnet(image_shape=(*image_shape, self.channels),
+        self.encoder = Resnet(image_shape=(*image_shape, 3),
                               batch_size=batch_size,
                               pretrained=True,
                               prefix=prefix + '_resnet18').build_model()
-        
+
         # Depth Decoder
         print('Building Depth Decoder Model')
         filters = [16, 32, 64, 128, 256]
@@ -104,9 +92,7 @@ class DispNet(tf_keras.Model):
         returns: disp1, disp2, disp3, disp4
         """
         # 1) 인코더
-        rgb, intrinsic = inputs
-        input_tensors = self.add_coord(rgb, intrinsic, training=training)
-        x, skips = self.encoder(input_tensors, training=training)
+        x, skips = self.encoder(inputs, training=training)
 
         x = tf.cast(x, tf.float32)
         skips = [tf.cast(skip, tf.float32) for skip in skips]
@@ -145,15 +131,3 @@ class DispNet(tf_keras.Model):
         disp1 = self.disp1(upconv1, training=training)
 
         return disp1, disp2, disp3, disp4
-
-
-if __name__ == '__main__':
-    dispnet = DispNet(image_shape=(256, 256), batch_size=1, prefix='disp_resnet')
-    monodepth = MonoDepth2Model(image_shape=(256, 256), batch_size=1)
-    dummy = tf.random.normal((1, 256, 256, 3))
-    dummy_src = tf.random.normal((1, 256, 256, 6))
-    imu_src = tf.random.normal((1, 10, 6))
-
-    # test
-    disp1, disp2, disp3, disp4 = dispnet(dummy, True)
-    print(disp1.shape, disp2.shape, disp3.shape, disp4.shape)
