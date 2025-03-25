@@ -84,9 +84,9 @@ class DataLoader(object):
         dataset: tf.data.Dataset = tf.data.Dataset.from_generator(
             lambda: np_samples,
             output_signature={
-                'source_left': tf.TensorSpec(shape=(), dtype=tf.string),  # 리스트로 가변 길이
+                'source_left': tf.TensorSpec(shape=(None,), dtype=tf.string),  # 리스트로 가변 길이
                 'target_image': tf.TensorSpec(shape=(), dtype=tf.string),  # 단일 스트링
-                'source_right': tf.TensorSpec(shape=(), dtype=tf.string),  # 리스트로 가변 길이
+                'source_right': tf.TensorSpec(shape=(None,), dtype=tf.string),  # 리스트로 가변 길이
                 'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32)  # 고정 크기 (3, 3)
             }
         )
@@ -104,12 +104,12 @@ class DataLoader(object):
     def normalize_image(self, image: tf.Tensor) -> tf.Tensor:
         image = tf.cast(image, tf.float32)
         image /= 255.0
-        # image = (image - self.mean) / self.std
+        image = (image - self.mean) / self.std
         return image
     
     @tf.function(jit_compile=True)
     def denormalize_image(self, image):
-        # image = (image * self.std) + self.mean
+        image = (image * self.std) + self.mean
         image *= 255.0
         image = tf.cast(image, tf.uint8)
         return image
@@ -117,39 +117,45 @@ class DataLoader(object):
     @tf.function()
     def train_preprocess(self, sample: dict) -> tuple:
         # read images
-        left_image = self._read_image(sample['source_left'])
+        left_images = tf.map_fn(self._read_image, sample['source_left'], fn_output_signature=tf.uint8)
+        right_images = tf.map_fn(self._read_image, sample['source_right'], fn_output_signature=tf.uint8)
+        # left_image = self._read_image(sample['source_left'])
         target_image = self._read_image(sample['target_image'])
-        right_image = self._read_image(sample['source_right'])
+        # right_image = self._read_image(sample['source_right'])
 
         # read intrinsic
         intrinsic = tf.cast(sample['intrinsic'], tf.float32)
 
         # augmentation
-        left_image, right_image, target_image, intrinsic = self.augmentation(left_image, right_image, target_image, intrinsic)
+        left_images, right_images, target_image, intrinsic = self.augmentation(left_images, right_images, target_image, intrinsic)
 
         # normalize images
-        left_image = self.normalize_image(left_image)
-        right_image = self.normalize_image(right_image)
+        left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
+        right_images = tf.map_fn(self.normalize_image, right_images, fn_output_signature=tf.float32)
+        
         target_image = self.normalize_image(target_image)
-        ref_images = (left_image, right_image)
+
+        ref_images = tf.concat([left_images, right_images], axis=0)
 
         return ref_images, target_image, intrinsic
     
     @tf.function()
     def valid_process(self, sample: dict) -> tuple:
         # read images
-        left_image = self._read_image(sample['source_left'])
+        left_images = tf.map_fn(self._read_image, sample['source_left'], fn_output_signature=tf.uint8)
+        right_images = tf.map_fn(self._read_image, sample['source_right'], fn_output_signature=tf.uint8)
         target_image = self._read_image(sample['target_image'])
-        right_image = self._read_image(sample['source_right'])
 
         # read intrinsic
         intrinsic = tf.cast(sample['intrinsic'], tf.float32)
 
         # normalize images
-        left_image = self.normalize_image(left_image)
-        right_image = self.normalize_image(right_image)
+        left_images = tf.map_fn(self.normalize_image, left_images, fn_output_signature=tf.float32)
+        right_images = tf.map_fn(self.normalize_image, right_images, fn_output_signature=tf.float32)
+        
         target_image = self.normalize_image(target_image)
-        ref_images = (left_image, right_image)
+
+        ref_images = tf.concat([left_images, right_images], axis=0)
 
         return ref_images, target_image, intrinsic
     
@@ -160,32 +166,32 @@ class DataLoader(object):
         target_image = tf.cast(target_image, tf.float32) / 255.0
 
         if tf.random.uniform([]) > 0.5:
-            left_image = self.augmentor.image_left_right_flip(left_image)
-            right_image = self.augmentor.image_left_right_flip(right_image)
+            left_image = tf.map_fn(self.augmentor.image_left_right_flip, left_image)
+            right_image = tf.map_fn(self.augmentor.image_left_right_flip, right_image)
             target_image = self.augmentor.image_left_right_flip(target_image)
 
         if tf.random.uniform([]) > 0.5:
             delta_brightness = tf.random.uniform([], -0.2, 0.2)
-            left_image = tf.image.adjust_brightness(left_image, delta_brightness)
-            right_image = tf.image.adjust_brightness(right_image, delta_brightness)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_brightness(x, delta_brightness), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_brightness(x, delta_brightness), right_image)
             target_image = tf.image.adjust_brightness(target_image, delta_brightness)
         
         if tf.random.uniform([]) > 0.5:
             contrast_factor = tf.random.uniform([], 0.8, 1.2)
-            left_image = tf.image.adjust_contrast(left_image, contrast_factor)
-            right_image = tf.image.adjust_contrast(right_image, contrast_factor)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_contrast(x, contrast_factor), right_image)
             target_image = tf.image.adjust_contrast(target_image, contrast_factor)
         
         if tf.random.uniform([]) > 0.5:
             saturation_factor = tf.random.uniform([], 0.8, 1.2)
-            left_image = tf.image.adjust_saturation(left_image, saturation_factor)
-            right_image = tf.image.adjust_saturation(right_image, saturation_factor)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_saturation(x, saturation_factor), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_saturation(x, saturation_factor), right_image)
             target_image = tf.image.adjust_saturation(target_image, saturation_factor)
         
         if tf.random.uniform([]) > 0.5:
             hue_factor = tf.random.uniform([], -0.1, 0.1)
-            left_image = tf.image.adjust_hue(left_image, hue_factor)
-            right_image = tf.image.adjust_hue(right_image, hue_factor)
+            left_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, hue_factor), left_image)
+            right_image = tf.map_fn(lambda x: tf.image.adjust_hue(x, hue_factor), right_image)
             target_image = tf.image.adjust_hue(target_image, hue_factor)
 
         left_image *= 255.
@@ -221,13 +227,29 @@ if __name__ == '__main__':
     for sample in data_loader.train_dataset.take(100):
         ref_images, target_image, intrinsic = sample
 
-        left_image, right_image = ref_images
-        left_image = data_loader.denormalize_image(left_image[0])
-        right_image = data_loader.denormalize_image(right_image[0])
-        target_image = data_loader.denormalize_image(target_image[0])   
+        """
+        ref_images: (batch_size, num_source * 2, img_h, img_w, 3)
+            left_images: ref_images[:, :num_source]
+            right_images: ref_images[:, num_source:]
 
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        axes[0].imshow(left_image)
-        axes[1].imshow(target_image)
-        axes[2].imshow(right_image)
+        target_image: (batch_size, img_h, img_w, 3)
+
+        imus: (batch_size, imu_seq_len, 12)
+           left_imus: imug[:, :num_source]
+           right_imus: imug[:, :, num_source:]
+
+        intrinsic: (batch_size, 3, 3)
+        """
+
+        left_images = data_loader.denormalize_image(ref_images[:, :data_loader.num_source])
+        right_images = data_loader.denormalize_image(ref_images[:, data_loader.num_source:])
+        print(left_images.shape, right_images.shape)
+
+        # show all images
+        fig, axes = plt.subplots(1, 5, figsize=(20, 4))
+        axes[0].imshow(left_images[0, 0])
+        axes[1].imshow(left_images[0, 1])
+        axes[2].imshow(right_images[0, 0])
+        axes[3].imshow(right_images[0, 1])
+        axes[4].imshow(data_loader.denormalize_image(target_image[0]))
         plt.show()

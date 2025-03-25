@@ -1,11 +1,18 @@
 import tensorflow as tf, tf_keras
 try:
-    from .model_utils import *
     from .flownet import CustomFlow
 except:
-    from model_utils import *
     from flownet import CustomFlow
-    
+
+
+def std_conv(filter_size, out_channel, stride, pad='same', name='conv'):
+    conv_layer = tf_keras.layers.Conv2D(out_channel,
+                                        (filter_size, filter_size),
+                                         strides=(stride, stride), 
+                                         padding=pad,
+                                         name=name+'_'+'conv')
+    return conv_layer
+
 class PoseNet(tf_keras.Model):
     """
     - 입력: (B, H, W, 6)  (ex: 소스+타겟 concat)
@@ -42,20 +49,11 @@ class PoseNet(tf_keras.Model):
             activation=None, name='pose_conv3'
         )
 
-        # 3) ReduceMeanLayer, Reshape
-        # self.reduce_mean_layer = ReduceMeanLayer(prefix='pose_reduce_mean')
         self.reshape_layer = tf_keras.layers.Reshape((6,), name='pose_reshape')
 
     def call(self, inputs, training=False):
-        """
-        inputs: [B, H, W, 6]
-        return: [B, 1, 6]
-        """
-        # 1) ResNet 인코더
         x = self.encoder(inputs, training=training) 
-        # x: 최종 conv5_x 특징맵, shape [B, H/32, W/32, 512]
 
-        # 2) pose_conv0 -> pose_conv1 -> pose_conv2 -> pose_conv3
         x = self.pose_conv0(x)
         x = self.pose_act0(x)
 
@@ -65,12 +63,10 @@ class PoseNet(tf_keras.Model):
         x = self.pose_conv2(x)
         x = self.pose_act2(x)
             
-        x = self.pose_conv3(x)  # [B, H/32, W/32, 6]
+        x = self.pose_conv3(x)
 
-        # 3) reduce_mean -> reshape -> scale
-        # x = self.reduce_mean_layer(x)  # [B, 1, 1, 6] => keepdims=True
         x = tf.reduce_mean(x, axis=[1, 2], keepdims=True)
-        x = self.reshape_layer(x)      # [B, 6]
+        x = self.reshape_layer(x)# [B, 6]
         x = x * 0.01 # scale
         return x
     

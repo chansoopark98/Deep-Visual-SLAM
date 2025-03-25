@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test
+  exp_name: test_newVersion
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -8,7 +8,7 @@ Directory:
 Dataset:
   custom_data: False
   mars_logger: True
-  redwood: True
+  redwood: False
 
 Train:
   mode: axisAngle # axisAngle, euler
@@ -17,7 +17,7 @@ Train:
   valid_plot_interval: 20
   save_freq: 2
   vis_batch_size: 1
-  num_source: 2
+  num_source: 1 # num_source = 1 >> image pair (t-1, t, t+1) / 2 >> image pair (t-2, t-1, t, t+1, t+2) default: 1
   num_scale: 4
   imu_seq_len: 10
   min_depth: 0.1
@@ -27,9 +27,9 @@ Train:
   auto_mask: True
   img_w: 320 #640
   img_h: 240 #480
-  weight_decay: 0.001
+  weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 8 # 1
+  batch_size: 16 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001

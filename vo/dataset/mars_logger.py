@@ -13,7 +13,7 @@ class MarsLoggerHandler(object):
         self.config = config
         self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'mars_logger')
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
-        self.num_source = self.config['Train']['num_source'] # 2
+        self.num_source = self.config['Train']['num_source'] # 1
         self.imu_seq_len = self.config['Train']['imu_seq_len'] # 10
         self.original_image_size = (3000, 4000)
         self.save_image_size = (3000 // 4, 4000 // 4)
@@ -22,7 +22,7 @@ class MarsLoggerHandler(object):
         self.test_dir = os.path.join(self.root_dir, 'test')
         self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
         self.valid_data = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
-        self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False)
+        self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=True)
 
     def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray, camera_data: pd.DataFrame) -> int:
         video_file = os.path.join(scene_dir, 'movie.mp4')
@@ -71,7 +71,7 @@ class MarsLoggerHandler(object):
         intrinsic_rescaled = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
         return intrinsic_rescaled
 
-    def _process(self, scene_dir: str):
+    def _process(self, scene_dir: str, is_test: bool=False) -> list:
         # load camera metadata
         camera_file = os.path.join(scene_dir, 'movie_metadata.csv')
         camera_data = pd.read_csv(camera_file)
@@ -88,29 +88,27 @@ class MarsLoggerHandler(object):
     
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
+        if is_test:
+            step = 1
+        else:
+            step = 2
+
         samples = []
-        for t in range(self.num_source, length - self.num_source, 2):
-            left_images = []
-            right_images = []
-
-            for step in range(1, self.num_source + 1):
-                left_images.append(rgb_files[t - step])
-                right_images.append(rgb_files[t + step])
-
+        for t in range(self.num_source, length - self.num_source, step):
             sample = {
-                'source_left': left_images, # List [str, str]]
+                'source_left': rgb_files[t-1], # str
                 'target_image': rgb_files[t], # str
-                'source_right': right_images, # List [str, str]]
+                'source_right': rgb_files[t+1], # str
                 'intrinsic': intrinsic # np.ndarray (3, 3)
             }
             samples.append(sample)
         return samples
             
-    def generate_datasets(self, fold_dir, shuffle=False):
+    def generate_datasets(self, fold_dir, shuffle=False, is_test=False):
         scene_files = sorted(glob.glob(os.path.join(fold_dir, '*')))
         datasets = []
         for scene in scene_files:
-            dataset = self._process(scene)
+            dataset = self._process(scene, is_test)
             datasets.append(dataset)
         datasets = np.concatenate(datasets, axis=0)
 
@@ -119,26 +117,13 @@ class MarsLoggerHandler(object):
         return datasets
 
 if __name__ == '__main__':
-    root_dir = './vio/data/'
-    config = {
-        'Directory': {
-            'data_dir': root_dir
-        },
-        'Dataset':{
-            'tspxr_capture': False,
-            'mars_logger': True,
-        },
-        'Train': {
-            'batch_size': 1,
-            'use_shuffle': True,
-            'num_source': 2,
-            'imu_seq_len': 10,
-            'img_h': 720,
-            'img_w': 1280
-        }
-    }
+    import yaml
+    
+    # load config
+    with open('./vo/config.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+
     dataset = MarsLoggerHandler(config)
     data_len = dataset.train_data.shape[0]
     for idx in range(data_len):
         print(dataset.train_data[idx])
-    

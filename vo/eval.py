@@ -67,23 +67,14 @@ class EvalTrajectory(Learner):
             if self.pose_mode == 'axisAngle':
                 self.is_euler = False
             else:
-                self.is_euler = True
+                raise NotImplementedError('Euler angle mode is not supported yet')
         else:
             raise ValueError('Invalid pose mode')
 
     def update_state(self, ref_images, tgt_image, intrinsic: tf.Tensor):
-        """
-        images: List of RGB images
-        imus: List of IMU data
-        intrinsic: Intrinsic matrix
-        """
-        left_images = ref_images[:, :self.num_source] # [B, num_source, H, W, 3]
-        right_images = ref_images[:, self.num_source:] # [B, num_source, H, W, 3]
-
-        left_image = left_images[:, 0] # [B, H, W, 3]
-        right_image = right_images[:, 0] # [B, H, W, 3]
+        right_image = ref_images[1]
         
-        disp_raw = self.depth_net([tgt_image, intrinsic], training=False)
+        disp_raw = self.depth_net(tgt_image, training=False)
 
         batch_disps = []
         for s in range(self.num_scales):
@@ -92,33 +83,27 @@ class EvalTrajectory(Learner):
             scaled_disp = tf.image.resize(disp_raw[s], [scale_h, scale_w], method=tf.image.ResizeMethod.BILINEAR)
             batch_disps.append(scaled_disp)
 
-        cat_left = tf.concat([left_image, tgt_image], axis=3)   # [B,H,W,6]
         cat_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
 
-        pose_left = self.pose_net(cat_left, training=False)    # [B,6]
+        
         pose_right = self.pose_net(cat_right, training=False)  # [B,6]
 
-        batch_poses = tf.stack([pose_left, pose_right], axis=1)    # [B,2,6]
-        batch_poses = tf.cast(batch_poses, tf.float32) 
+        batch_poses = tf.cast(pose_right, tf.float32) 
 
         # list comprehension으로 변환
         batch_disps = [tf.cast(disp, tf.float32) for disp in batch_disps]
-        batch_poses = tf.cast(batch_poses, tf.float32)
         intrinsic = tf.cast(intrinsic, tf.float32)
         
-        # 첫 번째 스케일(혹은 필요에 맞는 scale)로부터 깊이를 구한다고 가정
         batch_depths = self.disp_to_depth(
             disp=batch_disps[0],
             min_depth=self.min_depth,
             max_depth=self.max_depth
         )
 
-        batch_poses = batch_poses[:, 0, :]  # split left
-
         if self.is_euler:
             batch_poses = pose_vec2mat(batch_poses)
         else:
-            batch_poses = pose_axis_angle_vec2mat(batch_poses)  # shape: (b, 4, 4)
+            batch_poses = pose_axis_angle_vec2mat(batch_poses, invert=False)  # shape: (b, 4, 4)
 
         batch_size = batch_depths.shape[0]
 

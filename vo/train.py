@@ -47,7 +47,7 @@ class Trainer(object):
         self.depth_net.build(dispnet_input_shape)
         _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
-        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_45_model.weights.h5')
+        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_50_model.weights.h5')
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
@@ -62,10 +62,11 @@ class Trainer(object):
                                                                               self.config['Train']['final_lr'],
                                                                               power=0.9)
         
-        self.optimizer = keras.optimizers.AdamW(learning_rate=self.config['Train']['init_lr'],
-                                                  beta_1=self.config['Train']['beta1'],
-                                                  weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else None,
-                                                  ) # 
+        self.optimizer = keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
+                                               beta_1=self.config['Train']['beta1'],
+                                               weight_decay=self.config['Train']['weight_decay'] if self.config[
+                                                   'Train']['weight_decay'] > 0 else None,
+                                               )
         self.optimizer = keras.mixed_precision.LossScaleOptimizer(self.optimizer)
 
         # 4. Train Method
@@ -175,7 +176,6 @@ class Trainer(object):
                 self.valid_total_loss(valid_t_loss)
                 self.valid_pixel_loss(valid_p_loss)
                 self.valid_smooth_loss(valid_s_loss)
-                self.eval_tool.update_state(ref_images, target_image, intrinsic)
 
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     current_step = self.data_loader.num_valid_samples * epoch + idx
@@ -205,11 +205,18 @@ class Trainer(object):
                                     self.valid_smooth_loss.result(), step=epoch)
 
             # Eval
+            print('Evaluate trajectory ... Current Epoch : {0}'.format(epoch))
+            test_tqdm = tqdm(self.data_loader.test_dataset, total=self.data_loader.num_test_samples)
+            test_tqdm.set_description('Validation || ')
+            for idx, (ref_images, target_image, intrinsic) in enumerate(test_tqdm):
+                self.eval_tool.update_state(ref_images, target_image, intrinsic)
+
             eval_plot = self.eval_tool.eval_plot()
             with self.test_summary_writer.as_default():
                 # Logging eval images
                 tf.summary.image('Eval/Trajectory', eval_plot, step=epoch)
             
+            # Save weights
             if epoch % self.config['Train']['save_freq'] == 0:
                 self.depth_net.save_weights(self.save_path + '/depth_net_epoch_{0}_model.weights.h5'.format(epoch))
                 self.pose_net.save_weights(self.save_path + '/pose_net_epoch_{0}_model.weights.h5'.format(epoch))
