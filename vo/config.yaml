@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test_newVersion
+  exp_name: test_newVersion_480x640
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -25,8 +25,8 @@ Train:
   ssim_ratio: 0.85
   smoothness_ratio: 0.001
   auto_mask: True
-  img_w: 320 #640
-  img_h: 240 #480
+  img_w: 640 #640
+  img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
   batch_size: 16 # 1

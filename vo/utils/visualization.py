@@ -224,26 +224,30 @@ class Visualizer:
             self.plotter.render()
 
     def set_camera_poisition(self, world_pose):
-        # 카메라 중심 및 축 계산
-        cam_center = world_pose[:3, 3]  # 카메라 중심
-        cam_forward = world_pose[:3, 2]  # Z축 방향 (전방)
-        cam_up = world_pose[:3, 1]       # Y축 방향 (위쪽)
-
-        # 렌더링용 카메라 위치 설정
-        offset_distance_z = 5.0  # Z축으로 뒤쪽으로 이동
-        offset_distance_y = -1.5  # Y축으로 위쪽으로 이동
+        # 카메라 중심 위치
+        cam_center = world_pose[:3, 3]
+        
+        # 카메라 방향 벡터 (Monodepth2 좌표계에서)
+        cam_forward = world_pose[:3, 2]  # 카메라가 바라보는 방향 (Z축)
+        cam_up = -world_pose[:3, 1]      # 카메라의 위쪽 방향 (Y축 반전)
+        
+        # 가상 카메라를 실제 카메라 뒤쪽에 위치시킴
+        offset_distance_z = 5.0  # 카메라 뒤쪽으로의 거리
+        offset_distance_y = 2.0  # 카메라 위쪽으로의 거리
+        
+        # 카메라 궤적을 따라가는 가상 카메라 위치 계산
+        # cam_forward 방향의 반대로 이동 (뒤쪽)
         render_camera_position = cam_center - cam_forward * offset_distance_z + cam_up * offset_distance_y
-
-        # `cam_up` 벡터 검증 및 보정
-        # `cam_forward`와 항상 직교하도록 `cam_up` 재계산
-        cam_right = np.cross(cam_up, cam_forward)  # X축 방향 (우측)
-        cam_up_corrected = np.cross(cam_forward, cam_right)  # 직교 Y축 방향 (위쪽)
+        
+        # 직교성 유지를 위한 벡터 계산
+        cam_right = np.cross(cam_up, -cam_forward)  # 우측 방향
+        cam_up_corrected = np.cross(-cam_forward, cam_right)  # 수정된 위쪽 방향
         cam_up_corrected /= np.linalg.norm(cam_up_corrected)  # 정규화
-
-        # 렌더링용 카메라 설정
-        self.plotter.camera.position = render_camera_position  # 렌더링 카메라 위치
-        self.plotter.camera.focal_point = cam_center  # 렌더링 카메라가 VIO 카메라를 바라봄
-        self.plotter.camera.up = -cam_up_corrected  # 수정된 카메라 위쪽 방향
+        
+        # 렌더링 카메라 설정
+        self.plotter.camera.position = render_camera_position
+        self.plotter.camera.focal_point = cam_center  # 실제 카메라 위치를 바라봄
+        self.plotter.camera.up = cam_up_corrected
 
     def render(self) -> None:
         self.plotter.render()
