@@ -6,7 +6,7 @@ import keras
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
-from model.pose_net import PoseNet
+from model.pose_net import PoseNet, PoseNetExtra
 from model.depth_net import DispNet
 # from monodepth_learner import Learner
 from monodepth_learner_new import Learner
@@ -47,9 +47,9 @@ class Trainer(object):
         self.depth_net.build(dispnet_input_shape)
         _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
-        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_50_model.weights.h5')
+        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
 
-        self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        self.pose_net = PoseNetExtra(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
         self.pose_net.build(posenet_input_shape)
         

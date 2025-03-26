@@ -71,7 +71,7 @@ if __name__ == '__main__':
     import sys
     import os
     sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-    from model.pose_net import PoseNet
+    from model.pose_net import PoseNet, PoseNetExtra
     import yaml
 
     # Load config
@@ -79,7 +79,9 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
     batch_size = 1
     image_shape = (config['Train']['img_h'], config['Train']['img_w'])
-    pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
+    # pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
+    pose_net = PoseNetExtra(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
+    
     posenet_input_shape = (batch_size, *image_shape, 6)
     pose_net.build(posenet_input_shape)
 

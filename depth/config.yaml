@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Resnet18_nyu_diode_
+  exp_name: Resnet18_nyu_diode_0-1
   data_dir: ./depth/data/ # Directory containing the dataset
   log_dir: ./tensorboard  # TensorBoard log directory
   weights: ./weights      # Checkpoint weights directory
@@ -38,7 +38,7 @@ Train:
   beta1: 0.9  # Beta1 for Adam optimizer
   weight_decay: 0.00001  # Weight decay for optimizer
   batch_size: 32  # Training batch size
-  epoch: 51  # Total number of epochs
+  epoch: 31  # Total number of epochs
   init_lr: 0.0001  # Initial learning rate 
   final_lr: 0.00001 # Final learning rate after warmup
   power: 0.9  # Learning rate scheduler power factor

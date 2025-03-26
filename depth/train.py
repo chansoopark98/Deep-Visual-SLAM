@@ -61,6 +61,7 @@ class Trainer(object):
 
         # if self.config['Train']['mode'] == 'metric':
         #     self.model.load_weights('./assets/weights/depth/metric_epoch_45_model.weights.h5', skip_mismatch=True) # Pretrained relative depth weights
+        self.model.load_weights('./assets/weights/depth/metric_epoch_50_model.weights.h5')
         self.model.summary()
 
         # 2. Dataset

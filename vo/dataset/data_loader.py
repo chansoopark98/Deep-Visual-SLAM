@@ -73,10 +73,13 @@ class DataLoader(object):
         if self.config['Dataset']['redwood']:
             dataset = RedwoodHandler(config=self.config)
             train_dataset = self._build_generator(np_samples=dataset.train_data)
+            valid_dataset = self._build_generator(np_samples=dataset.valid_data)
 
             train_datasets.append(train_dataset)
+            valid_datasets.append(valid_dataset)
     
             self.num_train_samples += dataset.train_data.shape[0]
+            self.num_valid_samples += dataset.valid_data.shape[0]
             
         return train_datasets, valid_datasets, test_datasets
 
@@ -87,7 +90,7 @@ class DataLoader(object):
                 'source_left': tf.TensorSpec(shape=(), dtype=tf.string),  # 리스트로 가변 길이
                 'target_image': tf.TensorSpec(shape=(), dtype=tf.string),  # 단일 스트링
                 'source_right': tf.TensorSpec(shape=(), dtype=tf.string),  # 리스트로 가변 길이
-                'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32)  # 고정 크기 (3, 3)
+                'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32),  # 고정 크기 (3, 3)
             }
         )
         return dataset

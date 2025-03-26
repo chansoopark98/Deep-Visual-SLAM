@@ -1,29 +1,55 @@
 import os
 import glob
-import pandas as pd
 import numpy as np
-import cv2
-try:
-    from .utils import resample_imu
-except:
-    from utils import resample_imu
+import numpy.linalg
+
+class CameraPose:
+    def __init__(self, meta, mat):
+        self.metadata = meta
+        self.pose = mat
+    def __str__(self):
+        return 'Metadata : ' + ' '.join(map(str, self.metadata)) + '\n' + \
+            "Pose : " + "\n" + np.array_str(self.pose)
+
+def read_trajectory(filename):
+    traj = []
+    with open(filename, 'r') as f:
+        metastr = f.readline()
+        while metastr:
+            metadata = map(int, metastr.split())
+            mat = np.zeros(shape = (4, 4))
+            for i in range(4):
+                matstr = f.readline()
+                mat[i, :] = np.fromstring(matstr, dtype = float, sep=' \t')
+            traj.append(CameraPose(metadata, mat))
+            metastr = f.readline()
+    return traj
+
+def write_trajectory(traj, filename):
+    with open(filename, 'w') as f:
+        for x in traj:
+            p = x.pose.tolist()
+            f.write(' '.join(map(str, x.metadata)) + '\n')
+            f.write('\n'.join(' '.join(map('{0:.12f}'.format, p[i])) for i in range(4)))
+            f.write('\n')
 
 class RedwoodHandler(object):
     def __init__(self, config):
         self.config = config
         self.root_dir = '/media/park-ubuntu/park_cs/redwood'
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
-        self.num_source = self.config['Train']['num_source'] # 2
+        self.num_source = self.config['Train']['num_source'] # 1
         self.imu_seq_len = self.config['Train']['imu_seq_len'] # 10
         self.original_image_size = (480, 640)
         self.train_dir = os.path.join(self.root_dir, 'train')
-        # self.valid_dir = os.path.join(self.root_dir, 'valid')
-        # self.test_dir = os.path.join(self.root_dir, 'test')
-        self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
-        # self.valid_data = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
-        # self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False)
+        self.test_dir = os.path.join(self.root_dir, 'test')
+        self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True, is_test=False)
 
-    def _process(self, scene_dir: str):
+         # share valid data with test data
+        self.valid_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=False)
+        # self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=True)
+
+    def _process(self, scene_dir: str, is_test: bool=False):
         # load camera metadata
         fx = 525.0
         fy = 525.0
@@ -33,30 +59,42 @@ class RedwoodHandler(object):
 
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'image', '*.jpg')))
         length = len(rgb_files)
+
+         # parsing scene_dir name
+        scene_name = scene_dir.split('/')[-1]
+        # camera_poses = read_trajectory(os.path.join(scene_dir, f'{scene_name}.log'))
+
+        if is_test:
+            step = 1
+        else:
+            step = 2
         
         samples = []
-        for t in range(self.num_source, length - self.num_source, 4):
-            left_images = []
-            right_images = []
 
-            for step in range(1, self.num_source + 1):
-                left_images.append(rgb_files[t - step])
-                right_images.append(rgb_files[t + step])
-
+        for t in range(self.num_source, length - self.num_source, step):
             sample = {
-                'source_left': left_images, # List [str, str]]
+                'source_left': rgb_files[t-1], # str
                 'target_image': rgb_files[t], # str
-                'source_right': right_images, # List [str, str]]
+                'source_right': rgb_files[t+1], # str
                 'intrinsic': intrinsic # np.ndarray (3, 3)
             }
+
+            # if is_test:
+            #     # target -> source_right relative pose
+            #     target_pose = camera_poses[t].pose
+            #     source_right_pose = camera_poses[t+1].pose
+            #     relative_pose = np.dot(np.linalg.inv(target_pose), source_right_pose)
+            #     sample['relative_pose'] = relative_pose
+
             samples.append(sample)
+    
         return samples
             
-    def generate_datasets(self, fold_dir, shuffle=False):
+    def generate_datasets(self, fold_dir, shuffle=False, is_test=False):
         scene_files = sorted(glob.glob(os.path.join(fold_dir, '*')))
         datasets = []
         for scene in scene_files:
-            dataset = self._process(scene)
+            dataset = self._process(scene, is_test)
             datasets.append(dataset)
         datasets = np.concatenate(datasets, axis=0)
 
@@ -65,26 +103,14 @@ class RedwoodHandler(object):
         return datasets
 
 if __name__ == '__main__':
-    root_dir = './vo/data/'
-    config = {
-        'Directory': {
-            'data_dir': root_dir
-        },
-        'Dataset':{
-            'tspxr_capture': False,
-            'mars_logger': True,
-        },
-        'Train': {
-            'batch_size': 1,
-            'use_shuffle': True,
-            'num_source': 2,
-            'imu_seq_len': 10,
-            'img_h': 720,
-            'img_w': 1280
-        }
-    }
+    import yaml
+
+    # load config
+    with open('./vo/config.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+
     dataset = RedwoodHandler(config)
     data_len = dataset.train_data.shape[0]
     for idx in range(data_len):
-        print(dataset.train_data[idx])
-    
+        sample = dataset.train_data[idx]
+        print(sample)
