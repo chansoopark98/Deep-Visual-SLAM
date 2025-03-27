@@ -121,7 +121,7 @@ class Map:
 		# set up frames as vertices
 		for idx, f in enumerate(self.keyframes):
 			# add frame to the optimization graph as an SE(3) pose
-			transform = f.image.squeeze() #(f.a * f.image + f.b).squeeze()
+			transform = (f.a * f.image + f.b).squeeze()
 			v_se3 = g2o.VertexD3VOFramePose(transform)
 			v_se3.set_estimate(g2o.SE3Quat(f.pose[0:3, 0:3], f.pose[0:3, 3]))
 			v_se3.set_id(f.id * 2)			# even IDs only (avoid ID conflict with points)
@@ -145,33 +145,8 @@ class Map:
 			# initialize point estimate with the depth estimate of its host frame
 			host_frame, host_uv_coord = kpts[p][0][0], kpts[p][0][0].optimizer_kps[kpts[p][0][1]]
 			pt = g2o.VertexD3VOPointDepth(host_uv_coord[0], host_uv_coord[1])
-			pt.set_id(p.id * 2 + 1)  # odd IDs, no collisions with frame ID
-
-			# Safe access to depth with bounds checking
-			try:
-				# First check if depth is a tensor or numpy array and get its shape
-				if hasattr(host_frame.depth, 'shape'):
-					depth_h, depth_w = host_frame.depth.shape[:2]
-				else:
-					# If it's a tensor with different access method
-					depth_h, depth_w = host_frame.depth.size()[:2]
-				
-				# Check bounds
-				u, v = int(host_uv_coord[0]), int(host_uv_coord[1])
-				if 0 <= u < depth_h and 0 <= v < depth_w:
-					depth_value = float(host_frame.depth[u, v])
-				else:
-					# Use closest valid point if out of bounds
-					u = max(0, min(u, depth_h-1))
-					v = max(0, min(v, depth_w-1))
-					depth_value = float(host_frame.depth[u, v])
-					print(f"Warning: Adjusted out-of-bounds coordinates ({host_uv_coord[0]}, {host_uv_coord[1]}) to ({u}, {v})")
-			except Exception as e:
-				# Fallback to default depth
-				print(f"Error accessing depth: {e}")
-				depth_value = 5.0  # Default middle-distance depth value
-
-			pt.set_estimate(depth_value)
+			pt.set_id(p.id * 2 + 1)		# odd IDs, no collisions with frame ID
+			pt.set_estimate(host_frame.depth[host_uv_coord[0]][host_uv_coord[1]])			
 			pt.set_fixed(False)
 			opt_pts[p] = pt
 			opt.add_vertex(pt)
@@ -185,23 +160,7 @@ class Map:
 				edge.set_vertex(2, opt_frames[f[0]])						# connect to frame where point was observed
 				
 				# Incorporate uncertainty into optimization (D3VO Eq.13)
-				try:
-					if hasattr(host_frame.uncertainty, 'shape'):
-						unc_h, unc_w = host_frame.uncertainty.shape[:2]
-					else:
-						unc_h, unc_w = host_frame.uncertainty.size()[:2]
-						
-					# Check bounds and use clipped coordinates
-					u, v = int(host_uv_coord[0]), int(host_uv_coord[1])
-					u_safe = max(0, min(u, unc_h-1))
-					v_safe = max(0, min(v, unc_w-1))
-					
-					uncertainty_value = np.sqrt(float(host_frame.uncertainty[u_safe, v_safe]))
-					weight_mx = np.eye(3) * (self.alpha**2) / (self.alpha**2 + uncertainty_value**2)
-				except Exception as e:
-					print(f"Error accessing uncertainty map: {e}. Using default weight.")
-					weight_mx = np.eye(3) * 0.8  # Default weight if uncertainty access fails
-					
+				weight_mx = np.eye(3) * (self.alpha**2) / (self.alpha**2 + np.sqrt(host_frame.uncertainty[host_uv_coord[0]][host_uv_coord[1]])**2)
 				edge.set_information(weight_mx)					
 				edge.set_robust_kernel(g2o.RobustKernelHuber())
 				edge.set_parameter_id(0, 0)

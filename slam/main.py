@@ -6,6 +6,7 @@ from MonoVO import MonoVO
 DEBUG = True
 PER_FRAME_ERROR = True
 
+from vo.utils.visualization import Visualizer
 
 def offline_vo(cap, save_path):
 	"""Run D3VO on offline video"""
@@ -24,6 +25,22 @@ def offline_vo(cap, save_path):
 			print("\n*** frame %d/%d ***" % (i, CNT))
 			monoVO.process_frame(frame)
 
+			# if i >= 1:
+				# prev_rel_pose = monoVO.mp.frames[-2].pose
+				# current_rel_pose = np.linalg.inv(monoVO.mp.frames[-1].pose)
+				# current_global_pose = np.dot(prev_rel_pose, current_rel_pose)
+				# print("Current global pose: ", current_global_pose)
+
+				# poses = monoVO.mp.relative_to_global()
+
+				# visualizer.world_pose = poses[-1]
+
+				# visualizer.draw_trajectory(visualizer.world_pose, color="red", line_width=2)
+
+				# visualizer.draw_camera_model(visualizer.world_pose, scale=0.5, name_prefix="camera")			
+				
+				# visualizer.render()
+				
 		else:
 			break
 		i += 1
@@ -31,7 +48,7 @@ def offline_vo(cap, save_path):
 		if DEBUG:
 			cv2.imshow('d3vo', frame)
 			if cv2.waitKey(1) == 27:     # Stop if ESC is pressed
-				break
+				break	
 	
 
 	# Store pose predictions to a file (do not save identity pose of first frame)
@@ -47,6 +64,8 @@ if __name__ == "__main__":
 	H = 480
 	CNT = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+	visualizer = Visualizer(draw_plane=True, is_record=True, video_fps=24, video_name="visualization.mp4")
 
 	# run offline visual odometry on provided video
-	offline_vo(cap, './')
+	offline_vo(cap, './output_pose.npy')
+	visualizer.close()

@@ -3,6 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import numpy as np
 import tensorflow as tf
+import cv2
 
 def getTransMatrix(trans_vec):
     """
@@ -132,7 +133,9 @@ class Networks:
         self.pose_net = tf.saved_model.load('./weights/vo/export/pose_net')
 
     def depth(self, image):
-        tensor = tf.cast(image, tf.float32)
+        # bgr to rgb
+        tensor = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2RGB)
+        tensor = tf.cast(tensor, tf.float32)
         tensor = tf.expand_dims(tensor, 0)
         tensor /= 255.0
         disp = self.depth_net(tensor, training=False)[0]
@@ -142,9 +145,11 @@ class Networks:
         return depth.numpy()
     
     def pose(self, img1, img2, depth, translation_scale=5.6):
-        print(depth.shape)
-
-        pair_image = tf.concat([img1, img2], axis=-1)
+        # bgr to rgb
+        left = cv2.cvtColor(img1.copy(), cv2.COLOR_BGR2RGB)
+        right = cv2.cvtColor(img2.copy(), cv2.COLOR_BGR2RGB)
+        
+        pair_image = tf.concat([left, right], axis=-1)
         pair_image = tf.cast(pair_image, tf.float32)
         pair_image /= 255.0
         pair_image = tf.expand_dims(pair_image, 0)

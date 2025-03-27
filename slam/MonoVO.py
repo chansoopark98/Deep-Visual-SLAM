@@ -14,12 +14,7 @@ class MonoVO:
 		# Run DepthNet to get depth map
 		depth = self.nn.depth(frame)
 		
-		# Create a synthetic uncertainty map (can be improved later)
-		#  Create a proper 2D uncertainty map with same shape as depth
-		if len(depth.shape) == 3:  # If depth has channels
-			uncertainty = np.ones((depth.shape[0], depth.shape[1])) * 0.1
-		else:
-			uncertainty = np.ones_like(depth) * 0.1
+		uncertainty = depth * 0.05  # 5%의 상대 불확실성
 		
 		if len(self.mp.frames) == 0:
 			# Set first frame pose to identity 
