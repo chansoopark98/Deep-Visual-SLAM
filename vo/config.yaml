@@ -8,7 +8,7 @@ Directory:
 Dataset:
   custom_data: False
   mars_logger: True
-  redwood: False
+  redwood: True
 
 Train:
   mode: axisAngle # axisAngle, euler
