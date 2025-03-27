@@ -34,8 +34,10 @@ assets/
 /flow/weights/
 /flow/tensorboard/
 
-# vio ignore files and directories
+# vo ignore files and directories
 /vo/data/
+/vo/export/
+/weights/
 /vo/weights/
 /vo/tensorboard/
 

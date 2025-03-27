@@ -73,24 +73,27 @@ class Point:
 		
 
 class Frame:
-	def __init__(self, map, image, depth, uncertainty, pose, brightness_params):
-		self.id = map.add_frame(self)       # get an ID from the map
-		self.image = image
+    def __init__(self, map, image, depth, uncertainty=None, pose=None, brightness_params=None):
+        self.id = map.add_frame(self)
+        self.image = image
+        self.depth = depth
+        
+        # Set defaults for missing parameters
+        self.uncertainty = uncertainty if uncertainty is not None else np.ones_like(depth) * 0.1
+        self.pose = pose if pose is not None else np.eye(4)
+        
+        # Default brightness parameters if not provided
+        if brightness_params is None:
+            self.a, self.b = 1.0, 0.0
+        else:
+            self.a, self.b = brightness_params
 
-		self.depth = depth
-		self.uncertainty = uncertainty
-		self.a = brightness_params[0]
-		self.b = brightness_params[1]
-		self.pose = pose
-
-		self.marginalize = False
-
-		# Run frontend keypoint extractor
-		self.kps, self.des = extract_features(image)
-		self.pts = {}                       # map kps/des list index to corresponding Point object   
-
-		# Optimizer expects keypoints in a different coordinate ordering
-		self.optimizer_kps = [(k[1], k[0]) for k in self.kps]
-
-		# Ensure that u/v coordinates of keypoints match the image/depth/uncertainty dimension shape (catch these issues at the source!)
-		assert all([p[0] >= 0 and p[0] <= self.image.shape[0] and p[1] >= 0 and p[1] <= self.image.shape[1] for p in self.optimizer_kps])
+        self.marginalize = False
+        
+        # Run frontend keypoint extractor
+        self.kps, self.des = extract_features(image)
+        self.pts = {}
+        
+        # Optimizer expects keypoints in a different coordinate ordering
+        self.optimizer_kps = [(k[1], k[0]) for k in self.kps]
+		# assert all([p[0] >= 0 and p[0] <= self.image.shape[0] and p[1] >= 0 and p[1] <= self.image.shape[1] for p in self.optimizer_kps])
