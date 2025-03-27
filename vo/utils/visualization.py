@@ -155,29 +155,40 @@ class Visualizer:
     def draw_pointcloud(self, rgb, depth_map, intrinsic, world_pose) -> pv.PolyData:
         fx, fy, cx, cy = intrinsic[0, 0], intrinsic[1, 1], intrinsic[0, 2], intrinsic[1, 2]
 
-        us, vs = np.meshgrid(range(rgb.shape[1]), range(rgb.shape[0]))  # (W, H)
+        us, vs = np.meshgrid(range(rgb.shape[1]), range(rgb.shape[0]))
         us = us.reshape(-1)
         vs = vs.reshape(-1)
-
+        
         # Z 값 (depth 값)
-        zs = depth_map.flatten()  # Z = depth
-
+        zs = depth_map.flatten()
+        
         # 3D 포인트 계산
         xs = (us - cx) / fx * zs
         ys = (vs - cy) / fy * zs
-        points_cam = np.stack([xs, ys, zs, np.ones_like(zs)], axis=1)  # shape (N,4)
-
-            # RGB 색상 추출
-        rgb_image = (rgb).astype(np.uint8)  # [H, W, 3], uint8 형태로 변환
-        rgb_flattened = rgb_image.reshape(-1, 3)  # [N, 3], N = H*W
-
-        # PyVista 포인트 클라우드로 변환
-        points_world = (world_pose @ points_cam.T).T[:, :3]  # shape (N, 3)
-
-        points_world = (world_pose @ points_cam.T).T[:, :3]  # shape (N, 3)
-        point_cloud = pv.PolyData(points_world)  # 포인트 클라우드 생성
-        point_cloud["rgb"] = rgb_flattened  # RGB 색상 추가
-
+        
+        # SLAM에서 PyVista 좌표계로 변환 행렬 (예: Y축 반전)
+        slam_to_pyvista = np.array([
+            [1, 0, 0, 0],
+            [0, -1, 0, 0],  # Y축 반전 (아래쪽→위쪽)
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+        
+        # 카메라 좌표계 포인트
+        points_cam = np.stack([xs, ys, zs, np.ones_like(zs)], axis=1)  # (N,4)
+        
+        # RGB 색상 추출
+        rgb_image = (rgb).astype(np.uint8)
+        rgb_flattened = rgb_image.reshape(-1, 3)
+        
+        # 세계 좌표계로 변환 후 PyVista 좌표계로 변환
+        points_world = (world_pose @ points_cam.T).T  # SLAM 세계 좌표계
+        points_pyvista = (slam_to_pyvista @ points_world.T).T[:, :3]  # PyVista 좌표계
+        
+        # 포인트 클라우드 생성
+        point_cloud = pv.PolyData(points_pyvista)
+        point_cloud["rgb"] = rgb_flattened
+        
         self.camera_cloud.mapper.SetInputData(point_cloud)
 
     def draw_trajectory(self, world_pose: np.ndarray, color: str = "red", line_width: int = 2) -> None:
