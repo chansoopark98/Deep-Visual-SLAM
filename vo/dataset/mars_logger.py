@@ -86,14 +86,13 @@ class MarsLoggerHandler(object):
 
         samples = []
         for t in range(self.num_source, length - self.num_source, step):
-            for i in range(self.num_source):
-                sample = {
-                    'source_left': rgb_files[t - i], # str
-                    'target_image': rgb_files[t], # str
-                    'source_right': rgb_files[t + i], # str
-                    'intrinsic': resized_intrinsic # np.ndarray (3, 3)
-                }
-                samples.append(sample)
+            sample = {
+                'source_left': rgb_files[t - 1], # str
+                'target_image': rgb_files[t], # str
+                'source_right': rgb_files[t + 1], # str
+                'intrinsic': resized_intrinsic # np.ndarray (3, 3)
+            }
+            samples.append(sample)
         return samples
             
     def generate_datasets(self, fold_dir, shuffle=False, is_test=False):

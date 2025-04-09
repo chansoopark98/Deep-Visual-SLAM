@@ -46,8 +46,8 @@ class RedwoodHandler(object):
         self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True, is_test=False)
 
          # share valid data with test data
-        self.valid_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=False)
-        # self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=True)
+        self.valid_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=True)
+        self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=True)
 
     def _process(self, scene_dir: str, is_test: bool=False):
         # load camera metadata
@@ -68,14 +68,13 @@ class RedwoodHandler(object):
         samples = []
 
         for t in range(self.num_source, length - self.num_source, step):
-            for i in range(self.num_source):
-                sample = {
-                    'source_left': rgb_files[t - i], # str
-                    'target_image': rgb_files[t], # str
-                    'source_right': rgb_files[t + i], # str
-                    'intrinsic': intrinsic # np.ndarray (3, 3)
-                }
-                samples.append(sample)
+            sample = {
+                'source_left': rgb_files[t - 1], # str
+                'target_image': rgb_files[t], # str
+                'source_right': rgb_files[t + 1], # str
+                'intrinsic': intrinsic # np.ndarray (3, 3)
+            }
+            samples.append(sample)
         return samples
             
     def generate_datasets(self, fold_dir, shuffle=False, is_test=False):
@@ -88,6 +87,9 @@ class RedwoodHandler(object):
 
         if shuffle:
             np.random.shuffle(datasets)
+        if is_test:
+            # pick 1000 samples for test
+            datasets = datasets[:1000]
         return datasets
 
 if __name__ == '__main__':
