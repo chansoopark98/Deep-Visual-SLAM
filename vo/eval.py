@@ -6,7 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import yaml
-from monodepth_learner_new import Learner
+# from monodepth_learner import Learner
+from d3vo_learner import Learner
 from utils.projection_utils import pose_axis_angle_vec2mat, pose_vec2mat
 import pytransform3d.camera as pc
 
@@ -58,7 +59,6 @@ class EvalTrajectory(Learner):
 
         self.batch_size = config['Train']['batch_size']
         self.image_shape = (config['Train']['img_h'], config['Train']['img_w'])
-        self.pred_depth_list = []
         self.pred_pose_list = []
         self.intrinsic_list = []
 
@@ -84,7 +84,6 @@ class EvalTrajectory(Learner):
             batch_disps.append(scaled_disp)
 
         cat_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
-
         
         pose_right = self.pose_net(cat_right, training=False)  # [B,6]
 
@@ -112,8 +111,6 @@ class EvalTrajectory(Learner):
             pred_pose = batch_poses[i].numpy() # shape: (4, 4)
             current_intrinsic = intrinsic.numpy()[0]  # shape: (3, 3)
     
-            # 리스트에 누적
-            self.pred_depth_list.append(pred_depth)
             self.pred_pose_list.append(pred_pose)
             self.intrinsic_list.append(current_intrinsic)
 
@@ -245,13 +242,12 @@ class EvalTrajectory(Learner):
             buf = io.BytesIO()
             fig.savefig(buf, format='png')
             buf.seek(0)
-            plt.close(fig)  # 플롯 객체 닫기
+            plt.close(fig)
             image = tf.image.decode_png(buf.getvalue(), channels=4)
-            buf.close()  # BytesIO 닫기
+            buf.close()
             return tf.expand_dims(image, 0)
         
     def clear_state(self):
-        self.pred_depth_list.clear()
         self.pred_pose_list.clear()
         self.intrinsic_list.clear()
 

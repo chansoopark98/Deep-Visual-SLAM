@@ -1,5 +1,5 @@
 Directory:
-  exp_name: test_newVersion_480x640
+  exp_name: d3vo_test
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -8,7 +8,7 @@ Directory:
 Dataset:
   custom_data: False
   mars_logger: True
-  redwood: True
+  redwood: False
 
 Train:
   mode: axisAngle # axisAngle, euler
@@ -24,6 +24,7 @@ Train:
   max_depth: 10.0
   ssim_ratio: 0.85
   smoothness_ratio: 0.001
+  ab_ratio: 0.01
   auto_mask: True
   img_w: 640 #640
   img_h: 480 #480
