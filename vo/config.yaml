@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Monodepth2-resnet18-Posenet
+  exp_name: Monodepth2-resnet18-Posenet-onlyRedwood
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -7,8 +7,8 @@ Directory:
 
 Dataset:
   custom_data: False
-  mars_logger: True
-  redwood: False
+  mars_logger: False
+  redwood: True
 
 Train:
   mode: axisAngle # axisAngle, euler

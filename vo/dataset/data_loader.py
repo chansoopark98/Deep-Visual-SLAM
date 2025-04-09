@@ -74,12 +74,15 @@ class DataLoader(object):
             dataset = RedwoodHandler(config=self.config)
             train_dataset = self._build_generator(np_samples=dataset.train_data)
             valid_dataset = self._build_generator(np_samples=dataset.valid_data)
+            test_dataset = self._build_generator(np_samples=dataset.test_data)
 
             train_datasets.append(train_dataset)
             valid_datasets.append(valid_dataset)
+            test_datasets.append(test_dataset)
     
             self.num_train_samples += dataset.train_data.shape[0]
             self.num_valid_samples += dataset.valid_data.shape[0]
+            self.num_test_samples += dataset.test_data.shape[0]
             
         return train_datasets, valid_datasets, test_datasets
 
