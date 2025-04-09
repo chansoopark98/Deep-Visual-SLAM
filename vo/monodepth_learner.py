@@ -17,6 +17,7 @@ class Learner(object):
         self.image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.smoothness_ratio = self.config['Train']['smoothness_ratio'] # 0.001
         self.auto_mask = self.config['Train']['auto_mask'] # True
+        self.predictive_mask = self.config['Train']['predictive_mask'] # False
         self.ssim_ratio = self.config['Train']['ssim_ratio'] # 0.85
         self.min_depth = self.config['Train']['min_depth'] # 0.1
         self.max_depth = self.config['Train']['max_depth'] # 10.0
@@ -143,6 +144,7 @@ class Learner(object):
 
         pixel_losses = 0.
         smooth_losses = 0.
+        weighting_losses = 0.
         
         H = tf.shape(tgt_image)[1]
         W = tf.shape(tgt_image)[2]
@@ -236,12 +238,21 @@ class Learner(object):
                     mean=0.0, 
                     stddev=1e-5
                 )
+
+                if self.predictive_mask:
+                    # mask = tf.expand_dims(disp_raw[s], axis=-1)
+                    mask = disp_raw[s]
+                    reprojection_losses *= mask
+
+                    weighting_loss = tf_keras.losses.binary_crossentropy(mask, tf.ones(mask.shape)) * 0.2
+                    weighting_losses += tf.reduce_mean(weighting_loss)
                 
                 combined_losses = tf.concat([identity_reprojection_losses, reprojection_losses], axis=3) # [B, H, W, 17] > [B, H, W, 1]
                 combined = tf.reduce_min(combined_losses, axis=3, keepdims=True)
             else:
                 combined = tf.reduce_min(reprojection_losses, axis=3, keepdims=True)
-            
+
+  
             # 최종 reprojection loss
             reprojection_loss = tf.reduce_mean(combined)
 
@@ -258,6 +269,7 @@ class Learner(object):
         num_scales_f = tf.cast(self.num_scales, tf.float32)
         pixel_losses = pixel_losses / num_scales_f
         smooth_losses = smooth_losses / num_scales_f
-        total_loss = pixel_losses + smooth_losses
+        weighting_losses = weighting_losses / num_scales_f
+        total_loss = pixel_losses + smooth_losses + weighting_losses
 
         return total_loss, pixel_losses, smooth_losses, pred_depths

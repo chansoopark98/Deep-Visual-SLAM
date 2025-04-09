@@ -1,5 +1,5 @@
 Directory:
-  exp_name: d3vo_test
+  exp_name: Monodepth2-resnet18-PosenetExtra
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -26,6 +26,7 @@ Train:
   smoothness_ratio: 0.001
   ab_ratio: 0.01
   auto_mask: True
+  predictive_mask: False
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001

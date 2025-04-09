@@ -68,7 +68,7 @@ class PoseNetAB(tf_keras.Model):
         self.global_pool = tf_keras.layers.GlobalAveragePooling2D()
 
     def call(self, inputs, training=False):
-        x, _ = self.encoder(inputs, training=training)
+        x = self.encoder(inputs, training=training)
         shared_1 = self.shared_features_1(x)
         shared_2 = self.shared_features_2(shared_1)
         shared_3 = self.shared_features_3(shared_2)
@@ -108,7 +108,11 @@ class PoseNetExtra(tf_keras.Model):
         self.batch_size = batch_size
         self.pose_scale = 0.1
 
-        self.encoder = CustomFlow(image_shape=(self.image_height, self.image_width, 6), batch_size=batch_size, pretrained=True).build_model()
+        # self.encoder = CustomFlow(image_shape=(self.image_height, self.image_width, 6), batch_size=batch_size, pretrained=True).build_model()
+        # self.encoder.build((self.batch_size, self.image_height, self.image_width, 6))
+        # self.encoder.trainable = True
+
+        self.encoder = Resnet(image_shape=(self.image_height, self.image_width, 6), batch_size=batch_size, pretrained=True, prefix='resnet18_pose').build_model()
         self.encoder.build((self.batch_size, self.image_height, self.image_width, 6))
         self.encoder.trainable = True
         
@@ -120,11 +124,12 @@ class PoseNetExtra(tf_keras.Model):
             std_conv(3, 256, 1, use_bias=False, name='shared_conv2'),
             tf_keras.layers.BatchNormalization(),
             tf_keras.layers.LeakyReLU(),
+            std_conv(3, 256, 1, use_bias=True, name='shared_conv3'),
+            tf_keras.layers.LeakyReLU(),
         ])
 
         self.global_pool = tf_keras.layers.GlobalAveragePooling2D()
 
-        
         # 회전 브랜치
         self.rotation_branch = tf_keras.Sequential([
             tf_keras.layers.Dense(256),
@@ -140,14 +145,14 @@ class PoseNetExtra(tf_keras.Model):
         ])
 
     def call(self, inputs, training=False):
-        x = self.encoder(inputs, training=training)
+        x, _ = self.encoder(inputs, training=training)
         features = self.shared_features(x)
 
         features = self.global_pool(features)
 
         # 분리된 예측
         rotation = self.rotation_branch(features) * 0.01  # 회전에 적합한 스케일링
-        translation = self.translation_branch(features) * 0.1  # 이동에 적합한 스케일링
+        translation = self.translation_branch(features) * 0.01  # 이동에 적합한 스케일링
         
         # 결합된 포즈 벡터
         return tf.concat([rotation, translation], axis=-1)
@@ -195,7 +200,7 @@ class PoseNet(tf_keras.Model):
         self.reshape_layer = tf_keras.layers.Reshape((6,), name='pose_reshape')
 
     def call(self, inputs, training=False):
-        x = self.encoder(inputs, training=training) 
+        x, _ = self.encoder(inputs, training=training) 
 
         x = self.pose_conv0(x)
         x = self.pose_act0(x)
