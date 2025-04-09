@@ -102,7 +102,7 @@ class EvalTrajectory(Learner):
         if self.is_euler:
             batch_poses = pose_vec2mat(batch_poses)
         else:
-            batch_poses = pose_axis_angle_vec2mat(batch_poses, invert=False)  # shape: (b, 4, 4)
+            batch_poses = pose_axis_angle_vec2mat(batch_poses, batch_depths, invert=False)  # shape: (b, 4, 4)
 
         batch_size = batch_depths.shape[0]
 

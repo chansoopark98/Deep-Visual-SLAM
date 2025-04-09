@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Monodepth2-resnet18-PosenetExtra
+  exp_name: Monodepth2-resnet18-Posenet
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights

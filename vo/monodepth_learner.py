@@ -46,7 +46,7 @@ class Learner(object):
         l1_loss = tf.reduce_mean(tf.abs(reproj_image - tgt_image), axis=3, keepdims=True)
         ssim_loss = tf.reduce_mean(self.ssim(reproj_image, tgt_image), axis=3, keepdims=True)
 
-        loss = self.ssim_ratio * ssim_loss + (1. - self.ssim_ratio) * l1_loss
+        loss = (self.ssim_ratio * ssim_loss) + ((1. - self.ssim_ratio) * l1_loss)
         return loss
 
     def ssim(self, x, y):
@@ -269,7 +269,11 @@ class Learner(object):
         num_scales_f = tf.cast(self.num_scales, tf.float32)
         pixel_losses = pixel_losses / num_scales_f
         smooth_losses = smooth_losses / num_scales_f
-        weighting_losses = weighting_losses / num_scales_f
-        total_loss = pixel_losses + smooth_losses + weighting_losses
+        
+        total_loss = pixel_losses + smooth_losses
+
+        if self.predictive_mask:
+            weighting_losses = weighting_losses / num_scales_f
+            total_loss += weighting_losses
 
         return total_loss, pixel_losses, smooth_losses, pred_depths
