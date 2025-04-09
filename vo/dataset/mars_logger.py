@@ -3,37 +3,24 @@ import glob
 import pandas as pd
 import numpy as np
 import cv2
-try:
-    from .utils import resample_imu
-except:
-    from utils import resample_imu
+import json
 
 class MarsLoggerHandler(object):
     def __init__(self, config):
         self.config = config
-        self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'mars_logger')
+        self.root_dir = '/media/park-ubuntu/park_cs/slam_data/mars_logger'
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.num_source = self.config['Train']['num_source'] # 1
         self.imu_seq_len = self.config['Train']['imu_seq_len'] # 10
-        self.original_image_size = (3000, 4000)
-        self.save_image_size = (3000 // 4, 4000 // 4)
-        self.train_dir = os.path.join(self.root_dir, 'train')
-        self.valid_dir = os.path.join(self.root_dir, 'valid')
+        
+        self.train_data = self.generate_datasets(fold_dir='train', shuffle=True)
+        self.valid_data = self.generate_datasets(fold_dir='valid', shuffle=False)
         self.test_dir = os.path.join(self.root_dir, 'test')
-        self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
-        self.valid_data = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
-        self.test_data = self.generate_datasets(fold_dir=self.test_dir, shuffle=False, is_test=True)
+        self.test_data = self.generate_test(test_dir=self.test_dir)
 
-    def _extract_video(self, scene_dir: str, current_intrinsic: np.ndarray, camera_data: pd.DataFrame) -> int:
+    def _extract_video(self, scene_dir: str, camera_name) -> int:
         video_file = os.path.join(scene_dir, 'movie.mp4')
         rgb_save_path = os.path.join(scene_dir, 'rgb')
-
-        # Rescale intrinsic matrix
-        resized_intrinsic = self._rescale_intrinsic(current_intrinsic, self.save_image_size, self.original_image_size)
-
-        # Read metadata
-        # timestamps_ns = camera_data['Timestamp[nanosec]'].values  # Extract timestamps in nanoseconds
-        # timestamps_s = timestamps_ns / 1e9  # Convert to seconds
 
         # Ensure output directory exists
         if not os.path.exists(rgb_save_path):
@@ -52,15 +39,30 @@ class MarsLoggerHandler(object):
                 
                 rgb_name = os.path.join(rgb_save_path, f'rgb_{str(idx).zfill(6)}.jpg')
                 frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                frame = cv2.resize(frame, (self.save_image_size[1], self.save_image_size[0]))
+                frame = cv2.resize(frame, (self.image_size[1], self.image_size[0]))
                 cv2.imwrite(rgb_name, frame)
                 idx += 1
 
             cap.release()
             cv2.destroyAllWindows()
 
-        # Count and return the number of saved frames
-        return len(glob.glob(os.path.join(rgb_save_path, '*.jpg'))), resized_intrinsic
+        dataset = glob.glob(os.path.join(rgb_save_path, '*.jpg'))
+        data_len = len(dataset)
+
+        # Load camera metadata
+        camera_metadata_path = os.path.join(self.root_dir, camera_name, 'calibration_results')
+        
+
+        with open(os.path.join(camera_metadata_path, 'calibration_results.json'), 'r') as f:
+            camera_metadata = json.load(f)
+        original_image_size = (camera_metadata['image_height'], camera_metadata['image_width'])
+        
+        intrinsic = np.load(os.path.join(camera_metadata_path, 'camera_matrix.npy'))
+
+        # rescale intrinsic matrix
+        rescaled_intrinsic = self._rescale_intrinsic(intrinsic, self.image_size, original_image_size)
+
+        return data_len, rescaled_intrinsic
 
     def _rescale_intrinsic(self, intrinsic: np.ndarray, target_size: tuple, current_size: tuple) -> np.ndarray:
         # New shape = self.image_size (H, W)
@@ -71,49 +73,65 @@ class MarsLoggerHandler(object):
         intrinsic_rescaled = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
         return intrinsic_rescaled
 
-    def _process(self, scene_dir: str, is_test: bool=False) -> list:
-        # load camera metadata
-        camera_file = os.path.join(scene_dir, 'movie_metadata.csv')
-        camera_data = pd.read_csv(camera_file)
-        fx = 2.66908046e+03
-        fy = 2.67550677e+03
-        cx = 2.05566387e+03
-        cy = 1.44153479e+03
-        raw_intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-    
+    def _process(self, scene_dir: str, camera_name: str, is_test: bool=False) -> list:
         # load video .mp4
-        length, resized_intrinsic = self._extract_video(scene_dir, raw_intrinsic, camera_data)
-
-        intrinsic = self._rescale_intrinsic(resized_intrinsic, self.image_size, self.save_image_size)
+        length, resized_intrinsic = self._extract_video(scene_dir, camera_name)
     
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
         if is_test:
             step = 1
         else:
-            step = 2
+            step = 3
 
         samples = []
         for t in range(self.num_source, length - self.num_source, step):
-            sample = {
-                'source_left': rgb_files[t-1], # str
-                'target_image': rgb_files[t], # str
-                'source_right': rgb_files[t+1], # str
-                'intrinsic': intrinsic # np.ndarray (3, 3)
-            }
-            samples.append(sample)
+            for i in range(self.num_source):
+                sample = {
+                    'source_left': rgb_files[t - self.num_source + i], # str
+                    'target_image': rgb_files[t], # str
+                    'source_right': rgb_files[t + self.num_source - i], # str
+                    'intrinsic': resized_intrinsic # np.ndarray (3, 3)
+                }
+                samples.append(sample)
         return samples
             
     def generate_datasets(self, fold_dir, shuffle=False, is_test=False):
-        scene_files = sorted(glob.glob(os.path.join(fold_dir, '*')))
+        # path = os.path.join(self.root_dir, fold_dir)
+        camera_types = glob.glob(os.path.join(self.root_dir, '*'))
+
         datasets = []
-        for scene in scene_files:
-            dataset = self._process(scene, is_test)
-            datasets.append(dataset)
+
+        for camera_type in camera_types:
+            current_fold = os.path.join(camera_type, fold_dir)
+            camera_name = os.path.basename(camera_type)
+
+            scene_files = sorted(glob.glob(os.path.join(current_fold, '*')))
+            
+            for scene in scene_files:
+                dataset = self._process(scene, camera_name, is_test)
+                datasets.append(dataset)
+            
         datasets = np.concatenate(datasets, axis=0)
+
+        print('Current fold:', fold_dir)
+        print(f'  -- Camera types: {camera_types}')
+        print(f'  -- dataset size: {datasets.shape}')
 
         if shuffle:
             np.random.shuffle(datasets)
+        return datasets
+    
+    def generate_test(self, test_dir):
+        datasets = []
+
+        scene_files = sorted(glob.glob(os.path.join(test_dir, '*')))
+        
+        for scene in scene_files:
+            dataset = self._process(scene, 'S22')
+            datasets.append(dataset)
+
+        datasets = np.concatenate(datasets, axis=0)
         return datasets
 
 if __name__ == '__main__':
@@ -126,4 +144,5 @@ if __name__ == '__main__':
     dataset = MarsLoggerHandler(config)
     data_len = dataset.train_data.shape[0]
     for idx in range(data_len):
-        print(dataset.train_data[idx])
+        a = 1
+        # print(dataset.train_data[idx])

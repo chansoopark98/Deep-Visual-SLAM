@@ -6,10 +6,9 @@ import keras
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from eval import EvalTrajectory
-from model.pose_net import PoseNet, PoseNetExtra
-from model.depth_net import DispNet
-# from monodepth_learner import Learner
-from monodepth_learner_new import Learner
+from model.pose_net import PoseNet, PoseNetExtra, PoseNetAB
+from model.depth_net import DispNet, DispNetSigma
+from monodepth_learner import Learner
 from tqdm import tqdm
 import numpy as np
 from datetime import datetime
@@ -20,14 +19,16 @@ np.set_printoptions(suppress=True)
 class Trainer(object):
     def __init__(self, config, ) -> None:
         self.config = config
-
-        self.config['Directory']['exp_name'] = 'mode={0}_res={1}_ep={2}_bs={3}_initLR={4}_endLR={5}'.format(self.config['Train']['mode'],
+        original_name = self.config['Directory']['exp_name']
+        self.config['Directory']['exp_name'] = 'mode={0}_res={1}_ep={2}_bs={3}_initLR={4}_endLR={5}_prefix={6}'.format(self.config['Train']['mode'],
                                                                     (self.config['Train']['img_h'], self.config['Train']['img_w']),
                                                                     self.config['Train']['epoch'],
                                                                     self.config['Train']['batch_size'],
                                                                     self.config['Train']['init_lr'],
-                                                                    self.config['Train']['final_lr']
+                                                                    self.config['Train']['final_lr'],
+                                                                    original_name
                                                                     )
+
         self.configure_train_ops()
         print('initialize')
    
@@ -47,9 +48,9 @@ class Trainer(object):
         self.depth_net.build(dispnet_input_shape)
         _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
-        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
+        # self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5', skip_mismatch=True)
 
-        self.pose_net = PoseNetExtra(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = [(self.batch_size, *image_shape, 6)]
         self.pose_net.build(posenet_input_shape)
         
@@ -154,7 +155,8 @@ class Trainer(object):
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy(),
                     pixel_loss=self.train_pixel_loss.result().numpy(),
-                    smooth_loss=self.train_smooth_loss.result().numpy())
+                    smooth_loss=self.train_smooth_loss.result().numpy(),
+                    )
             
             # Logging train metrics
             with self.train_summary_writer.as_default():
@@ -207,7 +209,7 @@ class Trainer(object):
             # Eval
             print('Evaluate trajectory ... Current Epoch : {0}'.format(epoch))
             test_tqdm = tqdm(self.data_loader.test_dataset, total=self.data_loader.num_test_samples)
-            test_tqdm.set_description('Validation || ')
+            test_tqdm.set_description('Test || ')
             for idx, (ref_images, target_image, intrinsic) in enumerate(test_tqdm):
                 self.eval_tool.update_state(ref_images, target_image, intrinsic)
 

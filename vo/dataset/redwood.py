@@ -36,7 +36,7 @@ def write_trajectory(traj, filename):
 class RedwoodHandler(object):
     def __init__(self, config):
         self.config = config
-        self.root_dir = '/media/park-ubuntu/park_cs/redwood'
+        self.root_dir = '/media/park-ubuntu/park_cs/slam_data/redwood'
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.num_source = self.config['Train']['num_source'] # 1
         self.imu_seq_len = self.config['Train']['imu_seq_len'] # 10
@@ -60,34 +60,22 @@ class RedwoodHandler(object):
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'image', '*.jpg')))
         length = len(rgb_files)
 
-         # parsing scene_dir name
-        scene_name = scene_dir.split('/')[-1]
-        # camera_poses = read_trajectory(os.path.join(scene_dir, f'{scene_name}.log'))
-
         if is_test:
             step = 1
         else:
-            step = 2
+            step = 3
         
         samples = []
 
         for t in range(self.num_source, length - self.num_source, step):
-            sample = {
-                'source_left': rgb_files[t-1], # str
-                'target_image': rgb_files[t], # str
-                'source_right': rgb_files[t+1], # str
-                'intrinsic': intrinsic # np.ndarray (3, 3)
-            }
-
-            # if is_test:
-            #     # target -> source_right relative pose
-            #     target_pose = camera_poses[t].pose
-            #     source_right_pose = camera_poses[t+1].pose
-            #     relative_pose = np.dot(np.linalg.inv(target_pose), source_right_pose)
-            #     sample['relative_pose'] = relative_pose
-
-            samples.append(sample)
-    
+            for i in range(self.num_source):
+                sample = {
+                    'source_left': rgb_files[t - self.num_source + i], # str
+                    'target_image': rgb_files[t], # str
+                    'source_right': rgb_files[t + self.num_source - i], # str
+                    'intrinsic': intrinsic # np.ndarray (3, 3)
+                }
+                samples.append(sample)
         return samples
             
     def generate_datasets(self, fold_dir, shuffle=False, is_test=False):
