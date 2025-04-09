@@ -63,16 +63,16 @@ class RedwoodHandler(object):
         if is_test:
             step = 1
         else:
-            step = 3
+            step = 1
         
         samples = []
 
         for t in range(self.num_source, length - self.num_source, step):
             for i in range(self.num_source):
                 sample = {
-                    'source_left': rgb_files[t - self.num_source + i], # str
+                    'source_left': rgb_files[t - i], # str
                     'target_image': rgb_files[t], # str
-                    'source_right': rgb_files[t + self.num_source - i], # str
+                    'source_right': rgb_files[t + i], # str
                     'intrinsic': intrinsic # np.ndarray (3, 3)
                 }
                 samples.append(sample)

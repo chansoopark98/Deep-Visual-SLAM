@@ -166,33 +166,51 @@ def rotFromAxisAngle(vec):
 
     return rot_matrix
 
-def pose_axis_angle_vec2mat(vec, invert=False):
+def pose_axis_angle_vec2mat(vec, depth=None, invert=False):
     """
-    Convert axis angle and translation into 4x4 matrix
-    :param vec: [B,1,6] with former 3 vec is axis angle
-    :return:
+    Convert axis angle and translation into 4x4 matrix with scale adjustment
+    :param vec: [B,6] with former 3 elements as axis angle
+    :param depth: [B,H,W,1] depth map for scale normalization
+    :param invert: Whether to invert the transformation
+    :return: 4x4 transformation matrix
     """
-    # batch_size, _ = vec.get_shape().as_list()
     batch_size = vec.shape[0]
 
+    # 축-각도 회전 벡터 추출
     axisvec = tf.slice(vec, [0, 0], [-1, 3])
     axisvec = tf.reshape(axisvec, [batch_size, 1, 3])
 
+    # 변환 벡터 추출 
     translation = tf.slice(vec, [0, 3], [-1, 3])
     translation = tf.reshape(translation, [batch_size, 1, 3])
+    
+    # 중요: 깊이의 평균 역수 계산하여 이동 벡터 스케일 조정
+    if depth is not None:
+        # 역깊이(inverse depth) 계산
+        inv_depth = 1.0 / (depth + 1e-6)
+        # 평균 역깊이 계산 (배치별)
+        mean_inv_depth = tf.reduce_mean(inv_depth, axis=[1, 2], keepdims=True)
+        mean_inv_depth = tf.reshape(mean_inv_depth, [batch_size, 1, 1])
+        # 변환 벡터에 스케일 적용
+        translation = translation * mean_inv_depth
 
-
+    # 회전 행렬 생성
     R = rotFromAxisAngle(axisvec)
 
+    # 필요시 역변환 적용
     if invert:
-        R = tf.transpose(R, [0,2,1])
+        R = tf.transpose(R, [0, 2, 1])
         translation *= -1
+        
+    # 변환 행렬 생성
     t = getTransMatrix(translation)
 
+    # 최종 변환 행렬 계산 (순서 주의)
     if invert:
-        M = tf.matmul(R,t)
+        M = tf.matmul(R, t)
     else:
-        M = tf.matmul(t,R)
+        M = tf.matmul(t, R)
+        
     return M
 
 def euler2mat(z, y, x):
@@ -348,7 +366,7 @@ def projective_inverse_warp(img, depth, pose, intrinsics, invert=False, euler=Fa
     if euler:
         pose = pose_vec2mat(pose)
     else:
-        pose = pose_axis_angle_vec2mat(pose,invert)
+        pose = pose_axis_angle_vec2mat(pose, depth, invert)
     # Construct pixel grid coordinates
     pixel_coords = meshgrid(batch, height, width)
     # Convert pixel coordinates to the camera frame

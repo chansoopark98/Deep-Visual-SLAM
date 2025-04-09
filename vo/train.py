@@ -50,7 +50,7 @@ class Trainer(object):
 
         # self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5', skip_mismatch=True)
 
-        self.pose_net = PoseNetExtra(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = (self.batch_size, *image_shape, 6)
         self.pose_net.build(posenet_input_shape)
         
