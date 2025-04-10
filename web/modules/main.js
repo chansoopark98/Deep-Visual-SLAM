@@ -1,6 +1,8 @@
 
-import './ar_manager.js';
-import { updateCameraPose } from './ar_manager.js';
+// import './ar_manager.js';
+// import { updateCameraPose } from './ar_manager.js';
+
+let durations_lists = [];
 
 class InferenceManager {
   /**
@@ -30,7 +32,7 @@ class InferenceManager {
       return tensor;
     });
     const endTime = performance.now();    // 종료 시간 기록
-    console.log(`captureFrame 시간: ${endTime - startTime} ms`);
+    // console.log(`captureFrame 시간: ${endTime - startTime} ms`);
     return imgTensor;
   }
 
@@ -57,7 +59,7 @@ class InferenceManager {
     combined.dispose();
     currFrame.dispose();
     const endTime = performance.now();
-    console.log(`prepareInput 시간: ${endTime - startTime} ms`);
+    // console.log(`prepareInput 시간: ${endTime - startTime} ms`);
     return inputTensor;
   }
 
@@ -77,7 +79,7 @@ class InferenceManager {
       inputTensor.dispose();
     }
     const endTime = performance.now();
-    console.log(`runInference 시간: ${endTime - startTime} ms`);
+    // console.log(`runInference 시간: ${endTime - startTime} ms`);
     return output;
   }
 
@@ -93,6 +95,7 @@ class InferenceManager {
         callback(result);
       }
       const loopEndTime = performance.now();
+      durations_lists.push(loopEndTime - loopStartTime);
       console.log(`한 사이클 추론 전체 시간: ${loopEndTime - loopStartTime} ms`);
       // 추론 결과를 사용한 후, 결과 텐서들의 메모리를 관리해 주세요.
       // 예를 들어, 단일 텐서인 경우 result.dispose(), 배열인 경우 각각 dispose()
@@ -107,9 +110,41 @@ class InferenceManager {
   }
 }
 
-// 사용 예시 (예: main.js)
 const modelPath = '../assets/tfjs/model.json';
 tf.setBackend('webgl');
+
+async function loadAndDisposeModel(url) {
+  try {
+    const model = await tf.loadGraphModel(url);
+    model.dispose(); // 메모리 해제
+    return true;
+  } catch (error) {
+    console.error('모델 로드 실패:', error);
+    return false;
+  }
+}
+
+async function testModelLoad(url, iterations = 100) {
+  let successCount = 0;
+  let failureCount = 0;
+
+  for (let i = 0; i < iterations; i++) {
+    const success = await loadAndDisposeModel(url);
+    if (success) {
+      successCount++;
+    } else {
+      failureCount++;
+    }
+    console.log(`시도 ${i + 1}: 성공 ${successCount}, 실패 ${failureCount}`);
+  }
+
+  console.log('테스트 완료');
+  console.log(`성공 횟수: ${successCount}`);
+  console.log(`실패 횟수: ${failureCount}`);
+}
+
+// const modelUrl = 'https://example.com/model/model.json';
+await testModelLoad(modelPath);
 
 tf.loadGraphModel(modelPath)
   .then(model => {
@@ -120,12 +155,12 @@ tf.loadGraphModel(modelPath)
 
     // 추론 결과를 처리할 콜백 함수 예시
     const handleResult = result => {
-      console.log('Inference result:', result);
+      // console.log('Inference result:', result);
       // 결과 텐서가 단일 텐서인 경우:
       if (result instanceof tf.Tensor) {
         
         result.array().then(matrix => {
-          console.log('Tensor 4x4 matrix:', matrix);
+          // console.log('Tensor 4x4 matrix:', matrix);
           const rowMajor = matrix.flat();  // 예: [m00, m01, m02, m03, m10, m11, ..., m33]
 
           // Three.js는 column-major 순서의 배열을 필요로 하므로 재정렬
@@ -135,12 +170,11 @@ tf.loadGraphModel(modelPath)
             rowMajor[2], rowMajor[6], rowMajor[10], rowMajor[14],
             rowMajor[3], rowMajor[7], rowMajor[11], rowMajor[15]
           ];
-          updateCameraPose(colMajor);
+          // updateCameraPose(colMajor);
         });
         result.dispose();
-        console.log('Result tensor disposed.');
+        // console.log('Result tensor disposed.');
       }
-      // 또는 여러 텐서가 반환되면 배열 형태로 각 텐서를 dispose해야 합니다.
     };
 
     // 연속 추론 시작

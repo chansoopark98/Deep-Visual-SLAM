@@ -106,7 +106,7 @@ if __name__ == '__main__':
         pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
         posenet_input_shape = (batch_size, *image_shape, 6)
         pose_net.build(posenet_input_shape)
-        pose_net.load_weights('./weights/vo/mode=axisAngle_res=(480, 640)_ep=31_bs=16_initLR=0.0001_endLR=1e-05_prefix=Monodepth2-resnet18-Posenet-onlyRedwood/pose_net_epoch_4_model.weights.h5')
+        pose_net.load_weights('./weights/vo/mode=axisAngle_res=(480, 640)_ep=31_bs=16_initLR=0.0001_endLR=1e-05_prefix=Monodepth2-resnet18-Posenet-onlyRedwood/pose_net_epoch_26_model.weights.h5')
         pose_net.trainable = False
         # dummy
         dummy_input = tf.zeros((batch_size, *image_shape, 6), dtype=tf.float32)
@@ -114,7 +114,7 @@ if __name__ == '__main__':
 
         depth_net = DispNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_depthnet')
         depth_net.build((batch_size, *image_shape, 3))
-        depth_net.load_weights('./weights/vo/mode=axisAngle_res=(480, 640)_ep=31_bs=16_initLR=0.0001_endLR=1e-05_prefix=Monodepth2-resnet18-Posenet-onlyRedwood/depth_net_epoch_4_model.weights.h5')
+        depth_net.load_weights('./weights/vo/mode=axisAngle_res=(480, 640)_ep=31_bs=16_initLR=0.0001_endLR=1e-05_prefix=Monodepth2-resnet18-Posenet-onlyRedwood/depth_net_epoch_26_model.weights.h5')
         depth_net.trainable = False
         # dummy
         dummy_input = tf.zeros((batch_size, *image_shape, 3), dtype=tf.float32)
@@ -155,7 +155,7 @@ if __name__ == '__main__':
             gt_rel_pose_list.append(gt_rel_pose)
 
             idx += 1
-            if idx > 100:
+            if idx > 1000:
                 break
         
         # rel poses to global poses
@@ -193,7 +193,7 @@ if __name__ == '__main__':
         ax = fig.add_subplot(projection='3d')
         ax.plot(*dst.T, label='GT', color='green')
         ax.plot(*src.T, label='Before Alignment', color='red', linestyle='--')
-        ax.plot(*aligned_centers.T, label='After Alignment', color='blue')
+        # ax.plot(*aligned_centers.T, label='After Alignment', color='blue')
         ax.legend()
         plt.show()
 
@@ -217,6 +217,8 @@ if __name__ == '__main__':
             "Rotation Error (degrees)": aligned_rot_errors,
             "Translation Error (Meter)": aligned_trans_errors,
             "Durations (sec)": duration_list[:frame_count],
+            "GT Pose": [str(pose) for pose in gt_global_pose_list[:frame_count]],
+            "Pred Pose": [str(pose) for pose in aligned_monodepth2_poses[:frame_count]],
         }
 
         df = pd.DataFrame(data)

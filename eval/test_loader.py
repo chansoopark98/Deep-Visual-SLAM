@@ -102,7 +102,6 @@ class RedwoodDataLoader(object):
         self.test_data = self.generate_datasets(fold_dir=self.test_dir)
 
     def get_dataset_size(self, fold_dir):
-        """데이터셋의 총 샘플 수를 계산합니다."""
         total_samples = 0
         scene_files = sorted(glob.glob(os.path.join(fold_dir, '*')))
         
@@ -115,11 +114,8 @@ class RedwoodDataLoader(object):
         return total_samples
     
     def align_scale(self, pred_translations, gt_translations):
-        """스케일 보정을 위한 함수"""
-        # 최적의 스케일 계수 계산
         scale = np.sum(pred_translations * gt_translations) / np.sum(pred_translations * pred_translations)
         
-        # 예측값에 스케일 적용
         pred_scaled = pred_translations * scale
         return pred_scaled, scale
 
