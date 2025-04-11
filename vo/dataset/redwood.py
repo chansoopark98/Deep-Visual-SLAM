@@ -63,7 +63,7 @@ class RedwoodHandler(object):
         if is_test:
             step = 1
         else:
-            step = 1
+            step = 2
         
         samples = []
 
