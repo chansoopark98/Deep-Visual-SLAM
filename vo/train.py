@@ -5,8 +5,9 @@ import tensorflow as tf, tf_keras
 import keras
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
+from utils.train_utils import StepLR
 from eval import EvalTrajectory
-from model.pose_net import PoseNet, PoseNetExtra
+from model.pose_net import PoseNet
 from model.depth_net import DispNet
 from monodepth_learner import Learner
 from tqdm import tqdm
@@ -58,10 +59,14 @@ class Trainer(object):
         self.data_loader = DataLoader(config=self.config)
         
         # 3. Optimizer
-        self.warmup_scheduler = keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
+        self.lr_scehduler = keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
                                                                               self.config['Train']['epoch'],
                                                                               self.config['Train']['final_lr'],
                                                                               power=0.9)
+        
+        # self.lr_scehduler = StepLR(initial_learning_rate=self.config['Train']['init_lr'],
+        #                         step_size=self.config['Train']['init_lr'] - 5,
+        #                         gamma=0.1)
         
         self.optimizer = keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
                                                beta_1=self.config['Train']['beta1'],
@@ -123,7 +128,7 @@ class Trainer(object):
 
     def train(self) -> None:        
         for epoch in range(self.config['Train']['epoch']):    
-            lr = self.warmup_scheduler(epoch)
+            lr = self.lr_scehduler(epoch)
 
             # Set learning rate
             self.optimizer.learning_rate = lr
