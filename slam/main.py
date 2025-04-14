@@ -76,6 +76,8 @@ class OfflineRunner:
 				if current_idx > 0:
 					current_depth = outputs[0]
 					current_depth = np.clip(current_depth, 0.1, 10)
+					# Normalize depth map
+					current_depth = (current_depth - 0.1) / (10 - 0.1)
 					current_depth = (current_depth * 255).astype(np.uint8)
 					current_depth = cv2.applyColorMap(current_depth, cv2.COLORMAP_INFERNO)
 					

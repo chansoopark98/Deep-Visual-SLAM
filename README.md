@@ -20,10 +20,11 @@
  <br>
 </p>
 
+
 <p align="center">
-<a href="https://www.youtube.com/watch?v=in82U0r8gM0" target="_blank">
-  <img src="https://img.youtube.com/vi/in82U0r8gM0/0.jpg" alt="Deep-Visual-SLAM Demo" width="1280">
-</a>
+  <a href="https://youtu.be/in82U0r8gM0?si=tQRSAcHJxwvZIJG9" target="_blank">
+   <img src="output_concat_video.gif" alt="Deep-Visual-SLAM Demo GIF" width="640" height="480">
+  </a> 
 </p>
 
 
