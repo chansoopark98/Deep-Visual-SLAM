@@ -7,26 +7,26 @@ class MonoVO:
 	def __init__(self, intrinsic):
 		self.intrinsic = intrinsic
 		self.mp = Map()
-		self.nn = Networks((480, 640))
+		self.nn = Networks(depth_weight_path='./assets/weights/vo/0414_marsOnly/depth_net_epoch_30_model.weights.h5',
+							pose_weight_path='./assets/weights/vo/0414_marsOnly/pose_net_epoch_30_model.weights.h5',
+							image_shape=(480, 640))
 
+		
 	def process_frame(self, frame, optimize=True):
 		"""Process a single frame with D3VO."""
 		# Run DepthNet to get depth map
-		depth = self.nn.depth(frame)
-		
-		uncertainty = depth * 0.05  # 5%의 상대 불확실성
+		depth= self.nn.depth(frame)
+		uncertainty = np.zeros_like(depth)
 		
 		if len(self.mp.frames) == 0:
 			# Set first frame pose to identity 
-			pose = np.eye(4)
-			# Default brightness params
-			a, b = 1.0, 0.0
+			pose, a, b = np.eye(4), 1, 0
 		else:
 			# Pass PoseNet the two most recent frames 
 			pose = self.nn.pose(self.mp.frames[-1].image, frame, depth=depth)
-			# Default brightness params
-			a, b = 1.0, 0.0
-		
+			a = 1
+			b = 0
+			
 		# Run frontend tracking with added uncertainty and brightness params
 		if not self.frontend(frame, depth, uncertainty, pose, (a, b)):
 			return
@@ -34,12 +34,16 @@ class MonoVO:
 		# Run backend optimization
 		if optimize:
 			self.mp.optimize(self.intrinsic)
+		
+		return depth, uncertainty, self.mp.frames[-1].pose, a, b
 
 	def frontend(self, frame, depth, uncertainty, pose, brightness_params):
-		"""Run frontend tracking on the given frame."""
-		# Create frame with all parameters
+		"""Run frontend tracking on the given frame. Extract keypoints, match them keypoints in the preceding 
+        frame, add Frame to the map, and possibly make the Frame a keyframe. Return true to run backend 
+        optimization after this function returns."""
+		# create frame and add it to the map
 		f = Frame(self.mp, frame, depth, uncertainty, pose, brightness_params)
-		
+
 		# cannot match initial frame to any previous frames (but make it a keyframe)
 		if f.id == 0:
 			self.mp.check_add_key_frame(f)

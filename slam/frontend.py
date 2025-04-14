@@ -3,22 +3,44 @@ import cv2
 
 # Feature extraction hyperparameters
 NUM_FEATURE = 3000
-FEATURE_QUALITY = 0.01
+FEATURE_QUALITY = 0.01 # 0.01
 
+# def extract_features(img):
+# 	"""Extract ORB features from given image, return keypoints and their descriptors."""
+# 	# detection
+# 	orb = cv2.ORB_create()
+# 	pts = cv2.goodFeaturesToTrack(np.mean(img, axis=2).astype(np.uint8), NUM_FEATURE, qualityLevel=FEATURE_QUALITY, minDistance=7)
+
+# 	# extraction
+# 	kps = [cv2.KeyPoint(x=f[0][0], y=f[0][1], size=20) for f in pts]
+# 	kps, des = orb.compute(img, kps)
+
+# 	# return pts and des
+# 	return np.array([(int(kp.pt[0]), int(kp.pt[1])) for kp in kps]), des
 
 def extract_features(img):
-	"""Extract ORB features from given image, return keypoints and their descriptors."""
-	# detection
-	orb = cv2.ORB_create()
-	pts = cv2.goodFeaturesToTrack(np.mean(img, axis=2).astype(np.uint8), NUM_FEATURE, qualityLevel=FEATURE_QUALITY, minDistance=7)
-
-	# extraction
-	kps = [cv2.KeyPoint(x=f[0][0], y=f[0][1], size=20) for f in pts]
-	kps, des = orb.compute(img, kps)
-
-	# return pts and des
-	return np.array([(int(kp.pt[0]), int(kp.pt[1])) for kp in kps]), des
-
+    """Extract ORB features from given image, return keypoints and their descriptors."""
+    # Proper conversion to grayscale (BGR to GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Method 1: Full ORB detector and descriptor
+    orb = cv2.ORB_create(nfeatures=NUM_FEATURE, 
+                         scaleFactor=1.2,
+                         nlevels=8,
+                         edgeThreshold=31,
+                         firstLevel=0,
+                         WTA_K=2,
+                         patchSize=31)
+    kps, des = orb.detectAndCompute(gray, None)
+    
+    # Filter out keypoints with low response if needed
+    if len(kps) > NUM_FEATURE:
+        kps = sorted(kps, key=lambda x: x.response, reverse=True)[:NUM_FEATURE]
+        # Recompute descriptors for the filtered keypoints
+        kps, des = orb.compute(gray, kps)
+        
+    # Return keypoints as (x, y) coordinate pairs and descriptors
+    return np.array([(int(kp.pt[0]), int(kp.pt[1])) for kp in kps]), des
 
 def match_frame_kps(f1, f2):
 	"""Match ORB keypoints in the given frames"""
@@ -73,27 +95,24 @@ class Point:
 		
 
 class Frame:
-    def __init__(self, map, image, depth, uncertainty=None, pose=None, brightness_params=None):
-        self.id = map.add_frame(self)
-        self.image = image
-        self.depth = depth
-        
-        # Set defaults for missing parameters
-        self.uncertainty = uncertainty if uncertainty is not None else np.ones_like(depth) * 0.1
-        self.pose = pose if pose is not None else np.eye(4)
-        
-        # Default brightness parameters if not provided
-        if brightness_params is None:
-            self.a, self.b = 1.0, 0.0
-        else:
-            self.a, self.b = brightness_params
+	def __init__(self, map, image, depth, uncertainty, pose, brightness_params):
+		self.id = map.add_frame(self)       # get an ID from the map
+		self.image = image
 
-        self.marginalize = False
-        
-        # Run frontend keypoint extractor
-        self.kps, self.des = extract_features(image)
-        self.pts = {}
-        
-        # Optimizer expects keypoints in a different coordinate ordering
-        self.optimizer_kps = [(k[1], k[0]) for k in self.kps]
-		# assert all([p[0] >= 0 and p[0] <= self.image.shape[0] and p[1] >= 0 and p[1] <= self.image.shape[1] for p in self.optimizer_kps])
+		self.depth = depth
+		self.uncertainty = uncertainty
+		self.a = brightness_params[0]
+		self.b = brightness_params[1]
+		self.pose = pose
+
+		self.marginalize = False
+
+		# Run frontend keypoint extractor
+		self.kps, self.des = extract_features(image)
+		self.pts = {}                       # map kps/des list index to corresponding Point object   
+
+		# Optimizer expects keypoints in a different coordinate ordering
+		self.optimizer_kps = [(k[1], k[0]) for k in self.kps]
+
+		# Ensure that u/v coordinates of keypoints match the image/depth/uncertainty dimension shape (catch these issues at the source!)
+		assert all([p[0] >= 0 and p[0] <= self.image.shape[0] and p[1] >= 0 and p[1] <= self.image.shape[1] for p in self.optimizer_kps])
