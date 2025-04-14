@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf, tf_keras
 from model.depth_net import DispNet
 from model.pose_net import PoseNet
+import matplotlib.pyplot as plt
 from vo.utils.d3vo_projection_utils import pose_axis_angle_vec2mat
 import cv2
 
@@ -67,7 +68,7 @@ class Networks:
         
         pose= self.pose_net(pair_image, training=False)
     
-        transformation = pose_axis_angle_vec2mat(pose,  tf.expand_dims(depth, axis=-1), invert=False)
+        transformation = pose_axis_angle_vec2mat(pose,  tf.expand_dims(depth, axis=-1), invert=True)
         transformation = tf.squeeze(transformation, axis=0)
         
         return transformation.numpy()

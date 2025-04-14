@@ -20,6 +20,7 @@ ax.set_zlabel('Z')
 # Initial draw to create the figure window
 plt.show(block=False)
 
+
 def display_trajectory(poses):
     """Barebones visualization that propagates a point starting at the origin through the 
     provided list of poses. Unclear if this actually tracks the trajectory properly, but 
