@@ -42,7 +42,8 @@ if __name__ == '__main__':
         data_loader = DataLoader(config=config)
         test_tqdm = tqdm(data_loader.test_dataset, total=data_loader.num_test_samples)
 
-        visualizer = Visualizer(draw_plane=False, is_record=False, video_fps=30, video_name="visualization.mp4")
+        visualizer = Visualizer(window_size=(1280, 480),
+                                draw_plane=False, is_record=True, video_fps=30, video_name="0414_traj.mp4")
 
         poses = np.load('./output_pose.npy')
         print(poses.shape)

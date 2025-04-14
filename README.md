@@ -2,7 +2,6 @@
 
 [![Github All Releases](https://img.shields.io/github/downloads/chansoopark98/Deep-Visual-SLAM/total.svg)]() 
 
-[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Fchansoopark98%2FDeep-Visual-SLAM&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com)
 
 <p align="center">
  <img src="https://img.shields.io/github/issues/chansoopark98/Deep-Visual-SLAM">
@@ -19,6 +18,12 @@
  <img src ="https://img.shields.io/badge/Numpy-013243.svg?&style=for-the-badge&logo=Numpy&logoColor=white"/>
  <img src ="https://img.shields.io/badge/Pandas-150458.svg?&style=for-the-badge&logo=Pandas&logoColor=white"/>
  <br>
+</p>
+
+<p align="center">
+<a href="https://www.youtube.com/watch?v=in82U0r8gM0" target="_blank">
+  <img src="https://img.youtube.com/vi/in82U0r8gM0/0.jpg" alt="Deep-Visual-SLAM Demo" width="1280">
+</a>
 </p>
 
 

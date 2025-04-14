@@ -10,13 +10,14 @@ import numpy as np
 
 class Visualizer:
     def __init__(self,
+                 window_size: tuple = (1280, 480),
                  draw_plane: bool = True,
                  is_record: bool = True,
                  video_fps: int = 24,
                  video_name: str = "visualization.mp4"
                  ) -> None:
-
-        self.plotter = pv.Plotter()
+        self.window_size = window_size
+        self.plotter = pv.Plotter(window_size=self.window_size)
         self.plotter.show_axes()
         self.plotter.add_axes_at_origin()
         self.plotter.show(auto_close=False, interactive_update=True)

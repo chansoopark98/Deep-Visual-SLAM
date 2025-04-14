@@ -5,13 +5,9 @@ import tensorflow as tf, tf_keras
 from MonoVO import MonoVO
 import numpy as np
 import cv2
-import time
 import sys
-import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-from display import display_trajectory
-# from vo.utils.visualization import Visualizer
-
+# from display import display_trajectory
 
 def calc_avg_matches(frame, out_frame, show_correspondence=False):
     """Return the average number of matches each keypoint in the specified frame has. 
@@ -28,7 +24,6 @@ def calc_avg_matches(frame, out_frame, show_correspondence=False):
         n_match /= len(frame.pts)
     return n_match, out_frame
 
-
 class OfflineRunner:
 	def __init__(self,
                  video_path: str,
@@ -42,12 +37,12 @@ class OfflineRunner:
 		self.camera_poses = camera_poses
 		self.intrinsic = intrinsic
 		self.mono_vo = MonoVO(self.intrinsic)
-		# self.visualizer = Visualizer(draw_plane=False, is_record=False, video_fps=30, video_name="visualization.mp4")
 		self.flip_transform = np.diag([1, -1, -1, 1])
+		self.fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+		self.video_writer = cv2.VideoWriter('output_video.mp4', self.fourcc, 30.0, (1280, 480))
 
 	def run(self):
 		current_idx = 0
-		current_pose = np.eye(4)
 
 		while self.cap.isOpened():
 			ret, frame = self.cap.read()
@@ -58,11 +53,11 @@ class OfflineRunner:
 			frame = cv2.resize(frame, (self.image_size[1], self.image_size[0]))
 
 			# return depth, uncertainty, self.mp.frames[-1].pose, a, b
-			_ = self.mono_vo.process_frame(frame, optimize=True)
+			outputs = self.mono_vo.process_frame(frame.copy(), optimize=True)
 
 			if DEBUG:
 				# plot all poses (invert poses so they move in correct direction)
-				display_trajectory([f.pose for f in self.mono_vo.mp.frames])
+				# display_trajectory([f.pose for f in self.mono_vo.mp.frames])
 
 				# show keypoints with matches in this frame
 				for pidx, p in enumerate(self.mono_vo.mp.frames[-1].kps):
@@ -77,14 +72,23 @@ class OfflineRunner:
 				n_match, frame = calc_avg_matches(self.mono_vo.mp.frames[-1], frame, show_correspondence=False)
 				print("Matches: %d / %d (%f)" % (len(self.mono_vo.mp.frames[-1].pts), len(self.mono_vo.mp.frames[-1].kps), n_match))
 
-				
-				cv2.imshow('d3vo', frame)
-				if cv2.waitKey(1) == 27:     # Stop if ESC is pressed
-					break
+				# opencv depth map color map, current_depth scale is meter(0.1-10)
+				if current_idx > 0:
+					current_depth = outputs[0]
+					current_depth = np.clip(current_depth, 0.1, 10)
+					current_depth = (current_depth * 255).astype(np.uint8)
+					current_depth = cv2.applyColorMap(current_depth, cv2.COLORMAP_INFERNO)
+					
+					frame = cv2.hconcat([frame, current_depth])
+
+					self.video_writer.write(frame)
+					cv2.imshow('d3vo', frame)
+					if cv2.waitKey(1) == 27:     # Stop if ESC is pressed
+						break
 
 			current_idx += 1
-			# self.visualizer.render()
         
+		self.video_writer.release()
 		self.cap.release()
 		cv2.destroyAllWindows()
         
@@ -98,7 +102,7 @@ if __name__ == "__main__":
 
 		video_path = '/media/park-ubuntu/park_cs/slam_data/mars_logger/test/2025_01_06_18_21_32/movie.mp4'
 		cap = cv2.VideoCapture(video_path)
-		DEBUG = False
+		DEBUG = True
 		PER_FRAME_ERROR = True
 		W = 640
 		H = 480

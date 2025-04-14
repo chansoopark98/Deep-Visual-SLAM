@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import matplotlib.pyplot as plt
 
 # Feature extraction hyperparameters
 NUM_FEATURE = 3000
@@ -18,7 +19,7 @@ FEATURE_QUALITY = 0.01 # 0.01
 # 	# return pts and des
 # 	return np.array([(int(kp.pt[0]), int(kp.pt[1])) for kp in kps]), des
 
-def extract_features(img):
+def extract_features(img: np.ndarray): # Must be a BGR image
     """Extract ORB features from given image, return keypoints and their descriptors."""
     # Proper conversion to grayscale (BGR to GRAY)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
