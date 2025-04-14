@@ -6,7 +6,7 @@ import os
 import cv2
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from model.depth_net import DispNet
-from model.pose_net import PoseNet, PoseNetExtra
+from model.pose_net import PoseNet
 from utils.visualization import Visualizer
 from eval import EvalTrajectory, pose_axis_angle_vec2mat
 
@@ -29,13 +29,13 @@ if __name__ == '__main__':
         # depth_net(tf.random.normal((1, *image_shape, 3)))
         depth_net.build(dispnet_input_shape)
         _ = depth_net(tf.random.normal(dispnet_input_shape))
-        exp_name = 'mode=axisAngle_res=(480, 640)_ep=31_bs=16_initLR=0.0001_endLR=1e-05'
-        depth_net.load_weights(f'./weights/vo/{exp_name}/depth_net_epoch_24_model.weights.h5')
+        exp_name = '0414_marsOnly'
+        depth_net.load_weights(f'./assets/weights/vo/{exp_name}/depth_net_epoch_30_model.weights.h5')
 
-        pose_net = PoseNetExtra(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
+        pose_net = PoseNet(image_shape=image_shape, batch_size=batch_size, prefix='mono_posenet')
         posenet_input_shape = [(batch_size, *image_shape, 6)]
         pose_net.build(posenet_input_shape)
-        pose_net.load_weights(f'./weights/vo/{exp_name}/pose_net_epoch_24_model.weights.h5')
+        pose_net.load_weights(f'./assets/weights/vo/{exp_name}/pose_net_epoch_30_model.weights.h5')
 
         eval_tool = EvalTrajectory(depth_model=depth_net, pose_model=pose_net, config=config)
 
@@ -44,7 +44,7 @@ if __name__ == '__main__':
 
         visualizer = Visualizer(draw_plane=False, is_record=False, video_fps=30, video_name="visualization.mp4")
 
-        poses = np.load('./poses.npy')
+        poses = np.load('./output_pose.npy')
         print(poses.shape)
 
         for idx, (ref_images, target_image, intrinsics) in enumerate(test_tqdm):

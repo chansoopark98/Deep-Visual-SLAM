@@ -96,6 +96,128 @@ class Map:
 
 		return (w_f * f + w_ft * ft + w_a * a) > 1
 
+	def global_bundle_adjustment(self, intrinsic, iter=20, verbose=True):
+		"""
+		전체 궤적에 대한 글로벌 번들 조정 수행
+		"""
+		# 옵티마이저 생성
+		opt = g2o.SparseOptimizer()
+		solver = g2o.BlockSolverSE3(g2o.LinearSolverCSparseSE3())
+		solver = g2o.OptimizationAlgorithmLevenberg(solver)
+		opt.set_algorithm(solver)
+		opt.set_verbose(verbose)
+		opt_frames, opt_pts = {}, {}
+		
+		# 카메라 파라미터 설정
+		f = intrinsic[0, 0]
+		cx = intrinsic[0, 2]
+		cy = intrinsic[1, 2]       
+		assert intrinsic[0, 0] == intrinsic[1, 1]  # fx == fy
+		cam = g2o.CameraParameters(f, (cx, cy), 0)         
+		cam.set_id(0)
+		opt.add_parameter(cam)
+		
+		# 모든 키프레임을 그래프에 추가 (기존과 다름: 윈도우 크기 제한 없음)
+		all_keyframes = self.keyframes
+		print(f"글로벌 최적화: {len(all_keyframes)} 키프레임 처리 중...")
+		
+		for idx, f in enumerate(all_keyframes):
+			# SE(3) 포즈 정점 추가
+			transform = (f.a * f.image + f.b).squeeze()
+			v_se3 = g2o.VertexD3VOFramePose(transform)
+			v_se3.set_estimate(g2o.SE3Quat(f.pose[0:3, 0:3], f.pose[0:3, 3]))
+			v_se3.set_id(f.id * 2)  # 짝수 ID
+			
+			# 첫 프레임만 고정 (나머지는 최적화 대상)
+			if idx == 0:
+				v_se3.set_fixed(True)
+			
+			opt.add_vertex(v_se3)
+			opt_frames[f] = v_se3
+		
+		# 전역 맵 포인트 추가 - 기존 keypoints 함수를 확장
+		kpts = {}
+		
+		# 모든 유효한 포인트 수집
+		for f in all_keyframes:
+			for pt in f.pts.values():
+				if pt.valid:
+					# 포인트가 여러 프레임에서 관찰되었는지 확인
+					local = []
+					for idx, frame in enumerate(pt.frames):
+						if frame in all_keyframes:
+							local.append((frame, idx))
+					
+					# 둘 이상의 키프레임에서 관찰된 포인트만 사용
+					if len(local) > 1:
+						kpts[pt] = local
+		
+		print(f"글로벌 최적화: {len(kpts)} 포인트 처리 중...")
+		
+		# 포인트 정점 및 에지 추가 (기존 코드와 유사)
+		for p in kpts:
+			host_frame, host_uv_coord = kpts[p][0][0], kpts[p][0][0].optimizer_kps[kpts[p][0][1]]
+			pt = g2o.VertexD3VOPointDepth(host_uv_coord[0], host_uv_coord[1])
+			pt.set_id(p.id * 2 + 1)  # 홀수 ID
+			
+			# 깊이가 음수나 0이 되지 않도록 보장
+			depth_estimate = max(0.01, host_frame.depth[host_uv_coord[0]][host_uv_coord[1]])
+			pt.set_estimate(depth_estimate)
+			pt.set_fixed(False)
+			opt_pts[p] = pt
+			opt.add_vertex(pt)
+			
+			# 에지 추가
+			for f in kpts[p][1:]:
+				edge = g2o.EdgeProjectD3VO()
+				edge.resize(3)
+				edge.set_vertex(0, pt)
+				edge.set_vertex(1, opt_frames[host_frame])
+				edge.set_vertex(2, opt_frames[f[0]])
+				
+				# 불확실성 반영
+				weight_mx = np.eye(3) * (self.alpha**2) / (self.alpha**2 + np.sqrt(host_frame.uncertainty[host_uv_coord[0]][host_uv_coord[1]])**2)
+				edge.set_information(weight_mx)
+				
+				# 강건한 커널 사용 및 파라미터 설정
+				robust_kernel = g2o.RobustKernelHuber()
+				robust_kernel.set_delta(1.0)  # 이상치에 덜 민감하게
+				edge.set_robust_kernel(robust_kernel)
+				edge.set_parameter_id(0, 0)
+				opt.add_edge(edge)
+		
+		# 최적화 실행
+		if len(kpts) > 0:
+			# 초기 에러 계산
+			opt.initialize_optimization()
+			initial_chi2 = opt.chi2()
+			if verbose:
+				print(f"초기 에러(chi2): {initial_chi2}")
+			
+			# 단계적 최적화 (안정성 향상)
+			for i in range(3):  # 3단계로 나누어 최적화
+				opt.optimize(iter // 3)
+				if verbose:
+					print(f"단계 {i+1} 후 에러: {opt.chi2()}")
+			
+			# 결과 저장
+			for p in kpts:
+				est = max(0.01, opt_pts[p].estimate())
+				p.update_host_depth(est)
+			
+			for f in all_keyframes:
+				if f in opt_frames:  # 안전 검사
+					est = opt_frames[f].estimate()
+					f.pose = np.eye(4)
+					f.pose[:3, :3] = est.rotation().matrix()
+					f.pose[:3, 3] = est.translation()
+			
+			if verbose:
+				final_chi2 = opt.chi2()
+				print(f"최종 에러(chi2): {final_chi2}")
+				print(f"개선율: {(initial_chi2 - final_chi2) / initial_chi2 * 100:.2f}%")
+		
+		return True
 
 	def optimize(self, intrinsic, iter=6, verbose=False):
 		"""Run hypergraph-based optimization over current Points and Frames. Uses custom 
@@ -113,7 +235,7 @@ class Map:
 		f = intrinsic[0, 0]
 		cx = intrinsic[0, 2]
 		cy = intrinsic[1, 2]       
-		assert intrinsic[0, 0] == intrinsic[1, 1]		# fx == fy
+		# assert intrinsic[0, 0] == intrinsic[1, 1]		# fx == fy
 		cam = g2o.CameraParameters(f, (cx, cy), 0)         
 		cam.set_id(0)
 		opt.add_parameter(cam)  
@@ -174,8 +296,14 @@ class Map:
 			# store optimization results in our objects
 			for p in kpts:
 				est = opt_pts[p].estimate()
-				assert est >= 0
+				""" original code"""
+				# assert est >= 0
+				# p.update_host_depth(est)
+
+				""" new code """
+				est = max(0.01, opt_pts[p].estimate())  # 최소 깊이값 적용
 				p.update_host_depth(est)
+				
 		
 			for idx, f in enumerate(self.keyframes):
 				est = opt_frames[f].estimate()

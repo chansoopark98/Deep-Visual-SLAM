@@ -4,6 +4,7 @@ import pandas as pd
 import yaml
 import tqdm
 import sys
+import cv2
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from test_loader import RedwoodDataLoader, umeyama_alignment
@@ -119,6 +120,15 @@ if __name__ == '__main__':
         # dummy
         dummy_input = tf.zeros((batch_size, *image_shape, 3), dtype=tf.float32)
         _ = depth_net(dummy_input, training=False)
+
+        # results
+        result_dir = './eval/results'
+        rgb_results = os.path.join(result_dir, 'rgb')
+        depth_results = os.path.join(result_dir, 'depth')
+        os.makedirs(result_dir, exist_ok=True)
+        os.makedirs(rgb_results, exist_ok=True)
+        os.makedirs(depth_results, exist_ok=True)
+        
         
         gt_rel_pose_list = [] # 4x4 transform matrix
         pred_rel_pose_list = [] # 4x4 transform matrix
@@ -153,6 +163,21 @@ if __name__ == '__main__':
             pred_pose_mat = tf.squeeze(pred_pose_mat, axis=0)
             pred_rel_pose_list.append(pred_pose_mat.numpy())
             gt_rel_pose_list.append(gt_rel_pose)
+
+            # Save depth and rgb images
+            rgb_path = os.path.join(rgb_results, f"rgb_{idx:06d}.png")
+            depth_path = os.path.join(depth_results, f"depth_{idx:06d}.png")
+            denormed_target = dataset.denormalize_image(target_image).numpy().astype(np.uint8)
+            denormed_right = dataset.denormalize_image(right_image).numpy().astype(np.uint8)
+
+            plt.imshow(depth[0, :, :, 0], cmap='plasma', vmin=0.0, vmax=5.0)
+            plt.colorbar()
+            plt.savefig(depth_path)
+            plt.close()
+            
+            cv2.imwrite(rgb_path, cv2.cvtColor(denormed_target, cv2.COLOR_BGR2RGB))
+            cv2.imwrite(os.path.join(rgb_results, f"right_{idx:06d}.png"), cv2.cvtColor(denormed_right, cv2.COLOR_BGR2RGB))
+            
 
             idx += 1
             if idx > 1000:
