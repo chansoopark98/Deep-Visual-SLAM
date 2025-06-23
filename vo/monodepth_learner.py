@@ -93,50 +93,33 @@ class Learner(object):
         smoothness_y = disp_dy * weight_y
 
         return tf.reduce_mean(smoothness_x) + tf.reduce_mean(smoothness_y)
-    
+        
     @tf.function(jit_compile=True)
     def rescale_intrinsics(self, intrinsics, original_height, original_width, target_height, target_width):
         """
         intrinsics(tf.Tensor): [B, 3, 3]
         """
-        # float 변환
-        orig_h = tf.cast(original_height, tf.float32)
-        orig_w = tf.cast(original_width,  tf.float32)
-        tgt_h  = tf.cast(target_height,   tf.float32)
-        tgt_w  = tf.cast(target_width,    tf.float32)
+        # 스케일 비율 계산
+        h_scale = tf.cast(target_height, tf.float32) / tf.cast(original_height, tf.float32)
+        w_scale = tf.cast(target_width, tf.float32) / tf.cast(original_width, tf.float32)
 
-        # 세로/가로 스케일 비율
-        h_scale = tgt_h / orig_h
-        w_scale = tgt_w / orig_w
-
-        # 기존 fx, fy, cx, cy 추출
-        fx = intrinsics[:, 0, 0]  # (B,)
-        fy = intrinsics[:, 1, 1]  # (B,)
-        cx = intrinsics[:, 0, 2]  # (B,)
-        cy = intrinsics[:, 1, 2]  # (B,)
-
-        # 새로운 스케일 반영
-        fx_new = fx * w_scale
-        fy_new = fy * h_scale
-        cx_new = cx * w_scale
-        cy_new = cy * h_scale
-
-        # skew는 제외(혹은 0으로 둔다고 가정)
-        # 보통 pinhole 모델에서는 skew가 0이므로, 여기서는 0으로 세팅
-        skew_0 = tf.zeros_like(fx_new)  # (B,)
-        skew_1 = tf.zeros_like(fy_new)  # (B,)
-
-        # batch 차원만큼 3x3을 다시 구성
-        row0 = tf.stack([fx_new, skew_0, cx_new], axis=1)  # (B, 3)
-        row1 = tf.stack([skew_1, fy_new, cy_new], axis=1)  # (B, 3)
-        # 마지막 행은 [0, 0, 1]
-        # -> batch 크기에 맞춰 tile 또는 stack
-        # shape: (B, 3)
-        row2 = tf.tile(tf.constant([[0., 0., 1.]], tf.float32), [tf.shape(intrinsics)[0], 1])
-
-        # 최종 (B, 3, 3)으로 스택
-        intrinsics_rescaled = tf.stack([row0, row1, row2], axis=1)
-        return intrinsics_rescaled
+        # 배치 크기
+        batch_size = tf.shape(intrinsics)[0]
+        
+        # 스케일링 행렬 생성
+        scale_matrix = tf.stack([
+            tf.stack([w_scale, 0.0, 0.0], axis=0),
+            tf.stack([0.0, h_scale, 0.0], axis=0), 
+            tf.stack([0.0, 0.0, 1.0], axis=0)
+        ], axis=0)
+        
+        # 배치 차원으로 확장
+        scale_matrix = tf.tile(tf.expand_dims(scale_matrix, 0), [batch_size, 1, 1])
+        
+        # 행렬 곱셈으로 스케일링 적용
+        scaled_intrinsics = tf.matmul(scale_matrix, intrinsics)
+        
+        return scaled_intrinsics
 
     def forward_step(self, ref_images, tgt_image, intrinsic, training=True) -> tf.Tensor:
         left_image = ref_images[0] # [B, H, W, 3]
@@ -185,23 +168,16 @@ class Learner(object):
             identity_reprojection_list = []  # 원본 구현처럼 분리
 
             curr_depth = pred_depths[s] # [B,H,W,1]
+            h_s = H // (2**s)
+            w_s = W // (2**s)
+
             for i in range(2): # left, right
-                
                 curr_src = ref_images[i] # [B,H,W,3]
                 curr_pose = pred_poses[i] # [B,6]
 
-                # 스케일에 맞게 depth와 intrinsic 조정
-                h_s = H // (2**s)
-                w_s = W // (2**s)
-                
                 if s != 0:
-                    # 현재 스케일에 맞게 depth 크기 조정 (원본 구현과 일치)
-                    curr_depth = tf.image.resize(curr_depth, [h_s, w_s], 
-                                                method=tf.image.ResizeMethod.BILINEAR)
-                     
                     curr_src = tf.image.resize(curr_src, [h_s, w_s], 
-                                               method=tf.image.ResizeMethod.BILINEAR)
-                    # intrinsic도 스케일에 맞게 조정
+                                            method=tf.image.ResizeMethod.BILINEAR)
                     scaled_intrinsic = self.rescale_intrinsics(intrinsic, H, W, h_s, w_s)
                 else:
                     scaled_intrinsic = intrinsic
@@ -222,12 +198,9 @@ class Learner(object):
                 # Identity reprojection loss - 원본 구현처럼 여기서 계산
                 if self.auto_mask:
                     # 스케일에 맞게 ref 이미지 조정
-                    scaled_src = tf.image.resize(curr_src, [h_s, w_s], 
-                                                method=tf.image.ResizeMethod.BILINEAR)
-                    identity_reproj_loss = self.compute_reprojection_loss(scaled_src, scaled_tgts[s])
+                    identity_reproj_loss = self.compute_reprojection_loss(curr_src, scaled_tgts[s])
                     identity_reprojection_list.append(identity_reproj_loss)
 
-            # 원본 구현과 같은 방식으로 auto-masking 적용
             reprojection_losses = tf.concat(reprojection_list, axis=3)  # [B, H_s, W_s, 2]
             
             if self.auto_mask:
@@ -239,20 +212,12 @@ class Learner(object):
                     stddev=1e-5
                 )
 
-                if self.predictive_mask:
-                    # mask = tf.expand_dims(disp_raw[s], axis=-1)
-                    mask = disp_raw[s]
-                    reprojection_losses *= mask
-
-                    weighting_loss = tf_keras.losses.binary_crossentropy(mask, tf.ones(mask.shape)) * 0.2
-                    weighting_losses += tf.reduce_mean(weighting_loss)
-                
-                combined_losses = tf.concat([identity_reprojection_losses, reprojection_losses], axis=3) # [B, H, W, 17] > [B, H, W, 1]
+                combined_losses = tf.concat([identity_reprojection_losses, reprojection_losses], axis=3)
                 combined = tf.reduce_min(combined_losses, axis=3, keepdims=True)
+            
             else:
                 combined = tf.reduce_min(reprojection_losses, axis=3, keepdims=True)
 
-  
             # 최종 reprojection loss
             reprojection_loss = tf.reduce_mean(combined)
 

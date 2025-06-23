@@ -50,7 +50,7 @@ class Trainer(object):
         _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
         self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
-        self.depth_net.trainable = False
+        # self.depth_net.trainable = False
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = (self.batch_size, *image_shape, 6)
@@ -117,8 +117,8 @@ class Trainer(object):
                 ref_images, target_image, intrinsic, training=True)
             scaled_loss = self.optimizer.scale_loss(total_loss)
         
-        # all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        all_vars = self.pose_net.trainable_variables
+        all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
+        # all_vars = self.pose_net.trainable_variables
         grads = tape.gradient(scaled_loss, all_vars)
         self.optimizer.apply_gradients(zip(grads, all_vars))
         return total_loss, pixel_loss, smooth_loss, pred_depths
