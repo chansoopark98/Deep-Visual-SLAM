@@ -34,7 +34,7 @@ class OfflineRunner:
 		self.image_size = image_size
 		self.cap = cv2.VideoCapture(self.video_path)
 		self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-		self.camera_poses = camera_poses
+		self.camera_poses = camera_poses  
 		self.intrinsic = intrinsic
 		self.mono_vo = MonoVO(self.intrinsic)
 		self.flip_transform = np.diag([1, -1, -1, 1])

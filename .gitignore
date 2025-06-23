@@ -12,6 +12,7 @@ assets/
 *.pem
 *.h5
 *.mp4
+*.csv
 
 # web
 /web/modules/three.js/*

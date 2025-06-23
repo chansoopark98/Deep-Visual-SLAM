@@ -108,13 +108,13 @@ class PoseNetExtra(tf_keras.Model):
         self.batch_size = batch_size
         self.pose_scale = 0.1
 
-        # self.encoder = CustomFlow(image_shape=(self.image_height, self.image_width, 6), batch_size=batch_size, pretrained=True).build_model()
-        # self.encoder.build((self.batch_size, self.image_height, self.image_width, 6))
-        # self.encoder.trainable = True
-
-        self.encoder = Resnet(image_shape=(self.image_height, self.image_width, 6), batch_size=batch_size, pretrained=True, prefix='resnet18_pose').build_model()
+        self.encoder = CustomFlow(image_shape=(self.image_height, self.image_width, 6), batch_size=batch_size, pretrained=True).build_model()
         self.encoder.build((self.batch_size, self.image_height, self.image_width, 6))
         self.encoder.trainable = True
+
+        # self.encoder = Resnet(image_shape=(self.image_height, self.image_width, 6), batch_size=batch_size, pretrained=True, prefix='resnet18_pose').build_model()
+        # self.encoder.build((self.batch_size, self.image_height, self.image_width, 6))
+        # self.encoder.trainable = True
         
         # 공통 특징 추출층
         self.shared_features = tf_keras.Sequential([
