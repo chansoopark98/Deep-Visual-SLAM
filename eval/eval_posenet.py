@@ -170,13 +170,13 @@ if __name__ == '__main__':
             denormed_target = dataset.denormalize_image(target_image).numpy().astype(np.uint8)
             denormed_right = dataset.denormalize_image(right_image).numpy().astype(np.uint8)
 
-            plt.imshow(depth[0, :, :, 0], cmap='plasma', vmin=0.0, vmax=5.0)
-            plt.colorbar()
-            plt.savefig(depth_path)
-            plt.close()
+            # plt.imshow(depth[0, :, :, 0], cmap='plasma', vmin=0.0, vmax=5.0)
+            # plt.colorbar()
+            # plt.savefig(depth_path)
+            # plt.close()
             
-            cv2.imwrite(rgb_path, cv2.cvtColor(denormed_target, cv2.COLOR_BGR2RGB))
-            cv2.imwrite(os.path.join(rgb_results, f"right_{idx:06d}.png"), cv2.cvtColor(denormed_right, cv2.COLOR_BGR2RGB))
+            # cv2.imwrite(rgb_path, cv2.cvtColor(denormed_target, cv2.COLOR_BGR2RGB))
+            # cv2.imwrite(os.path.join(rgb_results, f"right_{idx:06d}.png"), cv2.cvtColor(denormed_right, cv2.COLOR_BGR2RGB))
             
 
             idx += 1
@@ -226,16 +226,15 @@ if __name__ == '__main__':
         aligned_rot_errors = compute_relative_rotation_error(gt_global_pose_list, pred_global_pose_list)
         aligned_trans_errors = compute_relative_translation_error(gt_global_pose_list, pred_global_pose_list)
 
+        # 프레임 수를 기준으로 데이터 정렬
+        frame_count = len(aligned_rot_errors)
+
         print(f"[Aligned] 평균 회전 오차: {np.mean(aligned_rot_errors):.3f}°")
         print(f"[Aligned] 평균 이동 오차: {np.mean(aligned_trans_errors):.3f} m")
         print(f"[Aligned] 평균 이동 오차: {np.mean(aligned_trans_errors) * 100:.3f} cm")
-        avg_duration_sec = np.mean(duration_list)
+        avg_duration_sec = np.mean(duration_list[:frame_count])
         avg_duration_ms = avg_duration_sec * 1000
-        print(f"평균 처리 시간: {avg_duration_sec:.4f} 초 ({avg_duration_ms:.2f} 밀리초)")
-
-
-        # 프레임 수를 기준으로 데이터 정렬
-        frame_count = len(aligned_rot_errors)
+        print(f"평균 처리 시간: {avg_duration_sec:.10f} 초 ({avg_duration_ms:.10f} 밀리초)")
 
         data = {
             "Frame": list(range(frame_count)),
