@@ -110,8 +110,7 @@ class Trainer(object):
                                      self.config['Directory']['exp_name'])
         os.makedirs(self.save_path, exist_ok=True)
     
-    # @tf.function(jit_compile=True)
-    @tf.function()
+    @tf.function(jit_compile=True)
     def train_step(self, sample: dict):
         with tf.GradientTape() as tape:
             total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(
