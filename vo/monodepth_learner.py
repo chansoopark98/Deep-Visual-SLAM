@@ -114,262 +114,180 @@ class Learner(object):
 
     def forward_step(self, sample: dict, training: bool = True) -> tf.Tensor:
         """
-        sample dict 구조:
-        - source_left: 왼쪽 소스 이미지
-        - source_right: 오른쪽 소스 이미지 (스테레오의 경우)
-        - target_image: 타겟 이미지 
-        - intrinsic: 카메라 내부 파라미터
-        - poses: GT poses (stereo의 경우) 또는 None (temporal의 경우)
-        - baseline: 스테레오 베이스라인
-        - data_type: 0 = 'stereo', 1 = 'temporal'
-        - use_pose_net: pose network 사용 여부
+        최적화된 forward step - JIT 컴파일 친화적
         """
         # Unpack sample
         left_image = sample['source_left']
         right_image = sample['source_right']
         tgt_image = sample['target_image']
         intrinsic = sample['intrinsic']
-        gt_poses = sample['poses']  # stereo의 경우 GT poses [B, 2, 4, 4]
-        # baseline = sample['baseline']
-        data_type = sample['data_type']  # integer로 변경
+        gt_poses = sample['poses']
+        data_type = sample['data_type']  # 0: temporal, 1: stereo
         use_pose_net = sample['use_pose_net']
-        
-        ref_images = [left_image, right_image]
 
         pixel_losses = 0.
         smooth_losses = 0.
         
+        batch_size = tf.shape(tgt_image)[0]
         H = tf.shape(tgt_image)[1]
         W = tf.shape(tgt_image)[2]
 
-        # Generate Depth Results
-        pred_depths = []
-        scaled_tgts = []
-
-        disp_raw = self.depth_net(tgt_image, training=training)
-
-        for scale_idx in range(self.num_scales):
-            scaled_disp = disp_raw[scale_idx]
-            scaled_depth = self.disp_to_depth(scaled_disp, self.min_depth, self.max_depth)
-            pred_depths.append(scaled_depth)
-
-            tgt_scaled = tf.image.resize(tgt_image,
-                                        [H // (2**scale_idx), W // (2**scale_idx)],
-                                        method=tf.image.ResizeMethod.BILINEAR)
-            scaled_tgts.append(tgt_scaled)
+        # Depth prediction
+        disp_outputs = self.depth_net(tgt_image, training=training)
         
-        # Pose 처리 - inner function 제거
-        # 1. Temporal poses (모든 샘플에 대해)
+        # Pose prediction - 조건부 계산 제거, 모두 계산 후 선택
         concat_left_tgt = tf.concat([left_image, tgt_image], axis=3)
         concat_tgt_right = tf.concat([tgt_image, right_image], axis=3)
         
         temporal_pose_left = self.pose_net(concat_left_tgt, training=training)
         temporal_pose_right = self.pose_net(concat_tgt_right, training=training)
         
-        # 2. Stereo poses (모든 샘플에 대해)
-        stereo_pose_left = self.matrix_to_axis_angle_simple(gt_poses[:, 0, :, :])
-        stereo_pose_right = self.matrix_to_axis_angle_simple(gt_poses[:, 1, :, :])
+        # Stereo poses
+        stereo_pose_left = self.matrix_to_axis_angle_vectorized(gt_poses[:, 0, :, :])
+        stereo_pose_right = self.matrix_to_axis_angle_vectorized(gt_poses[:, 1, :, :])
         
-        # 3. use_pose_net에 따라 선택
-        use_pose_net_expanded = tf.expand_dims(use_pose_net, axis=1)  # [B, 1]
+        # Select poses based on use_pose_net
+        use_pose_net_f = tf.cast(tf.expand_dims(use_pose_net, 1), tf.float32)
+        one_minus_use = 1.0 - use_pose_net_f
         
-        pose_left = tf.where(
-            use_pose_net_expanded,
-            temporal_pose_left,
-            stereo_pose_left
-        )
-        
-        pose_right = tf.where(
-            use_pose_net_expanded,
-            temporal_pose_right,
-            stereo_pose_right
-        )
-        
-        pred_poses = [pose_left, pose_right]
+        pose_left = temporal_pose_left * use_pose_net_f + stereo_pose_left * one_minus_use
+        pose_right = temporal_pose_right * use_pose_net_f + stereo_pose_right * one_minus_use
 
-        # Multi-scale loss computation
+        # 데이터 타입별 invert 설정
+        is_temporal = tf.cast(tf.equal(data_type, 0), tf.float32)
+        is_stereo = 1.0 - is_temporal
+
+        # Multi-scale processing
         for s in range(self.num_scales):
-            reprojection_list = []
-            identity_reprojection_list = []
-
-            curr_depth = pred_depths[s]  # [B,H,W,1]
-            h_s = H // (2**s)
-            w_s = W // (2**s)
-
-            for i in range(2):  # left, right
-                curr_src = ref_images[i]  # [B,H,W,3]
-                curr_pose = pred_poses[i]  # [B,6]
-
-                if s != 0:
-                    curr_src = tf.image.resize(curr_src, [h_s, w_s], 
-                                            method=tf.image.ResizeMethod.BILINEAR)
-                    scaled_intrinsic = self.rescale_intrinsics(intrinsic, H, W, h_s, w_s)
+            h_s = H // (2 ** s)
+            w_s = W // (2 ** s)
+            
+            # Current scale depth
+            disp_s = disp_outputs[s]
+            depth_s = self.disp_to_depth(disp_s, self.min_depth, self.max_depth)
+            
+            # Resize target
+            if s == 0:
+                tgt_s = tgt_image
+                scaled_K = intrinsic
+            else:
+                tgt_s = tf.image.resize(tgt_image, [h_s, w_s])
+                scaled_K = self.rescale_intrinsics(intrinsic, H, W, h_s, w_s)
+            
+            # Process both source images
+            reprojection_losses = []
+            
+            for i in range(2):
+                if i == 0:
+                    src = left_image
+                    pose = pose_left
                 else:
-                    scaled_intrinsic = intrinsic
-
-                # 효율적인 warping
-                is_stereo = tf.equal(data_type, 1)  # 1 = stereo
-                should_invert = tf.logical_and(
-                    tf.logical_not(is_stereo),  # temporal이고
-                    tf.equal(i, 0)              # left일 때
-                )  # [B]
+                    src = right_image  
+                    pose = pose_right
                 
-                adjusted_pose = self.adjust_pose_for_invert(curr_pose, should_invert)
+                if s > 0:
+                    src = tf.image.resize(src, [h_s, w_s])
                 
-                curr_proj_image = projective_inverse_warp(
-                    curr_src,
-                    tf.squeeze(curr_depth, axis=3),
+                # Adjust pose for temporal left
+                should_invert = is_temporal * tf.cast(tf.equal(i, 0), tf.float32)
+                should_invert = tf.expand_dims(should_invert, 1)
+                
+                adjusted_pose = pose * (1.0 - 2.0 * should_invert)
+                
+                # Warp
+                proj_img = projective_inverse_warp(
+                    src,
+                    tf.squeeze(depth_s, axis=3),
                     adjusted_pose,
-                    intrinsics=scaled_intrinsic,
+                    intrinsics=scaled_K,
                     invert=False,
                     euler=False
                 )
                 
-                # Photometric loss
-                curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, scaled_tgts[s])
-                reprojection_list.append(curr_reproj_loss)
+                # Compute loss
+                reproj_loss = self.compute_reprojection_loss(proj_img, tgt_s)
+                reprojection_losses.append(reproj_loss)
                 
-                # Identity reprojection loss
+                # Identity loss for auto-masking
                 if self.auto_mask:
-                    identity_reproj_loss = self.compute_reprojection_loss(curr_src, scaled_tgts[s])
-                    identity_reprojection_list.append(identity_reproj_loss)
-
-            reprojection_losses = tf.concat(reprojection_list, axis=3)  # [B, H_s, W_s, 2]
+                    identity_loss = self.compute_reprojection_loss(src, tgt_s)
+                    reprojection_losses.append(identity_loss)
             
-            # Auto-masking
+            # Combine losses
             if self.auto_mask:
-                identity_reprojection_losses = tf.concat(identity_reprojection_list, axis=3)
+                # Stack losses: [reproj_left, identity_left, reproj_right, identity_right]
+                all_losses = tf.concat(reprojection_losses, axis=3)
                 
-                # Add small noise for numerical stability
-                identity_reprojection_losses += tf.random.normal(
-                    tf.shape(identity_reprojection_losses), 
-                    mean=0.0, 
-                    stddev=1e-5
-                )
-
-                # 각 샘플별로 다른 masking 적용
-                is_stereo = tf.equal(data_type, 1)  # 1 = stereo
-                is_stereo_expanded = tf.expand_dims(tf.expand_dims(tf.expand_dims(is_stereo, -1), -1), -1)
+                # For stereo: use only reprojection losses (indices 0, 2)
+                # For temporal: use all losses
+                stereo_losses = tf.concat([reprojection_losses[0], reprojection_losses[2]], axis=3)
                 
-                # Stereo masking: occlusion만 고려
-                stereo_masked = tf.reduce_min(reprojection_losses, axis=3, keepdims=True)
+                # Select based on data type
+                is_stereo_4d = tf.reshape(is_stereo, [batch_size, 1, 1, 1])
+                selected_losses = all_losses * (1.0 - is_stereo_4d) + \
+                                  tf.concat([stereo_losses, stereo_losses], axis=3) * is_stereo_4d
                 
-                # Temporal masking: auto-masking 적용
-                temporal_combined = tf.concat([identity_reprojection_losses, reprojection_losses], axis=3)
-                temporal_masked = tf.reduce_min(temporal_combined, axis=3, keepdims=True)
-                
-                # 선택
-                combined = tf.where(
-                    is_stereo_expanded,
-                    stereo_masked,
-                    temporal_masked
-                )
+                # Take minimum
+                min_loss = tf.reduce_min(selected_losses[:, :, :, :4], axis=3, keepdims=True)
             else:
-                combined = tf.reduce_min(reprojection_losses, axis=3, keepdims=True)
-
-            # 최종 reprojection loss
-            reprojection_loss = tf.reduce_mean(combined)
-
-            # Smoothness loss
-            mean_disp = tf.reduce_mean(disp_raw[s], [1, 2], keepdims=True)
-            norm_disp = disp_raw[s] / (mean_disp + 1e-7)
-            smooth_loss = self.get_smooth_loss(norm_disp, scaled_tgts[s])
-            smooth_loss = smooth_loss / (2.0**s)
-
-            pixel_losses += reprojection_loss
+                # No auto-masking
+                combined = tf.concat(reprojection_losses, axis=3)
+                min_loss = tf.reduce_min(combined, axis=3, keepdims=True)
+            
+            # Accumulate losses
+            pixel_loss = tf.reduce_mean(min_loss)
+            smooth_loss = self.get_smooth_loss(disp_s, tgt_s) / (2 ** s)
+            
+            pixel_losses += pixel_loss
             smooth_losses += smooth_loss * self.smoothness_ratio
         
         # Average over scales
-        num_scales_f = tf.cast(self.num_scales, tf.float32)
-        pixel_losses = pixel_losses / num_scales_f
-        smooth_losses = smooth_losses / num_scales_f
+        pixel_losses = pixel_losses / float(self.num_scales)
+        smooth_losses = smooth_losses / float(self.num_scales)
         
         total_loss = pixel_losses + smooth_losses
+        
+        # Return depth predictions for visualization
+        pred_depths = []
+        for s in range(self.num_scales):
+            depth = self.disp_to_depth(disp_outputs[s], self.min_depth, self.max_depth)
+            pred_depths.append(depth)
 
         return total_loss, pixel_losses, smooth_losses, pred_depths
 
-
-    @tf.function(jit_compile=True)
-    def adjust_pose_for_invert(self, pose, should_invert):
+    @tf.function
+    def matrix_to_axis_angle_vectorized(self, matrix):
         """
-        invert가 필요한 경우 pose를 역변환
-        pose: [B, 6] - (tx, ty, tz, rx, ry, rz)
-        should_invert: [B] - boolean
+        완전히 벡터화된 4x4 to 6DoF 변환
         """
-        # Translation 부분 반전
-        translation = pose[:, :3]  # [B, 3]
-        rotation = pose[:, 3:]     # [B, 3]
-        
-        # invert가 True인 경우 translation과 rotation을 반전
-        inverted_translation = -translation
-        inverted_rotation = -rotation
-        
-        # should_invert를 [B, 1]로 확장
-        should_invert_expanded = tf.expand_dims(should_invert, axis=1)
-        
-        # 조건에 따라 선택
-        adjusted_translation = tf.where(
-            should_invert_expanded,
-            inverted_translation,
-            translation
-        )
-        
-        adjusted_rotation = tf.where(
-            should_invert_expanded,
-            inverted_rotation,
-            rotation
-        )
-        
-        adjusted_pose = tf.concat([adjusted_translation, adjusted_rotation], axis=1)
-        
-        return adjusted_pose
-
-    @tf.function(jit_compile=True)
-    def matrix_to_axis_angle_simple(self, matrix):
-        """
-        간단하고 안정적인 4x4 to 6DoF 변환
-        scipy.spatial.transform.Rotation.as_rotvec() 참조
-        """
-        batch_size = tf.shape(matrix)[0]
-        
-        # Translation 추출
-        translation = matrix[:, :3, 3]  # [B, 3]
+        # Translation
+        translation = matrix[:, :3, 3]
         
         # Rotation matrix
-        R = matrix[:, :3, :3]  # [B, 3, 3]
+        R = matrix[:, :3, :3]
         
-        # Compute rotation vector using Rodrigues' formula
-        # 1. Compute trace
-        trace = tf.linalg.trace(R)
+        # Compute angle from trace
+        trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+        angle = tf.acos(tf.clip_by_value((trace - 1.0) / 2.0, -1.0, 1.0))
         
-        # 2. Compute angle
-        cos_theta = (trace - 1.0) / 2.0
-        cos_theta = tf.clip_by_value(cos_theta, -1.0, 1.0)
-        theta = tf.acos(cos_theta)
+        # Compute axis
+        # When angle is small, use [0, 0, 1] as default
+        # Otherwise use (R - R^T) / (2 * sin(angle))
+        sin_angle = tf.sin(angle)
+        use_default = tf.less(tf.abs(sin_angle), 1e-7)
         
-        # 3. Compute axis (when theta != 0)
-        # Use the fact that R - R^T gives us the axis direction
-        R_minus_RT = R - tf.transpose(R, [0, 2, 1])
-        
-        # Extract axis components
-        axis_x = R_minus_RT[:, 2, 1]
-        axis_y = R_minus_RT[:, 0, 2]  
-        axis_z = R_minus_RT[:, 1, 0]
+        axis_x = tf.where(use_default, 0.0, (R[:, 2, 1] - R[:, 1, 2]) / (2.0 * sin_angle + 1e-8))
+        axis_y = tf.where(use_default, 0.0, (R[:, 0, 2] - R[:, 2, 0]) / (2.0 * sin_angle + 1e-8))
+        axis_z = tf.where(use_default, 1.0, (R[:, 1, 0] - R[:, 0, 1]) / (2.0 * sin_angle + 1e-8))
         
         axis = tf.stack([axis_x, axis_y, axis_z], axis=1)
         
-        # Normalize axis
-        axis_norm = tf.norm(axis, axis=1, keepdims=True) + 1e-8
+        # Normalize
+        axis_norm = tf.maximum(tf.norm(axis, axis=1, keepdims=True), 1e-8)
         axis = axis / axis_norm
         
-        # Handle special case when theta ≈ 0
-        is_small_angle = tf.less(theta, 1e-5)
-        theta = tf.where(is_small_angle, tf.zeros_like(theta), theta)
+        # Axis-angle
+        angle_expanded = tf.expand_dims(angle, 1)
+        axis_angle = axis * tf.where(tf.expand_dims(use_default, 1), 0.0, angle_expanded)
         
-        # Axis-angle representation
-        axis_angle = axis * tf.expand_dims(theta, 1)
-        
-        # Combine translation and rotation
-        pose_6dof = tf.concat([translation, axis_angle], axis=1)
-        
-        return pose_6dof
+        return tf.concat([translation, axis_angle], axis=1)
