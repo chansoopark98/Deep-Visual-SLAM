@@ -111,10 +111,10 @@ class Trainer(object):
         os.makedirs(self.save_path, exist_ok=True)
     
     @tf.function(jit_compile=True)
-    def train_step(self, ref_images, target_image, intrinsic):
+    def train_step(self, sample: dict):
         with tf.GradientTape() as tape:
             total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(
-                ref_images, target_image, intrinsic, training=True)
+                sample, training=True)
             scaled_loss = self.optimizer.scale_loss(total_loss)
         
         all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
@@ -124,8 +124,8 @@ class Trainer(object):
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     @tf.function(jit_compile=True)
-    def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
-        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
+    def validation_step(self, sample: dict) -> tf.Tensor:
+        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(sample, training=False)
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     def train(self) -> None:        
@@ -139,8 +139,8 @@ class Trainer(object):
             print(' LR : {0}'.format(self.optimizer.learning_rate))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
-            for idx, (ref_images, target_image, intrinsic) in enumerate(train_tqdm):
-                train_t_loss, train_p_loss, train_s_loss, pred_train_depths = self.train_step(ref_images, target_image, intrinsic)
+            for idx, (batch_sample) in enumerate(train_tqdm):
+                train_t_loss, train_p_loss, train_s_loss, pred_train_depths = self.train_step(batch_sample)
 
                 # Update train metrics
                 self.train_total_loss(train_t_loss)
@@ -151,7 +151,7 @@ class Trainer(object):
                     current_step = self.data_loader.num_train_samples * epoch + idx
 
                     # Draw depth plot
-                    train_depth_plot = self.plot_tool.plot_images(images=target_image, # target_image
+                    train_depth_plot = self.plot_tool.plot_images(images=batch_sample['target_image'],
                                                                   pred_depths=pred_train_depths,
                                                                   denorm_func=self.data_loader.denormalize_image)
 
@@ -178,8 +178,8 @@ class Trainer(object):
             # Validation
             valid_tqdm = tqdm(self.data_loader.valid_dataset, total=self.data_loader.num_valid_samples)
             valid_tqdm.set_description('Validation || ')
-            for idx, (ref_images, target_image, intrinsic) in enumerate(valid_tqdm):
-                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths = self.validation_step(ref_images, target_image, intrinsic)
+            for idx, (batch_sample) in enumerate(valid_tqdm):
+                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths = self.validation_step(batch_sample)
 
                 # Update valid metrics
                 self.valid_total_loss(valid_t_loss)
@@ -189,7 +189,7 @@ class Trainer(object):
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
                     current_step = self.data_loader.num_valid_samples * epoch + idx
                     # Draw target image - target depth plot
-                    valid_depth_plot = self.plot_tool.plot_images(images=target_image,
+                    valid_depth_plot = self.plot_tool.plot_images(images=batch_sample['target_image'],
                                                                   pred_depths=pred_valid_depths,
                                                                   denorm_func=self.data_loader.denormalize_image)
 

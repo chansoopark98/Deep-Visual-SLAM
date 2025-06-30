@@ -88,7 +88,7 @@ class CustomDataHandler(object):
                 'intrinsic': left_K,
                 'poses': np.array([stereo_T_L2R, stereo_T_R2L], dtype=np.float32),
                 'baseline': baseline,
-                'data_type': 'stereo',
+                'data_type': 0,
                 'use_pose_net': False,  # 단일 bool 값으로 변경
             }
             samples.append(sample_stereo)
@@ -107,7 +107,7 @@ class CustomDataHandler(object):
                 'intrinsic': intrinsic,
                 'poses': np.array([dummy_pose, dummy_pose], dtype=np.float32),  # 두 개의 더미 pose
                 'baseline': 0.0,
-                'data_type': 'temporal',
+                'data_type': 1,
                 'use_pose_net': True,
             }
             samples.append(sample)
