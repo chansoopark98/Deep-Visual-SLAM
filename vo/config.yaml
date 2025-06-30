@@ -6,12 +6,15 @@ Directory:
   results: ./results
 
 Dataset:
-  custom_data: False
-  mars_logger: True
+  custom_data: True
+  mars_logger: False
   redwood: False
+  tspxr_capture: False        # 새로운 플래그 추가
 
 Train:
   mode: axisAngle # axisAngle, euler
+  use_stereo: true    # 스테레오 데이터 사용 여부
+  use_temporal: true  # Temporal 데이터 사용 여부
   use_shuffle: True
   train_plot_interval: 100 # 100
   valid_plot_interval: 20
@@ -35,6 +38,9 @@ Train:
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001
+  use_stereo: true           # 스테레오 사용 여부
+  stereo_ratio: 0.4          # 스테레오 데이터 비율 (0.4 = 40%)
+  stereo_weight: 1.0         # 스테레오 손실 가중치
 
 Experiment:
   gpus: [1] # [0, 1]
