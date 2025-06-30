@@ -45,19 +45,8 @@ class DataLoader(object):
         self.num_valid_samples = 0
         self.num_test_samples = 0
         
-        # if self.config['Dataset']['custom_data']:
-        #     dataset = CustomDataHandler(config=self.config)
-        #     train_dataset = self._build_generator(np_samples=dataset.train_data)
-        #     valid_dataset = self._build_generator(np_samples=dataset.valid_data)
-
-        #     train_datasets.append(train_dataset)
-        #     valid_datasets.append(valid_dataset)
-
-        #     self.num_train_samples += dataset.train_data.shape[0]
-        #     self.num_valid_samples += dataset.valid_data.shape[0]
-
-        if self.config['Dataset']['mars_logger']:
-            dataset = MarsLoggerHandler(config=self.config)
+        if self.config['Dataset']['custom_data']:
+            dataset = CustomDataHandler(config=self.config)
             train_dataset = self._build_generator(np_samples=dataset.train_data)
             valid_dataset = self._build_generator(np_samples=dataset.valid_data)
             test_dataset = self._build_generator(np_samples=dataset.test_data)
@@ -69,32 +58,23 @@ class DataLoader(object):
             self.num_train_samples += dataset.train_data.shape[0]
             self.num_valid_samples += dataset.valid_data.shape[0]
             self.num_test_samples += dataset.test_data.shape[0]
-
-        if self.config['Dataset']['redwood']:
-            dataset = RedwoodHandler(config=self.config)
-            train_dataset = self._build_generator(np_samples=dataset.train_data)
-            valid_dataset = self._build_generator(np_samples=dataset.valid_data)
-            # test_dataset = self._build_generator(np_samples=dataset.test_data)
-
-            train_datasets.append(train_dataset)
-            valid_datasets.append(valid_dataset)
-            # test_datasets.append(test_dataset)
-    
-            self.num_train_samples += dataset.train_data.shape[0]
-            self.num_valid_samples += dataset.valid_data.shape[0]
-            # self.num_test_samples += dataset.test_data.shape[0]
-            
+        
         return train_datasets, valid_datasets, test_datasets
 
     def _build_generator(self, np_samples: np.ndarray) -> tf.data.Dataset:
         dataset: tf.data.Dataset = tf.data.Dataset.from_generator(
             lambda: np_samples,
-            output_signature={
-                'source_left': tf.TensorSpec(shape=(), dtype=tf.string),  # 리스트로 가변 길이
-                'target_image': tf.TensorSpec(shape=(), dtype=tf.string),  # 단일 스트링
-                'source_right': tf.TensorSpec(shape=(), dtype=tf.string),  # 리스트로 가변 길이
-                'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32),  # 고정 크기 (3, 3)
-            }
+            output_signature = {
+            'source_left': tf.TensorSpec(shape=(), dtype=tf.string),
+            'target_image': tf.TensorSpec(shape=(), dtype=tf.string),
+            'source_right': tf.TensorSpec(shape=(), dtype=tf.string),
+            'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32),  # 3x3 행렬
+            'poses': tf.TensorSpec(shape=(2, 4, 4), dtype=tf.float32),  # 가변 개수의 4x4 행렬
+            'baseline': tf.TensorSpec(shape=(), dtype=tf.float32),  # 스칼라
+            'data_type': tf.TensorSpec(shape=(), dtype=tf.string),  # 스트링
+            'use_pose_net': tf.TensorSpec(shape=(), dtype=tf.bool),  # bool
+        }
+    
         )
         return dataset
 
@@ -137,9 +117,19 @@ class DataLoader(object):
         left_image = self.normalize_image(left_image)
         right_image = self.normalize_image(right_image)
         target_image = self.normalize_image(target_image)
-        ref_images = (left_image, right_image)
+        
+        processed_sample = {
+            'source_left': left_image,
+            'source_right': right_image,
+            'target_image': target_image,
+            'intrinsic': intrinsic,
+            'poses': sample['poses'],
+            'baseline': sample['baseline'],
+            'data_type': sample['data_type'],
+            'use_pose_net': sample['use_pose_net']
+        }
 
-        return ref_images, target_image, intrinsic
+        return processed_sample
     
     @tf.function()
     def valid_process(self, sample: dict) -> tuple:
@@ -155,9 +145,20 @@ class DataLoader(object):
         left_image = self.normalize_image(left_image)
         right_image = self.normalize_image(right_image)
         target_image = self.normalize_image(target_image)
-        ref_images = (left_image, right_image)
 
-        return ref_images, target_image, intrinsic
+        processed_sample = {
+            'source_left': left_image,
+            'source_right': right_image,
+            'target_image': target_image,
+            'intrinsic': intrinsic,
+            'poses': sample['poses'],
+            'baseline': sample['baseline'],
+            'data_type': sample['data_type'],
+            'use_pose_net': sample['use_pose_net']
+        }
+
+        return processed_sample
+    
     
     @tf.function(jit_compile=True)
     def augmentation(self, left_image, right_image, target_image, intrinsic):
@@ -165,10 +166,10 @@ class DataLoader(object):
         right_image = tf.cast(right_image, tf.float32) / 255.0
         target_image = tf.cast(target_image, tf.float32) / 255.0
 
-        if tf.random.uniform([]) > 0.5:
-            left_image = self.augmentor.image_left_right_flip(left_image)
-            right_image = self.augmentor.image_left_right_flip(right_image)
-            target_image = self.augmentor.image_left_right_flip(target_image)
+        # if tf.random.uniform([]) > 0.5:
+        #     left_image = self.augmentor.image_left_right_flip(left_image)
+        #     right_image = self.augmentor.image_left_right_flip(right_image)
+        #     target_image = self.augmentor.image_left_right_flip(target_image)
 
         if tf.random.uniform([]) > 0.5:
             delta_brightness = tf.random.uniform([], -0.2, 0.2)
@@ -217,23 +218,41 @@ class DataLoader(object):
         return combined_dataset
 
 if __name__ == '__main__':
-    import yaml
+    import yaml   
     import matplotlib.pyplot as plt
+    
     with open('./vo/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
     data_loader = DataLoader(config)
     
-    for sample in data_loader.train_dataset.take(100):
-        ref_images, target_image, intrinsic = sample
-
-        left_image, right_image = ref_images
-        left_image = data_loader.denormalize_image(left_image[0])
-        right_image = data_loader.denormalize_image(right_image[0])
-        target_image = data_loader.denormalize_image(target_image[0])   
+    # 샘플 시각화
+    for i, sample in enumerate(data_loader.train_dataset.take(5)):
+        left_image = sample['source_left'][0]
+        right_image = sample['source_right'][0]
+        target_image = sample['target_image'][0]
+        data_type = sample['data_type'][0].numpy().decode('utf-8')
+        use_pose_net = sample['use_pose_net'][0].numpy()
+        baseline = sample['baseline'][0].numpy()
+        
+        left_image = data_loader.denormalize_image(left_image)
+        right_image = data_loader.denormalize_image(right_image)
+        target_image = data_loader.denormalize_image(target_image)   
 
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         axes[0].imshow(left_image)
+        axes[0].set_title('Source Left')
         axes[1].imshow(target_image)
+        axes[1].set_title('Target')
         axes[2].imshow(right_image)
+        axes[2].set_title('Source Right')
+        
+        plt.suptitle(f'Sample {i}: {data_type} (use_pose_net={use_pose_net}, baseline={baseline:.3f}m)')
+        plt.tight_layout()
         plt.show()
+        
+        # 데이터 타입별 통계 출력
+        if i == 0:
+            print(f"\nBatch shape: {sample['target_image'].shape}")
+            print(f"Intrinsic shape: {sample['intrinsic'].shape}")
+            print(f"Poses shape: {sample['poses'].shape}")
