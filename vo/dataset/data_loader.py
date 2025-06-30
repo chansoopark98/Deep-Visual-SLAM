@@ -71,7 +71,7 @@ class DataLoader(object):
             'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32),  # 3x3 행렬
             'poses': tf.TensorSpec(shape=(2, 4, 4), dtype=tf.float32),  # 가변 개수의 4x4 행렬
             'baseline': tf.TensorSpec(shape=(), dtype=tf.float32),  # 스칼라
-            'data_type': tf.TensorSpec(shape=(), dtype=tf.string),  # 스트링
+            'data_type': tf.TensorSpec(shape=(), dtype=tf.int32),  # 스트링
             'use_pose_net': tf.TensorSpec(shape=(), dtype=tf.bool),  # bool
         }
     
