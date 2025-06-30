@@ -6,7 +6,7 @@ import keras
 from dataset.data_loader import DataLoader
 from utils.plot_utils import PlotTool
 from utils.train_utils import StepLR
-from eval import EvalTrajectory
+# from eval import EvalTrajectory
 from model.pose_net import PoseNet
 from model.depth_net import DispNet
 from monodepth_learner import Learner
@@ -81,8 +81,8 @@ class Trainer(object):
                                pose_model=self.pose_net,
                                config=self.config)
 
-        self.eval_tool = EvalTrajectory(depth_model=self.depth_net,
-                                        pose_model=self.pose_net, config=self.config)
+        # self.eval_tool = EvalTrajectory(depth_model=self.depth_net,
+        #                                 pose_model=self.pose_net, config=self.config)
 
         self.plot_tool = PlotTool(config=self.config)
 
@@ -110,7 +110,8 @@ class Trainer(object):
                                      self.config['Directory']['exp_name'])
         os.makedirs(self.save_path, exist_ok=True)
     
-    @tf.function(jit_compile=True)
+    # @tf.function(jit_compile=True)
+    @tf.function()
     def train_step(self, sample: dict):
         with tf.GradientTape() as tape:
             total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(
@@ -213,17 +214,17 @@ class Trainer(object):
                 tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
                                     self.valid_smooth_loss.result(), step=epoch)
 
-            # Eval
-            print('Evaluate trajectory ... Current Epoch : {0}'.format(epoch))
-            test_tqdm = tqdm(self.data_loader.test_dataset, total=self.data_loader.num_test_samples)
-            test_tqdm.set_description('Test || ')
-            for idx, (ref_images, target_image, intrinsic) in enumerate(test_tqdm):
-                self.eval_tool.update_state(ref_images, target_image, intrinsic)
+            # # Eval
+            # print('Evaluate trajectory ... Current Epoch : {0}'.format(epoch))
+            # test_tqdm = tqdm(self.data_loader.test_dataset, total=self.data_loader.num_test_samples)
+            # test_tqdm.set_description('Test || ')
+            # for idx, (batch_sample) in enumerate(test_tqdm):
+            #     self.eval_tool.update_state(batch_sample)
 
-            eval_plot = self.eval_tool.eval_plot()
-            with self.test_summary_writer.as_default():
-                # Logging eval images
-                tf.summary.image('Eval/Trajectory', eval_plot, step=epoch)
+            # eval_plot = self.eval_tool.eval_plot()
+            # with self.test_summary_writer.as_default():
+            #     # Logging eval images
+            #     tf.summary.image('Eval/Trajectory', eval_plot, step=epoch)
             
             # Save weights
             if epoch % self.config['Train']['save_freq'] == 0:

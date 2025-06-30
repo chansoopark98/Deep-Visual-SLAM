@@ -71,7 +71,10 @@ class EvalTrajectory(Learner):
         else:
             raise ValueError('Invalid pose mode')
 
-    def update_state(self, ref_images, tgt_image, intrinsic: tf.Tensor):
+    def update_state(self, batch_sample):
+        source_left = 
+
+        # ref_images, tgt_image, intrinsic: tf.Tensor = batch_sample
         right_image = ref_images[1]
         
         disp_raw = self.depth_net(tgt_image, training=False)
