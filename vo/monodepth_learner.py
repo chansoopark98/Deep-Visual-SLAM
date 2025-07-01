@@ -61,27 +61,6 @@ class Learner(object):
         SSIM_loss = tf.clip_by_value((1.0 - SSIM_raw)*0.5, 0.0, 1.0)
         return SSIM_loss
 
-    # def get_smooth_loss(self, disp, img):
-    #     """
-    #     monodepth2 스타일의 smoothness loss
-    #     """
-    #     # Normalize disparity
-    #     mean_disp = tf.reduce_mean(disp, axis=[1, 2], keepdims=True)
-    #     norm_disp = disp / (mean_disp + 1e-7)
-        
-    #     # Compute gradients
-    #     grad_disp_x = tf.abs(norm_disp[:, :, :-1, :] - norm_disp[:, :, 1:, :])
-    #     grad_disp_y = tf.abs(norm_disp[:, :-1, :, :] - norm_disp[:, 1:, :, :])
-        
-    #     grad_img_x = tf.reduce_mean(tf.abs(img[:, :, :-1, :] - img[:, :, 1:, :]), axis=3, keepdims=True)
-    #     grad_img_y = tf.reduce_mean(tf.abs(img[:, :-1, :, :] - img[:, 1:, :, :]), axis=3, keepdims=True)
-        
-    #     # Edge-aware weighting
-    #     grad_disp_x *= tf.exp(-grad_img_x)
-    #     grad_disp_y *= tf.exp(-grad_img_y)
-        
-    #     return tf.reduce_mean(grad_disp_x) + tf.reduce_mean(grad_disp_y)
-
     def get_smooth_loss(self, disp, img):
         disp = tf.cast(disp, tf.float32)
         img = tf.cast(img, tf.float32)
@@ -222,13 +201,12 @@ class Learner(object):
                 src_right_s = right_image
             
             # Temporal left (frame -1)
-            pose_left_inv = pose_left * -1.0
             proj_img_left = projective_inverse_warp(
                 src_left_s,
                 tf.squeeze(depth_s, axis=3),
-                pose_left_inv,
+                pose_left,
                 intrinsics=scaled_K,
-                invert=False,
+                invert=True,
                 euler=False
             )
             temporal_reproj_left = self.compute_reprojection_loss(proj_img_left, tgt_s)

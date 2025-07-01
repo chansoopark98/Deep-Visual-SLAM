@@ -15,9 +15,7 @@ class CustomDataHandler(object):
         
         # 스테레오 설정
         self.use_stereo = self.config['Train'].get('use_stereo', True)
-        self.stereo_ratio = self.config['Train'].get('stereo_ratio', 0.5)  # 스테레오 샘플 비율
         self.use_temporal = self.config['Train'].get('use_temporal', True)
-        self.temporal_ratio = self.config['Train'].get('temporal_ratio', 0.5)  # temporal 샘플 비율
         
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
@@ -80,34 +78,19 @@ class CustomDataHandler(object):
         samples = []
         
         for idx in indices:
-            # Left to Right warping (left가 target)
+            
             sample_L2R = {
-                'source_left': right_files[idx],  # source는 right
-                'target_image': left_files[idx],   # target은 left
+                'source_left': left_files[idx],
+                'target_image': right_files[idx],
                 'source_right': right_files[idx],  # 더미
                 'intrinsic': left_K,
-                'pose': stereo_T_L2R,  # R->L 변환
+                'pose': stereo_T_L2R,
                 'baseline': baseline,
                 'data_type': 1,
                 'use_pose_net': False,
-                # 'stereo_direction': 'R2L',  # 방향 표시
             }
             samples.append(sample_L2R)
             
-            # # Right to Left warping (right가 target)
-            # sample_R2L = {
-            #     'source_left': left_files[idx],   # source는 left
-            #     'target_image': right_files[idx], # target은 right
-            #     'source_right': left_files[idx],  # 더미
-            #     'intrinsic': right_K,
-            #     'pose': stereo_T_R2L,  # L->R 변환
-            #     'baseline': baseline,
-            #     'data_type': 1,
-            #     'use_pose_net': False,
-            #     # 'stereo_direction': 'L2R',  # 방향 표시
-            # }
-            # samples.append(sample_R2L)
-
         return samples
 
     def _create_temporal_samples(self, rgb_files, intrinsic, indices, camera_side='mono'):
@@ -284,7 +267,7 @@ class CustomDataHandler(object):
             }
             
             for sample in samples:
-                if sample['data_type'] == 'stereo':
+                if sample['data_type'] == 1:
                     stats['stereo'] += 1
                 elif sample['data_type'] == 'temporal':
                     camera_side = sample.get('camera_side', 'mono')
