@@ -61,6 +61,27 @@ class Learner(object):
         SSIM_loss = tf.clip_by_value((1.0 - SSIM_raw)*0.5, 0.0, 1.0)
         return SSIM_loss
 
+    # def get_smooth_loss(self, disp, img):
+    #     """
+    #     monodepth2 스타일의 smoothness loss
+    #     """
+    #     # Normalize disparity
+    #     mean_disp = tf.reduce_mean(disp, axis=[1, 2], keepdims=True)
+    #     norm_disp = disp / (mean_disp + 1e-7)
+        
+    #     # Compute gradients
+    #     grad_disp_x = tf.abs(norm_disp[:, :, :-1, :] - norm_disp[:, :, 1:, :])
+    #     grad_disp_y = tf.abs(norm_disp[:, :-1, :, :] - norm_disp[:, 1:, :, :])
+        
+    #     grad_img_x = tf.reduce_mean(tf.abs(img[:, :, :-1, :] - img[:, :, 1:, :]), axis=3, keepdims=True)
+    #     grad_img_y = tf.reduce_mean(tf.abs(img[:, :-1, :, :] - img[:, 1:, :, :]), axis=3, keepdims=True)
+        
+    #     # Edge-aware weighting
+    #     grad_disp_x *= tf.exp(-grad_img_x)
+    #     grad_disp_y *= tf.exp(-grad_img_y)
+        
+    #     return tf.reduce_mean(grad_disp_x) + tf.reduce_mean(grad_disp_y)
+
     def get_smooth_loss(self, disp, img):
         disp = tf.cast(disp, tf.float32)
         img = tf.cast(img, tf.float32)
@@ -114,16 +135,16 @@ class Learner(object):
 
     def forward_step(self, sample: dict, training: bool = True) -> tf.Tensor:
         """
-        최적화된 forward step - JIT 컴파일 친화적
+        최적화된 forward step - 스테레오와 temporal을 명확히 구분하여 처리
         """
         # Unpack sample
         left_image = sample['source_left']
         right_image = sample['source_right']
         tgt_image = sample['target_image']
         intrinsic = sample['intrinsic']
-        gt_poses = sample['poses']
+        gt_pose = sample['pose']
         data_type = sample['data_type']  # 0: temporal, 1: stereo
-        use_pose_net = sample['use_pose_net']
+        use_pose_net = sample['use_pose_net']  # [batch_size] boolean tensor
 
         pixel_losses = 0.
         smooth_losses = 0.
@@ -135,27 +156,27 @@ class Learner(object):
         # Depth prediction
         disp_outputs = self.depth_net(tgt_image, training=training)
         
-        # Pose prediction - 조건부 계산 제거, 모두 계산 후 선택
+        # Pose handling - 모든 샘플에 대해 계산 후 선택
+        # Temporal poses from pose network
         concat_left_tgt = tf.concat([left_image, tgt_image], axis=3)
         concat_tgt_right = tf.concat([tgt_image, right_image], axis=3)
         
         temporal_pose_left = self.pose_net(concat_left_tgt, training=training)
         temporal_pose_right = self.pose_net(concat_tgt_right, training=training)
         
-        # Stereo poses
-        stereo_pose_left = self.matrix_to_axis_angle_vectorized(gt_poses[:, 0, :, :])
-        stereo_pose_right = self.matrix_to_axis_angle_vectorized(gt_poses[:, 1, :, :])
+        # Stereo poses from ground truth
+        stereo_pose = self.matrix_to_axis_angle_vectorized(gt_pose)
         
-        # Select poses based on use_pose_net
-        use_pose_net_f = tf.cast(tf.expand_dims(use_pose_net, 1), tf.float32)
-        one_minus_use = 1.0 - use_pose_net_f
+        # Select poses based on use_pose_net (batch-wise)
+        use_pose_net_f = tf.expand_dims(tf.cast(use_pose_net, tf.float32), 1)
         
-        pose_left = temporal_pose_left * use_pose_net_f + stereo_pose_left * one_minus_use
-        pose_right = temporal_pose_right * use_pose_net_f + stereo_pose_right * one_minus_use
+        # For each sample, select appropriate pose
+        pose_left = temporal_pose_left * use_pose_net_f + stereo_pose * (1.0 - use_pose_net_f)
+        pose_right = temporal_pose_right * use_pose_net_f + stereo_pose * (1.0 - use_pose_net_f)
 
-        # 데이터 타입별 invert 설정
-        is_temporal = tf.cast(tf.equal(data_type, 0), tf.float32)
-        is_stereo = 1.0 - is_temporal
+        # Data type indicators
+        is_temporal = tf.cast(tf.equal(data_type, 0), tf.float32)  # [batch_size]
+        is_stereo = 1.0 - is_temporal  # [batch_size]
 
         # Multi-scale processing
         for s in range(self.num_scales):
@@ -166,76 +187,101 @@ class Learner(object):
             disp_s = disp_outputs[s]
             depth_s = self.disp_to_depth(disp_s, self.min_depth, self.max_depth)
             
-            # Resize target
-            if s == 0:
-                tgt_s = tgt_image
-                scaled_K = intrinsic
-            else:
+            # Resize images
+            if s != 0:
                 tgt_s = tf.image.resize(tgt_image, [h_s, w_s])
                 scaled_K = self.rescale_intrinsics(intrinsic, H, W, h_s, w_s)
+            else:
+                tgt_s = tgt_image
+                scaled_K = intrinsic
             
-            # Process both source images
             reprojection_losses = []
             
-            for i in range(2):
-                if i == 0:
-                    src = left_image
-                    pose = pose_left
-                else:
-                    src = right_image  
-                    pose = pose_right
-                
-                if s > 0:
-                    src = tf.image.resize(src, [h_s, w_s])
-                
-                # Adjust pose for temporal left
-                should_invert = is_temporal * tf.cast(tf.equal(i, 0), tf.float32)
-                should_invert = tf.expand_dims(should_invert, 1)
-                
-                adjusted_pose = pose * (1.0 - 2.0 * should_invert)
-                
-                # Warp
-                proj_img = projective_inverse_warp(
-                    src,
-                    tf.squeeze(depth_s, axis=3),
-                    adjusted_pose,
-                    intrinsics=scaled_K,
-                    invert=False,
-                    euler=False
-                )
-                
-                # Compute loss
-                reproj_loss = self.compute_reprojection_loss(proj_img, tgt_s)
-                reprojection_losses.append(reproj_loss)
-                
-                # Identity loss for auto-masking
-                if self.auto_mask:
-                    identity_loss = self.compute_reprojection_loss(src, tgt_s)
-                    reprojection_losses.append(identity_loss)
-            
-            # Combine losses
-            if self.auto_mask:
-                # Stack losses: [reproj_left, identity_left, reproj_right, identity_right]
-                all_losses = tf.concat(reprojection_losses, axis=3)
-                
-                # For stereo: use only reprojection losses (indices 0, 2)
-                # For temporal: use all losses
-                stereo_losses = tf.concat([reprojection_losses[0], reprojection_losses[2]], axis=3)
-                
-                # Select based on data type
-                is_stereo_4d = tf.reshape(is_stereo, [batch_size, 1, 1, 1])
-                selected_losses = all_losses * (1.0 - is_stereo_4d) + \
-                                  tf.concat([stereo_losses, stereo_losses], axis=3) * is_stereo_4d
-                
-                # Take minimum
-                min_loss = tf.reduce_min(selected_losses[:, :, :, :4], axis=3, keepdims=True)
+            # Stereo processing
+            if s > 0:
+                src_stereo = tf.image.resize(left_image, [h_s, w_s])
             else:
-                # No auto-masking
-                combined = tf.concat(reprojection_losses, axis=3)
-                min_loss = tf.reduce_min(combined, axis=3, keepdims=True)
+                src_stereo = left_image
+                
+            proj_img_stereo = projective_inverse_warp(
+                src_stereo,
+                tf.squeeze(depth_s, axis=3),
+                pose_left,
+                intrinsics=scaled_K,
+                invert=False,
+                euler=False
+            )
+            stereo_reproj = self.compute_reprojection_loss(proj_img_stereo, tgt_s)
             
-            # Accumulate losses
-            pixel_loss = tf.reduce_mean(min_loss)
+            # Temporal processing
+            if s > 0:
+                src_left_s = tf.image.resize(left_image, [h_s, w_s])
+                src_right_s = tf.image.resize(right_image, [h_s, w_s])
+            else:
+                src_left_s = left_image
+                src_right_s = right_image
+            
+            # Temporal left (frame -1)
+            pose_left_inv = pose_left * -1.0
+            proj_img_left = projective_inverse_warp(
+                src_left_s,
+                tf.squeeze(depth_s, axis=3),
+                pose_left_inv,
+                intrinsics=scaled_K,
+                invert=False,
+                euler=False
+            )
+            temporal_reproj_left = self.compute_reprojection_loss(proj_img_left, tgt_s)
+            
+            # Temporal right (frame 1)
+            proj_img_right = projective_inverse_warp(
+                src_right_s,
+                tf.squeeze(depth_s, axis=3),
+                pose_right,
+                intrinsics=scaled_K,
+                invert=False,
+                euler=False
+            )
+            temporal_reproj_right = self.compute_reprojection_loss(proj_img_right, tgt_s)
+            
+            # Build reprojection losses based on data type
+            is_stereo_4d = tf.reshape(is_stereo, [batch_size, 1, 1, 1])
+            is_temporal_4d = tf.reshape(is_temporal, [batch_size, 1, 1, 1])
+            
+            # For each sample, select appropriate reprojection losses
+            reproj_loss_1 = stereo_reproj * is_stereo_4d + temporal_reproj_left * is_temporal_4d
+            reproj_loss_2 = temporal_reproj_right * is_temporal_4d + tf.ones_like(temporal_reproj_right) * 1e10 * is_stereo_4d
+            
+            reprojection_losses = [reproj_loss_1, reproj_loss_2]
+            
+            # Auto-masking
+            if self.auto_mask:
+                # Identity reprojection losses
+                identity_reproj_1 = self.compute_reprojection_loss(src_stereo * is_stereo_4d + src_left_s * is_temporal_4d, tgt_s)
+                identity_reproj_2 = self.compute_reprojection_loss(src_right_s, tgt_s) * is_temporal_4d + tf.ones_like(temporal_reproj_right) * 1e10 * is_stereo_4d
+                
+                # Add identity losses
+                reprojection_losses.extend([identity_reproj_1, identity_reproj_2])
+            
+            # Combine and compute minimum
+            combined = tf.concat(reprojection_losses, axis=3)
+            
+            # Add random noise to break ties (important!)
+            if self.auto_mask:
+                combined = combined + tf.random.normal(tf.shape(combined)) * 1e-5
+            
+            # Take minimum across all losses
+            min_loss, _ = tf.nn.top_k(-combined, k=1, sorted=False)  # negative for minimum
+            min_loss = -min_loss
+            
+            # Filter out invalid losses
+            valid_mask = tf.less(min_loss, 1e9)
+            valid_loss = tf.where(valid_mask, min_loss, 0.0)
+            
+            # Compute pixel loss
+            pixel_loss = tf.reduce_mean(valid_loss)
+            
+            # Smoothness loss
             smooth_loss = self.get_smooth_loss(disp_s, tgt_s) / (2 ** s)
             
             pixel_losses += pixel_loss
@@ -255,7 +301,7 @@ class Learner(object):
 
         return total_loss, pixel_losses, smooth_losses, pred_depths
 
-    @tf.function
+    # @tf.function
     def matrix_to_axis_angle_vectorized(self, matrix):
         """
         완전히 벡터화된 4x4 to 6DoF 변환
