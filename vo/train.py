@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import tensorflow as tf, tf_keras
 import keras
-from dataset.data_loader import DataLoader
+from vo.dataset.stereo_loader import DataLoader
 from utils.plot_utils import PlotTool
 from utils.train_utils import StepLR
 # from eval import EvalTrajectory
@@ -113,19 +113,19 @@ class Trainer(object):
     @tf.function(jit_compile=True)
     def train_step(self, sample: dict):
         with tf.GradientTape() as tape:
-            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
                 sample, training=True)
             scaled_loss = self.optimizer.scale_loss(total_loss)
         
-        all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        # all_vars = self.pose_net.trainable_variables
+        # all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
+        all_vars = self.depth_net.trainable_variables
         grads = tape.gradient(scaled_loss, all_vars)
         self.optimizer.apply_gradients(zip(grads, all_vars))
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     @tf.function(jit_compile=True)
     def validation_step(self, sample: dict) -> tf.Tensor:
-        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(sample, training=False)
+        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(sample, training=False)
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     def train(self) -> None:        
@@ -135,7 +135,7 @@ class Trainer(object):
             # Set learning rate
             self.optimizer.learning_rate = lr
             
-            train_tqdm = tqdm(self.data_loader.train_dataset, total=self.data_loader.num_train_samples)
+            train_tqdm = tqdm(self.data_loader.train_stereo_datasets, total=self.data_loader.num_stereo_train)
             print(' LR : {0}'.format(self.optimizer.learning_rate))
             train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
                                                                              round(float(self.optimizer.learning_rate.numpy()), 8)))
@@ -148,7 +148,7 @@ class Trainer(object):
                 self.train_smooth_loss(train_s_loss)
 
                 if idx % self.config['Train']['train_plot_interval'] == 0:
-                    current_step = self.data_loader.num_train_samples * epoch + idx
+                    current_step = self.data_loader.num_stereo_train * epoch + idx
 
                     # Draw depth plot
                     train_depth_plot = self.plot_tool.plot_images(images=batch_sample['target_image'],
@@ -176,7 +176,7 @@ class Trainer(object):
                                     self.train_smooth_loss.result(), step=epoch)
             
             # Validation
-            valid_tqdm = tqdm(self.data_loader.valid_dataset, total=self.data_loader.num_valid_samples)
+            valid_tqdm = tqdm(self.data_loader.valid_stereo_datasets, total=self.data_loader.num_stereo_valid)
             valid_tqdm.set_description('Validation || ')
             for idx, (batch_sample) in enumerate(valid_tqdm):
                 valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths = self.validation_step(batch_sample)
@@ -187,7 +187,7 @@ class Trainer(object):
                 self.valid_smooth_loss(valid_s_loss)
 
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
-                    current_step = self.data_loader.num_valid_samples * epoch + idx
+                    current_step = self.data_loader.num_stereo_valid * epoch + idx
                     # Draw target image - target depth plot
                     valid_depth_plot = self.plot_tool.plot_images(images=batch_sample['target_image'],
                                                                   pred_depths=pred_valid_depths,
