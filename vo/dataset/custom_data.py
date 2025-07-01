@@ -52,14 +52,14 @@ class CustomDataHandler(object):
             else:
                 baseline_m = 0.05  # 5cm
             
-            # 좌->우 변환 행렬 (4x4)
-            stereo_T_L2R = np.eye(4, dtype=np.float32)
-            stereo_T_L2R[0, 3] = baseline_m  # x축으로 이동
+            T_left_to_right = np.eye(4, dtype=np.float32)
+            T_left_to_right[0, 3] = baseline_m  # +x 방향으로 baseline
             
-            # 우->좌 변환 행렬 (역변환)
-            stereo_T_R2L = np.linalg.inv(stereo_T_L2R)
+            # Right to Left transformation (역변환)
+            T_right_to_left = np.eye(4, dtype=np.float32)
+            T_right_to_left[0, 3] = -baseline_m  # -x 방향으로 baseline
             
-            return left_intrinsic, right_intrinsic, stereo_T_L2R, stereo_T_R2L, baseline_m
+            return left_intrinsic, right_intrinsic, T_left_to_right, T_right_to_left, baseline_m
             
         except Exception as e:
             print(f"Error loading stereo calibration: {e}")
@@ -80,19 +80,34 @@ class CustomDataHandler(object):
         samples = []
         
         for idx in indices:
-            # 1. 좌->우 warping 샘플 (left가 source, right가 target)
-            sample_stereo = {
-                'source_left': left_files[idx],
-                'target_image': right_files[idx],
-                'source_right': right_files[idx],
+            # Left to Right warping (left가 target)
+            sample_L2R = {
+                'source_left': right_files[idx],  # source는 right
+                'target_image': left_files[idx],   # target은 left
+                'source_right': right_files[idx],  # 더미
                 'intrinsic': left_K,
-                'poses': np.array([stereo_T_L2R, stereo_T_R2L], dtype=np.float32),
+                'pose': stereo_T_L2R,  # R->L 변환
                 'baseline': baseline,
                 'data_type': 1,
-                'use_pose_net': False,  # 단일 bool 값으로 변경
+                'use_pose_net': False,
+                # 'stereo_direction': 'R2L',  # 방향 표시
             }
-            samples.append(sample_stereo)
-   
+            samples.append(sample_L2R)
+            
+            # # Right to Left warping (right가 target)
+            # sample_R2L = {
+            #     'source_left': left_files[idx],   # source는 left
+            #     'target_image': right_files[idx], # target은 right
+            #     'source_right': left_files[idx],  # 더미
+            #     'intrinsic': right_K,
+            #     'pose': stereo_T_R2L,  # L->R 변환
+            #     'baseline': baseline,
+            #     'data_type': 1,
+            #     'use_pose_net': False,
+            #     # 'stereo_direction': 'L2R',  # 방향 표시
+            # }
+            # samples.append(sample_R2L)
+
         return samples
 
     def _create_temporal_samples(self, rgb_files, intrinsic, indices, camera_side='mono'):
@@ -105,7 +120,7 @@ class CustomDataHandler(object):
                 'target_image': rgb_files[idx],
                 'source_right': rgb_files[idx + 1],
                 'intrinsic': intrinsic,
-                'poses': np.array([dummy_pose, dummy_pose], dtype=np.float32),  # 두 개의 더미 pose
+                'pose': dummy_pose,  # 두 개의 더미 pose
                 'baseline': 0.0,
                 'data_type': 0,
                 'use_pose_net': True,
