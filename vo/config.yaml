@@ -13,8 +13,6 @@ Dataset:
 
 Train:
   mode: axisAngle # axisAngle, euler
-  use_stereo: true    # 스테레오 데이터 사용 여부
-  use_temporal: true  # Temporal 데이터 사용 여부
   use_shuffle: True
   train_plot_interval: 100 # 100
   valid_plot_interval: 20
@@ -35,7 +33,7 @@ Train:
   weight_decay: 0.00001
   beta1: 0.9
   batch_size: 8 # 1
-  epoch: 31
+  epoch: 101
   init_lr: 0.0001
   final_lr: 0.00001
   use_stereo: true           # 스테레오 사용 여부

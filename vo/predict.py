@@ -9,7 +9,7 @@ from utils.visualization import Visualizer
 from eval import EvalTrajectory, pose_axis_angle_vec2mat
 
 if __name__ == '__main__':
-    from dataset.data_loader import DataLoader
+    from vo.dataset.stereo_loader import DataLoader
     from tqdm import tqdm
 
     with open('./vo/config.yaml', 'r') as file:

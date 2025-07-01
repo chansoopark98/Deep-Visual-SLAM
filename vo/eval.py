@@ -260,7 +260,7 @@ if __name__ == '__main__':
     import os
     sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
     from model.monodepth2 import MonoDepth2Model
-    from dataset.data_loader import DataLoader
+    from vo.dataset.stereo_loader import DataLoader
     from tqdm import tqdm
 
     with open('./vio/config.yaml', 'r') as file:
@@ -311,7 +311,7 @@ if __name__ == '__main__':
 
     data_loader = DataLoader(config=config)
 
-    valid_tqdm = tqdm(data_loader.valid_dataset, total=data_loader.num_valid_samples)
+    valid_tqdm = tqdm(data_loader.valid_dataset, total=data_loader.num_stereo_valid)
     valid_tqdm.set_description('Validation || ')
     for idx, (ref_images, target_image, imus, intrinsic) in enumerate(valid_tqdm):
         eval_tool.update_state(ref_images, target_image, intrinsic)
