@@ -11,7 +11,6 @@ from eval import EvalTrajectory
 from model.pose_net import PoseNet
 from model.depth_net import DispNet
 from monodepth_learner import Learner
-from itertools import zip_longest
 from tqdm import tqdm
 import numpy as np
 from datetime import datetime
@@ -268,6 +267,15 @@ class Trainer(object):
                     pixel_loss=self.valid_pixel_loss.result().numpy(),
                     smooth_loss=self.valid_smooth_loss.result().numpy(),
                     )
+            
+            with self.valid_summary_writer.as_default():
+                # Logging valid total, pixel, smooth loss
+                tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
+                                    self.valid_total_loss.result(), step=epoch)
+                tf.summary.scalar(f'Valid/{self.valid_pixel_loss.name}',
+                                    self.valid_pixel_loss.result(), step=epoch)
+                tf.summary.scalar(f'Valid/{self.valid_smooth_loss.name}',
+                                    self.valid_smooth_loss.result(), step=epoch)
 
             # Eval
             print('Evaluate trajectory ... Current Epoch : {0}'.format(epoch))

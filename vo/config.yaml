@@ -32,7 +32,7 @@ Train:
   weight_decay: 0.00001
   beta1: 0.9
   batch_size: 8 # 1
-  epoch: 101
+  epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001
   use_stereo: true           # 스테레오 사용 여부
