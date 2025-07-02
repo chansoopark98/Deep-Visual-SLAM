@@ -9,7 +9,7 @@ from utils.visualization import Visualizer
 from eval import EvalTrajectory, pose_axis_angle_vec2mat
 
 if __name__ == '__main__':
-    from vo.dataset.stereo_loader import DataLoader
+    from vo.dataset.stereo_loader import StereoLoader
     from tqdm import tqdm
 
     with open('./vo/config.yaml', 'r') as file:
@@ -37,7 +37,7 @@ if __name__ == '__main__':
 
         eval_tool = EvalTrajectory(depth_model=depth_net, pose_model=pose_net, config=config)
 
-        data_loader = DataLoader(config=config)
+        data_loader = StereoLoader(config=config)
         test_tqdm = tqdm(data_loader.test_dataset, total=data_loader.num_test_samples)
 
         visualizer = Visualizer(draw_plane=True, is_record=True, video_fps=24, video_name="visualization.mp4")

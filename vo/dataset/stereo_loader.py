@@ -5,7 +5,7 @@ try:
 except:
     from custom_data import CustomDataHandler
 
-class DataLoader(object):
+class StereoLoader(object):
     def __init__(self, config) -> None:
         self.config = config
         self.batch_size = config['Train']['batch_size']
@@ -184,7 +184,7 @@ if __name__ == '__main__':
     with open('./vo/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
 
-    data_loader = DataLoader(config)
+    data_loader = StereoLoader(config)
     
     # 샘플 시각화
     for i, sample in enumerate(data_loader.train_stereo_datasets.take(5)):

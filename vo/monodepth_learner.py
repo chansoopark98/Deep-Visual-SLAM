@@ -7,7 +7,7 @@ class Learner(object):
                  pose_model: tf_keras.Model,
                  config: dict):
         self.depth_net = depth_model
-        # self.pose_net = pose_model
+        self.pose_net = pose_model
         self.config = config
 
         # 예시 하이퍼파라미터
@@ -17,7 +17,6 @@ class Learner(object):
         self.image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.smoothness_ratio = self.config['Train']['smoothness_ratio'] # 0.001
         self.auto_mask = self.config['Train']['auto_mask'] # True
-        self.predictive_mask = self.config['Train']['predictive_mask'] # False
         self.ssim_ratio = self.config['Train']['ssim_ratio'] # 0.85
         self.min_depth = self.config['Train']['min_depth'] # 0.1
         self.max_depth = self.config['Train']['max_depth'] # 10.0
@@ -105,6 +104,127 @@ class Learner(object):
         scaled_intrinsics = tf.matmul(scale_matrix, intrinsics)
         
         return scaled_intrinsics
+    
+    def forward_mono(self, sample, training=True) -> tf.Tensor:
+        left_image = sample['source_left']  # [B, H, W, 3]
+        right_image = sample['source_right']  # [B, H, W, 3]
+        tgt_image = sample['target_image']  # [B, H, W, 3]
+        intrinsic = sample['intrinsic']  # [B, 3, 3] - target camera intrinsic
+        ref_images = [left_image, right_image]  # [B, H, W, 3] * 2
+
+        pixel_losses = 0.
+        smooth_losses = 0.
+
+        H = tf.shape(tgt_image)[1]
+        W = tf.shape(tgt_image)[2]
+
+        # Generate Depth and Pose Results
+        pred_depths = []
+        pred_poses = []
+        scaled_tgts = []
+
+        disp_raw = self.depth_net(tgt_image, training=training) # disp raw result (H, W, 1)
+
+        for scale_idx in range(self.num_scales):
+            scaled_disp = disp_raw[scale_idx]
+            scaled_depth = self.disp_to_depth(scaled_disp, self.min_depth, self.max_depth)
+            pred_depths.append(scaled_depth)
+
+            tgt_scaled = tf.image.resize(tgt_image,
+                                        [H // (2**scale_idx), W // (2**scale_idx)],
+                                        method=tf.image.ResizeMethod.BILINEAR)
+            scaled_tgts.append(tgt_scaled)
+        
+        # Predict Poses
+        concat_left_tgt = tf.concat([left_image, tgt_image], axis=3)   # [B,H,W,6]
+        concat_tgt_right = tf.concat([tgt_image, right_image], axis=3) # [B,H,W,6]
+
+        # no use imu
+        pose_left = self.pose_net(concat_left_tgt, training=training)    # [B,6]
+        pose_right = self.pose_net(concat_tgt_right, training=training)  # [B,6]
+
+        pose_left = tf.cast(pose_left, tf.float32)
+        pose_right = tf.cast(pose_right, tf.float32)
+        
+        pred_poses = [pose_left, pose_right]
+
+        for s in range(self.num_scales):
+            # reprojection loss
+            reprojection_list = []
+            identity_reprojection_list = []  # 원본 구현처럼 분리
+
+            curr_depth = pred_depths[s] # [B,H,W,1]
+            h_s = H // (2**s)
+            w_s = W // (2**s)
+
+            for i in range(2): # left, right
+                curr_src = ref_images[i] # [B,H,W,3]
+                curr_pose = pred_poses[i] # [B,6]
+
+                if s != 0:
+                    curr_src = tf.image.resize(curr_src, [h_s, w_s], 
+                                            method=tf.image.ResizeMethod.BILINEAR)
+                    scaled_intrinsic = self.rescale_intrinsics(intrinsic, H, W, h_s, w_s)
+                else:
+                    scaled_intrinsic = intrinsic
+
+                curr_proj_image = projective_inverse_warp(
+                    curr_src,
+                    tf.squeeze(curr_depth, axis=3),
+                    curr_pose,
+                    intrinsics=scaled_intrinsic,
+                    invert=(i == 0),
+                    is_stereo=False,
+                    euler=False,
+                )
+                
+                # Photometric loss
+                curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, scaled_tgts[s])
+                reprojection_list.append(curr_reproj_loss)
+                
+                # Identity reprojection loss - 원본 구현처럼 여기서 계산
+                if self.auto_mask:
+                    # 스케일에 맞게 ref 이미지 조정
+                    identity_reproj_loss = self.compute_reprojection_loss(curr_src, scaled_tgts[s])
+                    identity_reprojection_list.append(identity_reproj_loss)
+
+            reprojection_losses = tf.concat(reprojection_list, axis=3)  # [B, H_s, W_s, 2]
+            
+            if self.auto_mask:
+                identity_reprojection_losses = tf.concat(identity_reprojection_list, axis=3)
+                
+                identity_reprojection_losses += tf.random.normal(
+                    tf.shape(identity_reprojection_losses), 
+                    mean=0.0, 
+                    stddev=1e-5
+                )
+
+                combined_losses = tf.concat([identity_reprojection_losses, reprojection_losses], axis=3)
+                combined = tf.reduce_min(combined_losses, axis=3, keepdims=True)
+            
+            else:
+                combined = tf.reduce_min(reprojection_losses, axis=3, keepdims=True)
+
+            # 최종 reprojection loss
+            reprojection_loss = tf.reduce_mean(combined)
+
+            # smoothness loss
+            mean_disp = tf.reduce_mean(disp_raw[s], [1, 2], keepdims=True)
+            norm_disp = disp_raw[s] / (mean_disp + 1e-7)
+            smooth_loss = self.get_smooth_loss(norm_disp, scaled_tgts[s])
+            smooth_loss = smooth_loss / (2.0**s)
+
+            pixel_losses += reprojection_loss
+            smooth_losses += smooth_loss * self.smoothness_ratio
+            
+        # total loss
+        num_scales_f = tf.cast(self.num_scales, tf.float32)
+        pixel_losses = pixel_losses / num_scales_f
+        smooth_losses = smooth_losses / num_scales_f
+        
+        total_loss = pixel_losses + smooth_losses
+
+        return total_loss, pixel_losses, smooth_losses, pred_depths
     
     def forward_stereo(self, sample, training=True) -> tf.Tensor:
         src_image = sample['source_image']  # [B, H, W, 3]

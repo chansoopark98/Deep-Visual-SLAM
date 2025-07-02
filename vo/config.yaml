@@ -7,7 +7,7 @@ Directory:
 
 Dataset:
   custom_data: True
-  mars_logger: False
+  mars_logger: True
   redwood: False
   tspxr_capture: False        # 새로운 플래그 추가
 
@@ -27,7 +27,6 @@ Train:
   smoothness_ratio: 0.001
   ab_ratio: 0.01
   auto_mask: True
-  predictive_mask: False
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001
