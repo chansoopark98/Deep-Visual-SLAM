@@ -7,7 +7,7 @@ class Learner(object):
                  pose_model: tf_keras.Model,
                  config: dict):
         self.depth_net = depth_model
-        self.pose_net = pose_model
+        # self.pose_net = pose_model
         self.config = config
 
         # 예시 하이퍼파라미터
@@ -110,7 +110,7 @@ class Learner(object):
         src_image = sample['source_image']  # [B, H, W, 3]
         tgt_image = sample['target_image']  # [B, H, W, 3]
         intrinsic = sample['intrinsic']  # [B, 3, 3] - target camera intrinsic
-        stereo_pose = sample['pose']
+        stereo_pose = sample['pose'] # src to tgt pose [B, 6] (axis-angle + translation)
 
         pixel_losses = 0.
         smooth_losses = 0.
@@ -146,12 +146,19 @@ class Learner(object):
                 tf.squeeze(depth_s, axis=3),
                 stereo_pose,
                 intrinsics=scaled_intrinsic,
-                invert=True,  # 항상 True (pose 역변환 필요)
+                invert=False,
+                is_stereo=True,
                 euler=False,
             )
             
             # Photometric loss
             reproj_loss = self.compute_reprojection_loss(proj_image, tgt_s)
+
+            if self.auto_mask:
+                # Identity reprojection loss (no warping)
+                identity_loss = self.compute_reprojection_loss(src_s, tgt_s)
+                
+                reproj_loss = tf.minimum(reproj_loss, identity_loss)
             
             pixel_loss = tf.reduce_mean(reproj_loss)
             pixel_losses += pixel_loss

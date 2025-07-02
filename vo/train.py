@@ -50,11 +50,11 @@ class Trainer(object):
         _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
         self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
-        # self.depth_net.trainable = False
+        self.depth_net.trainable = True
 
-        self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
-        posenet_input_shape = (self.batch_size, *image_shape, 6)
-        self.pose_net.build(posenet_input_shape)
+        # self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        # posenet_input_shape = (self.batch_size, *image_shape, 6)
+        # self.pose_net.build(posenet_input_shape)
         
         # 2. Dataset
         self.data_loader = DataLoader(config=self.config)
@@ -78,7 +78,7 @@ class Trainer(object):
 
         # 4. Train Method
         self.learner = Learner(depth_model=self.depth_net,
-                               pose_model=self.pose_net,
+                               pose_model=None,
                                config=self.config)
 
         # self.eval_tool = EvalTrajectory(depth_model=self.depth_net,
@@ -228,7 +228,7 @@ class Trainer(object):
             # Save weights
             if epoch % self.config['Train']['save_freq'] == 0:
                 self.depth_net.save_weights(self.save_path + '/depth_net_epoch_{0}_model.weights.h5'.format(epoch))
-                self.pose_net.save_weights(self.save_path + '/pose_net_epoch_{0}_model.weights.h5'.format(epoch))
+                # self.pose_net.save_weights(self.save_path + '/pose_net_epoch_{0}_model.weights.h5'.format(epoch))
             
             # Reset metrics        
             self.train_total_loss.reset_states()

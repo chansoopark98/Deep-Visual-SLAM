@@ -166,7 +166,7 @@ def rotFromAxisAngle(vec):
 
     return rot_matrix
 
-def pose_axis_angle_vec2mat(vec, depth=None, invert=False):
+def pose_axis_angle_vec2mat(vec, depth=None, invert=False, is_stereo=False):
     """
     Convert axis angle and translation into 4x4 matrix with scale adjustment
     :param vec: [B,6] with former 3 elements as axis angle
@@ -184,7 +184,7 @@ def pose_axis_angle_vec2mat(vec, depth=None, invert=False):
     translation = tf.slice(vec, [0, 3], [-1, 3])
     translation = tf.reshape(translation, [batch_size, 1, 3])
     
-    if depth is not None:
+    if depth is not None and not is_stereo:
         # 역깊이(inverse depth) 계산
         inv_depth = 1.0 / (depth + 1e-6)
         # 평균 역깊이 계산 (배치별)
@@ -348,7 +348,7 @@ def meshgrid(batch, height, width, is_homogeneous=True):
     coords = tf.tile(tf.expand_dims(coords, 0), [batch, 1, 1, 1])
     return coords
 
-def projective_inverse_warp(img, depth, pose, intrinsics, invert=False, euler=False):
+def projective_inverse_warp(img, depth, pose, intrinsics, invert=False, is_stereo=False, euler=False):
     """Inverse warp a source image to the target image plane based on projection.
     Args:
       img: the source image [batch, height_s, width_s, 3]
@@ -365,7 +365,7 @@ def projective_inverse_warp(img, depth, pose, intrinsics, invert=False, euler=Fa
     if euler:
         pose = pose_vec2mat(pose)
     else:
-        pose = pose_axis_angle_vec2mat(pose, depth, invert)
+        pose = pose_axis_angle_vec2mat(pose, depth, invert, is_stereo)
     # Construct pixel grid coordinates
     pixel_coords = meshgrid(batch, height, width)
     # Convert pixel coordinates to the camera frame
