@@ -284,7 +284,10 @@ class Learner(object):
             pixel_losses += pixel_loss
             
             # Smoothness loss  
-            smooth_loss = self.get_smooth_loss(disp_s, tgt_s) / (2.0**s)
+            mean_disp = tf.reduce_mean(disp_raw[s], axis=[1, 2], keepdims=True)
+            norm_disp = disp_raw[s] / (mean_disp + 1e-7)
+            smooth_loss = self.get_smooth_loss(norm_disp, tgt_s)
+            smooth_loss = smooth_loss / (2.0**s)
             smooth_losses += smooth_loss * self.smoothness_ratio
         
         # Average over scales

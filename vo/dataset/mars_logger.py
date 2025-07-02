@@ -127,7 +127,7 @@ class MarsLoggerHandler(object):
         scene_files = sorted(glob.glob(os.path.join(test_dir, '*')))
         
         for scene in scene_files:
-            dataset = self._process(scene, 'S22')
+            dataset = self._process(scene, 'S22', is_test=True)
             datasets.append(dataset)
 
         datasets = np.concatenate(datasets, axis=0)

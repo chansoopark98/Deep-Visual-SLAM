@@ -168,7 +168,6 @@ class Trainer(object):
             
             # Use smaller dataset size as total iterations
             min_samples = min(self.stereo_loader.num_stereo_train, self.mono_loader.num_mono_train)
-            total_iterations = min_samples * 2  # x2 because we do both mono and stereo per iteration
             
             print(f'Epoch : {epoch + 1} / {self.config["Train"]["epoch"]}')
             print(f'Stereo samples: {self.stereo_loader.num_stereo_train}, Mono samples: {self.mono_loader.num_mono_train}')
