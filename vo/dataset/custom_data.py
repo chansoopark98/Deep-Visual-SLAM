@@ -7,8 +7,9 @@ import json
 import yaml
 
 class CustomDataHandler(object):
-    def __init__(self, config):
+    def __init__(self, config, mode='stereo'):
         self.config = config
+        self.mode = mode  # 'stereo' or 'mono'
         self.root_dir = '/media/park-ubuntu/park_cs/tspxr_capture'
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.num_source = self.config['Train']['num_source']  # temporal frames
@@ -78,6 +79,20 @@ class CustomDataHandler(object):
             samples.append(sample_R2L)
             
         return samples
+    
+    def _create_mono_samples(self, left_files, left_K):
+        samples = []
+        step = 3
+
+        for t in range(self.num_source, len(left_files) - self.num_source, step):
+            sample = {
+                'source_left': left_files[t - 1],
+                'target_image': left_files[t],
+                'source_right': left_files[t + 1],
+                'intrinsic': left_K,
+            }
+            samples.append(sample)
+        return samples
 
     def _process_stereo_scene(self, scene_dir: str):
         """스테레오 시퀀스 처리"""
@@ -131,6 +146,55 @@ class CustomDataHandler(object):
         samples.extend(stereo_samples)
         
         return samples
+    
+    def _process_mono_scene(self, scene_dir: str):
+        """스테레오 시퀀스 처리"""
+        sensor_dir = os.path.join(scene_dir, 'sensor')
+        
+        # 이미지 파일 로드
+        # load both PNG and JPG images
+        extensions = ['*.png', '*.jpg', '*.jpeg']
+        left_files = []
+        right_files = []
+
+        for ext in extensions:
+            left_files.extend(glob.glob(os.path.join(scene_dir, 'rgb_left', ext)))
+            right_files.extend(glob.glob(os.path.join(scene_dir, 'rgb_right', ext)))
+
+        left_files = sorted(left_files)
+        right_files = sorted(right_files)
+        
+        if not left_files or not right_files:
+            print(f"No stereo images found in {scene_dir}")
+            return []
+        
+        # 파일 개수 맞추기
+        min_length = min(len(left_files), len(right_files))
+        left_files = left_files[:min_length]
+        right_files = right_files[:min_length]
+        
+        # 캘리브레이션 로드
+        left_K, right_K, pose_L2R, pose_R2L, baseline = self._load_stereo_calibration(sensor_dir)
+        if left_K is None:
+            return []
+        
+        # 이미지 크기 확인 및 내부 파라미터 스케일링
+        sample_img = cv2.imread(left_files[0])
+        if sample_img is None:
+            return []
+        original_size = (sample_img.shape[0], sample_img.shape[1])
+        
+        left_K = self._rescale_intrinsic(left_K, self.image_size, original_size)
+        right_K = self._rescale_intrinsic(right_K, self.image_size, original_size)
+        
+        samples = []
+        
+        mono_samples = self._create_mono_samples(
+            left_files, left_K
+        )
+        samples.extend(mono_samples)
+        
+        return samples
 
     def _process(self, scene_dir: str):
         """씬 디렉토리 처리 - 스테레오/모노 자동 감지"""
@@ -138,12 +202,13 @@ class CustomDataHandler(object):
         has_stereo = (os.path.exists(os.path.join(scene_dir, 'rgb_left')) and 
                      os.path.exists(os.path.join(scene_dir, 'rgb_right')))
         
-        if has_stereo:
-            print(f"Processing stereo scene: {os.path.basename(scene_dir)}")
+        if self.mode == 'stereo':
             return self._process_stereo_scene(scene_dir)
+        elif self.mode == 'mono':
+            return self._process_mono_scene(scene_dir)
         else:
-            print(f"No valid image directory found in {scene_dir}")
-            return []
+            raise ValueError(f"Unsupported mode: {self.mode}. Use 'stereo' or 'mono'.")
+
 
     def generate_datasets(self, fold_dir, shuffle=False):
         """데이터셋 생성"""

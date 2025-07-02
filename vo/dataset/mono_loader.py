@@ -3,10 +3,12 @@ import tensorflow as tf
 try:
     from .mars_logger import MarsLoggerHandler
     from .redwood import RedwoodHandler
+    from .custom_data import CustomDataHandler
     from .augmentation_tool import Augmentations
 except:
     from mars_logger import MarsLoggerHandler
     from redwood import RedwoodHandler
+    from custom_data import CustomDataHandler
     from augmentation_tool import Augmentations
 
 class MonoLoader(object):
@@ -56,6 +58,17 @@ class MonoLoader(object):
             self.num_mono_train += dataset.train_data.shape[0]
             self.num_mono_valid += dataset.valid_data.shape[0]
             self.num_mono_test += dataset.test_data.shape[0]
+        
+        if self.config['Dataset']['custom_data']:
+            dataset = CustomDataHandler(config=self.config, mode='mono')
+            train_dataset = self._build_generator(np_samples=dataset.train_data)
+            valid_dataset = self._build_generator(np_samples=dataset.valid_data)
+            
+            train_datasets.append(train_dataset)
+            valid_datasets.append(valid_dataset)
+
+            self.num_mono_train += dataset.train_data.shape[0]
+            self.num_mono_valid += dataset.valid_data.shape[0]
         
         self.train_mono_datasets = train_datasets
         self.valid_mono_datasets = valid_datasets
