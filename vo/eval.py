@@ -62,17 +62,12 @@ class EvalTrajectory(Learner):
         self.pred_pose_list = []
         self.intrinsic_list = []
 
-        if self.config['Train']['mode'] in ['axisAngle', 'euler']:
-            self.pose_mode = self.config['Train']['mode']
-            if self.pose_mode == 'axisAngle':
-                self.is_euler = False
-            else:
-                raise NotImplementedError('Euler angle mode is not supported yet')
-        else:
-            raise ValueError('Invalid pose mode')
-
     def update_state(self, batch_sample):
-        source_left = 
+        source_left = batch_sample['source_left']  # [B, H, W, 3]
+        tgt_image = batch_sample['target_image']    # [B, H, W, 3]
+        source_right = batch_sample['source_right']  # [B, H,
+        intrinsic = batch_sample['intrinsic']  # [B, 3, 3]
+        ref_images = [source_left, source_right]
 
         # ref_images, tgt_image, intrinsic: tf.Tensor = batch_sample
         right_image = ref_images[1]
@@ -102,10 +97,11 @@ class EvalTrajectory(Learner):
             max_depth=self.max_depth
         )
 
-        if self.is_euler:
-            batch_poses = pose_vec2mat(batch_poses)
-        else:
-            batch_poses = pose_axis_angle_vec2mat(batch_poses, None, invert=False)  # shape: (b, 4, 4)
+        
+        batch_poses = pose_axis_angle_vec2mat(batch_poses,
+                                              batch_depths,
+                                              invert=False,
+                                              is_stereo=False)
 
         batch_size = batch_depths.shape[0]
 
@@ -260,7 +256,7 @@ if __name__ == '__main__':
     import os
     sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
     from model.monodepth2 import MonoDepth2Model
-    from vo.dataset.stereo_loader import DataLoader
+    from vo.dataset.stereo_loader import StereoLoader
     from tqdm import tqdm
 
     with open('./vio/config.yaml', 'r') as file:
@@ -309,7 +305,7 @@ if __name__ == '__main__':
 
     eval_tool = EvalTrajectory(model=model, config=config)
 
-    data_loader = DataLoader(config=config)
+    data_loader = StereoLoader(config=config)
 
     valid_tqdm = tqdm(data_loader.valid_dataset, total=data_loader.num_stereo_valid)
     valid_tqdm.set_description('Validation || ')
