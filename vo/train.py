@@ -154,7 +154,7 @@ class Trainer(object):
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     def train(self) -> None:        
-        for epoch in range(self.config['Train']['epoch']):    
+        for epoch in range(1, self.config['Train']['epoch'] + 1):
             lr = self.lr_scehduler(epoch)
 
             # Set learning rate
@@ -168,10 +168,10 @@ class Trainer(object):
             # Use smaller dataset size as total iterations
             min_samples = min(self.stereo_loader.num_stereo_train, self.mono_loader.num_mono_train)
             
-            print(f'Epoch : {epoch + 1} / {self.config["Train"]["epoch"]}')
+            print(f'Epoch : {epoch} / {self.config["Train"]["epoch"]}')
             print(f'Stereo samples: {self.stereo_loader.num_stereo_train}, Mono samples: {self.mono_loader.num_mono_train}')
             print(f'Total iterations (mono+stereo pairs): {min_samples}')
-            print(f'Learning Rate : {self.mono_optimizer.learning_rate.numpy()}')
+            print(f'Learning Rate : {self.mono_optimizer.learning_rate.numpy()} \n')
             
             train_tqdm = tqdm(total=min_samples, desc=f'Training || Epoch : {epoch}')
 
