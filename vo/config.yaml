@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Monodepth2-resnet18-Posenet-mars-testNew
+  exp_name: Monodepth2-resnet18-irs
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -8,6 +8,7 @@ Directory:
 Dataset:
   custom_data: True
   mars_logger: True
+  irs: True
   redwood: False
   tspxr_capture: False        # 새로운 플래그 추가
 

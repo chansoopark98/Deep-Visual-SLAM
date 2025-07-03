@@ -2,8 +2,10 @@ import numpy as np
 import tensorflow as tf
 try:
     from .custom_data import CustomDataHandler
+    from .irs import IrsDataHandler
 except:
     from custom_data import CustomDataHandler
+    from irs import IrsDataHandler
 
 class StereoLoader(object):
     def __init__(self, config) -> None:
@@ -40,6 +42,17 @@ class StereoLoader(object):
 
         if self.config['Dataset']['custom_data']:
             dataset = CustomDataHandler(config=self.config, mode='stereo')
+            train_dataset = self._build_stereo(np_samples=dataset.train_data)
+            valid_dataset = self._build_stereo(np_samples=dataset.valid_data)
+
+            train_stereo_datasets.append(train_dataset)
+            valid_stereo_datasets.append(valid_dataset)
+
+            self.num_stereo_train += dataset.train_data.shape[0]
+            self.num_stereo_valid += dataset.valid_data.shape[0]
+        
+        if self.config['Dataset']['irs']:
+            dataset = IrsDataHandler(config=self.config, mode='stereo')
             train_dataset = self._build_stereo(np_samples=dataset.train_data)
             valid_dataset = self._build_stereo(np_samples=dataset.valid_data)
 

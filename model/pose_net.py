@@ -145,7 +145,7 @@ class PoseNetExtra(tf_keras.Model):
         ])
 
     def call(self, inputs, training=False):
-        x, _ = self.encoder(inputs, training=training)
+        x = self.encoder(inputs, training=training)
         features = self.shared_features(x)
 
         features = self.global_pool(features)
