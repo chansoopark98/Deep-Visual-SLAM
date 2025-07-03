@@ -55,8 +55,8 @@ class Trainer(object):
 
         self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = (self.batch_size, *image_shape, 6)
-        self.pose_net.build(posenet_input_shape)
         _ = self.pose_net(tf.random.normal(posenet_input_shape))
+        self.pose_net.build(posenet_input_shape)
         self.pose_net.trainable = True
         
         # 2. Dataset
