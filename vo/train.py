@@ -65,9 +65,9 @@ class Trainer(object):
         
         # 3. Optimizer
         self.lr_scehduler = keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
-                                                                              self.config['Train']['epoch'],
-                                                                              self.config['Train']['final_lr'],
-                                                                              power=0.9)
+                                                                        self.config['Train']['epoch'],
+                                                                        self.config['Train']['final_lr'],
+                                                                        power=0.9)
         
         # self.lr_scehduler = StepLR(initial_learning_rate=self.config['Train']['init_lr'],
         #                         step_size=self.config['Train']['init_lr'] - 5,

@@ -40,16 +40,16 @@ class StereoLoader(object):
         self.num_stereo_train = 0
         self.num_stereo_valid = 0
 
-        if self.config['Dataset']['custom_data']:
-            dataset = CustomDataHandler(config=self.config, mode='stereo')
-            train_dataset = self._build_stereo(np_samples=dataset.train_data)
-            valid_dataset = self._build_stereo(np_samples=dataset.valid_data)
+        # if self.config['Dataset']['custom_data']:
+        #     dataset = CustomDataHandler(config=self.config, mode='stereo')
+        #     train_dataset = self._build_stereo(np_samples=dataset.train_data)
+        #     valid_dataset = self._build_stereo(np_samples=dataset.valid_data)
 
-            train_stereo_datasets.append(train_dataset)
-            valid_stereo_datasets.append(valid_dataset)
+        #     train_stereo_datasets.append(train_dataset)
+        #     valid_stereo_datasets.append(valid_dataset)
 
-            self.num_stereo_train += dataset.train_data.shape[0]
-            self.num_stereo_valid += dataset.valid_data.shape[0]
+        #     self.num_stereo_train += dataset.train_data.shape[0]
+        #     self.num_stereo_valid += dataset.valid_data.shape[0]
         
         if self.config['Dataset']['irs']:
             dataset = IrsDataHandler(config=self.config, mode='stereo')
