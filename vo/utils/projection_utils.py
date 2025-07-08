@@ -184,14 +184,14 @@ def pose_axis_angle_vec2mat(vec, depth=None, invert=False, is_stereo=False):
     translation = tf.slice(vec, [0, 3], [-1, 3])
     translation = tf.reshape(translation, [batch_size, 1, 3])
     
-    if depth is not None and not is_stereo:
-        # 역깊이(inverse depth) 계산
-        inv_depth = 1.0 / (depth + 1e-6)
-        # 평균 역깊이 계산 (배치별)
-        mean_inv_depth = tf.reduce_mean(inv_depth, axis=[1, 2], keepdims=True)
-        mean_inv_depth = tf.reshape(mean_inv_depth, [batch_size, 1, 1])
-        # 변환 벡터에 스케일 적용
-        translation = translation * mean_inv_depth
+    # if depth is not None and not is_stereo:
+    #     # 역깊이(inverse depth) 계산
+    #     inv_depth = 1.0 / (depth + 1e-6)
+    #     # 평균 역깊이 계산 (배치별)
+    #     mean_inv_depth = tf.reduce_mean(inv_depth, axis=[1, 2], keepdims=True)
+    #     mean_inv_depth = tf.reshape(mean_inv_depth, [batch_size, 1, 1])
+    #     # 변환 벡터에 스케일 적용
+    #     translation = translation * mean_inv_depth
 
     # 회전 행렬 생성
     R = rotFromAxisAngle(axisvec)

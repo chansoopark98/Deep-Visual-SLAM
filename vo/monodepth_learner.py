@@ -182,29 +182,43 @@ class Learner(object):
                 curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, scaled_tgts[s])
                 reprojection_list.append(curr_reproj_loss)
                 
-                # Identity reprojection loss - 원본 구현처럼 여기서 계산
-                if self.auto_mask:
-                    # 스케일에 맞게 ref 이미지 조정
-                    identity_reproj_loss = self.compute_reprojection_loss(curr_src, scaled_tgts[s])
-                    identity_reprojection_list.append(identity_reproj_loss)
 
             reprojection_losses = tf.concat(reprojection_list, axis=3)  # [B, H_s, W_s, 2]
             
             if self.auto_mask:
-                identity_reprojection_losses = tf.concat(identity_reprojection_list, axis=3)
+                identity_reprojection_losses = []
                 
-                identity_reprojection_losses += tf.random.normal(
-                    tf.shape(identity_reprojection_losses), 
+                for i in range(2):  # left, right
+                    # 원본과 동일: source_scale에 따른 처리
+                    if s != 0:
+                        # v1_multiscale이 False인 경우 source_scale = 0
+                        pred = tf.image.resize(ref_images[i], [h_s, w_s], 
+                                            method=tf.image.ResizeMethod.BILINEAR)
+                    else:
+                        pred = ref_images[i]
+                    
+                    identity_loss = self.compute_reprojection_loss(pred, scaled_tgts[s])
+                    identity_reprojection_losses.append(identity_loss)
+                
+                identity_reprojection_losses = tf.concat(identity_reprojection_losses, 3)
+                
+                # identity_reprojection_loss = tf.reduce_mean(identity_reprojection_losses, 3, keepdims=True)
+                identity_reprojection_loss = identity_reprojection_losses
+                
+                # 원본과 동일: 랜덤 노이즈 추가
+                identity_reprojection_loss += tf.random.normal(
+                    tf.shape(identity_reprojection_loss), 
                     mean=0.0, 
                     stddev=1e-5
                 )
-
-                combined_losses = tf.concat([identity_reprojection_losses, reprojection_losses], axis=3)
-                combined = tf.reduce_min(combined_losses, axis=3, keepdims=True)
-            
+                
+                # 원본과 동일: identity와 reprojection loss 결합
+                combined = tf.concat([identity_reprojection_loss, reprojection_losses], axis=3)
             else:
-                combined = tf.reduce_min(reprojection_losses, axis=3, keepdims=True)
+                combined = reprojection_losses
 
+            combined = tf.reduce_min(combined, axis=3, keepdims=True)  # [B, H_s, W_s, 1]
+            
             # 최종 reprojection loss
             reprojection_loss = tf.reduce_mean(combined)
 
