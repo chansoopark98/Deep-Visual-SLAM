@@ -8,7 +8,7 @@ from vo.dataset.mono_loader import MonoLoader
 from utils.plot_utils import PlotTool
 from utils.train_utils import StepLR
 from eval import EvalTrajectory
-from model.pose_net import PoseNet
+from model.pose_net import ImprovedPoseNet
 from model.depth_net import DispNet
 from monodepth_learner import Learner
 from tqdm import tqdm
@@ -53,7 +53,8 @@ class Trainer(object):
         self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
         self.depth_net.trainable = True
 
-        self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        # self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        self.pose_net = ImprovedPoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = (self.batch_size, *image_shape, 6)
         _ = self.pose_net(tf.random.normal(posenet_input_shape))
         self.pose_net.build(posenet_input_shape)
