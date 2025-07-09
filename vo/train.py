@@ -2,7 +2,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import tensorflow as tf
-from tensorflow import keras
+import keras
+# from tensorflow import keras
 from vo.dataset.stereo_loader import StereoLoader
 from vo.dataset.mono_loader import MonoLoader
 from utils.plot_utils import PlotTool
@@ -35,9 +36,10 @@ class Trainer(object):
         print('initialize')
    
     def configure_train_ops(self) -> None:
-        # policy = keras.mixed_precision.Policy('mixed_float16')
-        keras.config.set_dtype_policy('mixed_float16')
-        # keras.mixed_precision.set_global_policy(policy)
+        policy = keras.mixed_precision.Policy('mixed_float16')
+        # keras.config.set_dtype_policy('mixed_float16')
+        # keras.mixed_precision.set_global_policy('mixed_float16')
+        keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
@@ -49,15 +51,15 @@ class Trainer(object):
                                self.config['Train']['img_w'],
                                3)
         self.depth_net.build(dispnet_input_shape)
-        _ = self.depth_net(tf.random.normal(dispnet_input_shape, dtype=tf.float16))
+        _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
-        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
+        # self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
         self.depth_net.trainable = True
 
         # self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         self.pose_net = ImprovedPoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = (self.batch_size, *image_shape, 6)
-        _ = self.pose_net(tf.random.normal(posenet_input_shape))
+        # _ = self.pose_net(tf.random.normal(posenet_input_shape))
         self.pose_net.build(posenet_input_shape)
         self.pose_net.trainable = True
         

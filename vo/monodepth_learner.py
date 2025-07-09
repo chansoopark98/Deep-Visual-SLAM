@@ -25,8 +25,9 @@ class Learner(object):
     def disp_to_depth(self, disp, min_depth, max_depth):
         min_disp = 1. / max_depth
         max_disp = 1. / min_depth
-        scaled_disp = tf.cast(min_disp, tf.float32) + tf.cast(max_disp - min_disp, tf.float32) * disp
-        depth = tf.cast(1., tf.float32) / scaled_disp
+        scaled_disp = min_disp + (max_disp - min_disp) * disp
+        depth = 1 / scaled_disp
+        depth = tf.cast(depth, tf.float32)
         return depth
         
     def compute_reprojection_loss(self, reproj_image, tgt_image):
@@ -37,9 +38,12 @@ class Learner(object):
         ssim_loss = tf.reduce_mean(self.ssim(reproj_image, tgt_image), axis=3, keepdims=True)
 
         loss = (self.ssim_ratio * ssim_loss) + ((1. - self.ssim_ratio) * l1_loss)
+        loss = tf.cast(loss, tf.float32)
         return loss
 
     def ssim(self, x, y):
+        x = tf.cast(x, tf.float32)
+        y = tf.cast(y, tf.float32)
         # 현재 코드 동일
         x = tf.pad(x, [[0,0],[1,1],[1,1],[0,0]], mode='REFLECT')
         y = tf.pad(y, [[0,0],[1,1],[1,1],[0,0]], mode='REFLECT')
@@ -103,6 +107,9 @@ class Learner(object):
         
         # 행렬 곱셈으로 스케일링 적용
         scaled_intrinsics = tf.matmul(scale_matrix, intrinsics)
+
+        # dtype 변환
+        scaled_intrinsics = tf.cast(scaled_intrinsics, tf.float32)
         
         return scaled_intrinsics
     
@@ -125,6 +132,7 @@ class Learner(object):
         scaled_tgts = []
 
         disp_raw = self.depth_net(tgt_image, training=training) # disp raw result (H, W, 1)
+        disp_raw = [tf.cast(disp, tf.float32) for disp in disp_raw]
 
         for scale_idx in range(self.num_scales):
             scaled_disp = disp_raw[scale_idx]
@@ -254,7 +262,8 @@ class Learner(object):
 
         # Generate Depth
         disp_raw = self.depth_net(tgt_image, training=training)  # [[B, H, W, 1], [B, H/2, W/2, 1], ...]
-
+        disp_raw = [tf.cast(disp, tf.float32) for disp in disp_raw]
+        
         for s in range(self.num_scales):
             h_s = H // (2**s)
             w_s = W // (2**s)

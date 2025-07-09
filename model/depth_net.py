@@ -1,5 +1,6 @@
 import tensorflow as tf
-from tensorflow import keras
+# from tensorflow import keras
+import keras
 try:
     from .model_utils import *
     from .resnet_tf import Resnet, Resnet34
