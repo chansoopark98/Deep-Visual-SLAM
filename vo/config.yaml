@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Monodepth2-resnet18-irs-withoutCustom_withoutScaling
+  exp_name: Monodepth2-resnet18-irs-withoutCustom_newPosenet
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
