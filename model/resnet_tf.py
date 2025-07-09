@@ -1,5 +1,6 @@
 import tensorflow as tf
-from tensorflow import keras
+# from tensorflow import keras
+import keras
 try:
     from .resnet_original import resnet_18, resnet_34
 except:

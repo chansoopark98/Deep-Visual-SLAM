@@ -1,5 +1,6 @@
 import tensorflow as tf
-from tensorflow import keras
+# from tensorflow import keras
+import keras
 
 BATCH_NORM_DECAY = 0.95
 

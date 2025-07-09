@@ -1,5 +1,6 @@
 import tensorflow as tf
-from tensorflow import keras
+# from tensorflow import keras
+import keras
 
 batch_norm_decay = 0.95
 batch_norm_epsilon = 1e-5
@@ -20,7 +21,7 @@ def hard_sigmoid(x):
 def hard_swish(x):
     return keras.layers.Multiply()([x, hard_sigmoid(x)])
 
-def reflect_conv(filter_size, out_channel, stride, name='conv', activation_fn=tf.nn.elu):
+def reflect_conv(filter_size, out_channel, stride, name='conv', activation_fn=keras.layers.ELU()): # tf.nn.elu
     """
     returns a `keras.Sequential` with ReflectionPadding2D + Conv2D(...).
     """
