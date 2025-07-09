@@ -1,4 +1,5 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+from tensorflow import keras
 try:
     from .model_utils import *
     from .resnet_tf import Resnet, Resnet34
@@ -7,7 +8,7 @@ except:
     from model_utils import *
     from resnet_tf import Resnet, Resnet34
 
-class DispNet(tf_keras.Model):
+class DispNet(keras.Model):
     """
     Encoder + Disp Decoder
     """
@@ -35,7 +36,7 @@ class DispNet(tf_keras.Model):
 
         # disp 5
         self.iconv5 = reflect_conv(3, filters[4], 1, 'iconv5')
-        self.iconv5_resize = tf_keras.layers.Resizing(
+        self.iconv5_resize = keras.layers.Resizing(
             height=self.image_height // 16,
             width=self.image_width // 16,
             interpolation='bilinear',
@@ -45,7 +46,7 @@ class DispNet(tf_keras.Model):
 
         # disp 4
         self.iconv4 = reflect_conv(3, filters[3], 1, 'iconv4')
-        self.iconv4_resize = tf_keras.layers.Resizing(
+        self.iconv4_resize = keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
             interpolation='bilinear',
@@ -56,7 +57,7 @@ class DispNet(tf_keras.Model):
 
         # disp 3
         self.iconv3 = reflect_conv(3, filters[2], 1, 'iconv3')
-        self.iconv3_resize = tf_keras.layers.Resizing(
+        self.iconv3_resize = keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
             interpolation='bilinear',
@@ -67,7 +68,7 @@ class DispNet(tf_keras.Model):
 
         # disp 2
         self.iconv2 = reflect_conv(3, filters[1], 1, 'iconv2')
-        self.iconv2_resize = tf_keras.layers.Resizing(
+        self.iconv2_resize = keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
             interpolation='bilinear',
@@ -78,7 +79,7 @@ class DispNet(tf_keras.Model):
 
         # disp 1
         self.iconv1 = reflect_conv(3, filters[0], 1, 'iconv1')
-        self.iconv1_resize = tf_keras.layers.Resizing(
+        self.iconv1_resize = keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
             interpolation='bilinear',
@@ -95,8 +96,8 @@ class DispNet(tf_keras.Model):
         # 1) 인코더
         x, skips = self.encoder(inputs, training=training)
 
-        x = tf.cast(x, tf.float32)
-        skips = [tf.cast(skip, tf.float32) for skip in skips]
+        # x = tf.cast(x, tf.float32)
+        # skips = [tf.cast(skip, tf.float32) for skip in skips]
 
         # disp5
         iconv5 = self.iconv5(x, training=training)  # [B,H/32, W/32, 256]
@@ -133,7 +134,7 @@ class DispNet(tf_keras.Model):
 
         return disp1, disp2, disp3, disp4
     
-class DispNetSigma(tf_keras.Model):
+class DispNetSigma(keras.Model):
     """
     Encoder + Disp Decoder
     """
@@ -161,7 +162,7 @@ class DispNetSigma(tf_keras.Model):
 
         # disp 5
         self.iconv5 = reflect_conv(3, filters[4], 1, 'iconv5')
-        self.iconv5_resize = tf_keras.layers.Resizing(
+        self.iconv5_resize = keras.layers.Resizing(
             height=self.image_height // 16,
             width=self.image_width // 16,
             interpolation='bilinear',
@@ -171,7 +172,7 @@ class DispNetSigma(tf_keras.Model):
 
         # disp 4
         self.iconv4 = reflect_conv(3, filters[3], 1, 'iconv4')
-        self.iconv4_resize = tf_keras.layers.Resizing(
+        self.iconv4_resize = keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
             interpolation='bilinear',
@@ -182,7 +183,7 @@ class DispNetSigma(tf_keras.Model):
 
         # disp 3
         self.iconv3 = reflect_conv(3, filters[2], 1, 'iconv3')
-        self.iconv3_resize = tf_keras.layers.Resizing(
+        self.iconv3_resize = keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
             interpolation='bilinear',
@@ -193,7 +194,7 @@ class DispNetSigma(tf_keras.Model):
 
         # disp 2
         self.iconv2 = reflect_conv(3, filters[1], 1, 'iconv2')
-        self.iconv2_resize = tf_keras.layers.Resizing(
+        self.iconv2_resize = keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
             interpolation='bilinear',
@@ -204,7 +205,7 @@ class DispNetSigma(tf_keras.Model):
 
         # disp 1
         self.iconv1 = reflect_conv(3, filters[0], 1, 'iconv1')
-        self.iconv1_resize = tf_keras.layers.Resizing(
+        self.iconv1_resize = keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
             interpolation='bilinear',
