@@ -1,8 +1,8 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-import tensorflow as tf, tf_keras
-import keras
+import tensorflow as tf
+from tensorflow import keras
 from vo.dataset.stereo_loader import StereoLoader
 from vo.dataset.mono_loader import MonoLoader
 from utils.plot_utils import PlotTool
@@ -35,8 +35,9 @@ class Trainer(object):
         print('initialize')
    
     def configure_train_ops(self) -> None:
-        policy = keras.mixed_precision.Policy('mixed_float16')
-        keras.mixed_precision.set_global_policy(policy)
+        # policy = keras.mixed_precision.Policy('mixed_float16')
+        keras.config.set_dtype_policy('mixed_float16')
+        # keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
         self.batch_size = self.config['Train']['batch_size']
@@ -48,7 +49,7 @@ class Trainer(object):
                                self.config['Train']['img_w'],
                                3)
         self.depth_net.build(dispnet_input_shape)
-        _ = self.depth_net(tf.random.normal(dispnet_input_shape))
+        _ = self.depth_net(tf.random.normal(dispnet_input_shape, dtype=tf.float16))
 
         self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
         self.depth_net.trainable = True
@@ -99,12 +100,12 @@ class Trainer(object):
         self.plot_tool = PlotTool(config=self.config)
 
         # 5. Metrics
-        self.train_total_loss = tf_keras.metrics.Mean(name='train_total_loss')
-        self.train_pixel_loss = tf_keras.metrics.Mean(name='train_pixel_loss')
-        self.train_smooth_loss = tf_keras.metrics.Mean(name='train_smooth_loss')
-        self.valid_total_loss = tf_keras.metrics.Mean(name='valid_total_loss')
-        self.valid_pixel_loss = tf_keras.metrics.Mean(name='valid_pixel_loss')
-        self.valid_smooth_loss = tf_keras.metrics.Mean(name='valid_smooth_loss')
+        self.train_total_loss = keras.metrics.Mean(name='train_total_loss')
+        self.train_pixel_loss = keras.metrics.Mean(name='train_pixel_loss')
+        self.train_smooth_loss = keras.metrics.Mean(name='train_smooth_loss')
+        self.valid_total_loss = keras.metrics.Mean(name='valid_total_loss')
+        self.valid_pixel_loss = keras.metrics.Mean(name='valid_pixel_loss')
+        self.valid_smooth_loss = keras.metrics.Mean(name='valid_smooth_loss')
 
         # 6. Logger
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")

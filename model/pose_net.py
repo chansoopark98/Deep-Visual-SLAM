@@ -1,4 +1,5 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+from tensorflow import keras
 try:
     from .flownet import CustomFlow
     from .resnet_tf import Resnet
@@ -8,7 +9,7 @@ except:
 
 
 def std_conv(filter_size, out_channel, stride, use_bias=True, pad='same', name='conv'):
-    conv_layer = tf_keras.layers.Conv2D(out_channel,
+    conv_layer = keras.layers.Conv2D(out_channel,
                                         (filter_size, filter_size),
                                          strides=(stride, stride), 
                                          use_bias=use_bias,
@@ -16,7 +17,7 @@ def std_conv(filter_size, out_channel, stride, use_bias=True, pad='same', name='
                                          name=name+'_'+'conv')
     return conv_layer
 
-class PoseNetAB(tf_keras.Model):
+class PoseNetAB(keras.Model):
     def __init__(self,
                  image_shape: tuple,
                  batch_size: int,
@@ -33,39 +34,37 @@ class PoseNetAB(tf_keras.Model):
         self.encoder.trainable = True
         
         # 공통 특징 추출층
-        self.shared_features_1 = tf_keras.Sequential([
+        self.shared_features_1 = keras.Sequential([
             std_conv(1, 256, 1, use_bias=True, name='shared_conv1'),
-            # tf_keras.layers.BatchNormalization(),
-            tf_keras.layers.LeakyReLU(),
+            keras.layers.LeakyReLU(),
             std_conv(3, 256, 1, use_bias=True, name='shared_conv1_2'),
-            # tf_keras.layers.BatchNormalization(),
-            tf_keras.layers.LeakyReLU(),
+            keras.layers.LeakyReLU(),
         ])
 
-        self.shared_features_2 = tf_keras.Sequential([
+        self.shared_features_2 = keras.Sequential([
             std_conv(3, 256, 1, use_bias=True, name='shared_conv2'),
-            # tf_keras.layers.BatchNormalization(),
-            tf_keras.layers.LeakyReLU(),
+            # keras.layers.BatchNormalization(),
+            keras.layers.LeakyReLU(),
         ])
 
-        self.shared_features_3 = tf_keras.Sequential([
+        self.shared_features_3 = keras.Sequential([
             std_conv(3, 6, 1, use_bias=True, name='shared_conv3'),
-            # tf_keras.layers.BatchNormalization(),
-            tf_keras.layers.LeakyReLU(),
+            # keras.layers.BatchNormalization(),
+            keras.layers.LeakyReLU(),
         ]) 
 
         # 밝기 조정 파라미터 브랜치 (a와 b)
-        self.a_conv = tf_keras.layers.Conv2D(
+        self.a_conv = keras.layers.Conv2D(
             filters=1, kernel_size=(1, 1), strides=(1, 1),
             padding='same', name='a_conv'
         )
         
-        self.b_conv = tf_keras.layers.Conv2D(
+        self.b_conv = keras.layers.Conv2D(
             filters=1, kernel_size=(1, 1), strides=(1, 1),
             padding='same', name='b_conv'
         )
 
-        self.global_pool = tf_keras.layers.GlobalAveragePooling2D()
+        self.global_pool = keras.layers.GlobalAveragePooling2D()
 
     def call(self, inputs, training=False):
         x = self.encoder(inputs, training=training)
@@ -90,7 +89,7 @@ class PoseNetAB(tf_keras.Model):
         return out_pose, out_a, out_b
 
 
-class PoseNetExtra(tf_keras.Model):
+class PoseNetExtra(keras.Model):
     """
     - 입력: (B, H, W, 6)  (ex: 소스+타겟 concat)
     - 내부: ResNet-18 인코더 -> Conv/ReduceMean -> Reshape -> scale
@@ -117,31 +116,31 @@ class PoseNetExtra(tf_keras.Model):
         # self.encoder.trainable = True
         
         # 공통 특징 추출층
-        self.shared_features = tf_keras.Sequential([
+        self.shared_features = keras.Sequential([
             std_conv(1, 256, 1, use_bias=False, name='shared_conv1'),
-            tf_keras.layers.BatchNormalization(),
-            tf_keras.layers.LeakyReLU(),
+            keras.layers.BatchNormalization(),
+            keras.layers.LeakyReLU(),
             std_conv(3, 256, 1, use_bias=False, name='shared_conv2'),
-            tf_keras.layers.BatchNormalization(),
-            tf_keras.layers.LeakyReLU(),
+            keras.layers.BatchNormalization(),
+            keras.layers.LeakyReLU(),
             std_conv(3, 256, 1, use_bias=True, name='shared_conv3'),
-            tf_keras.layers.LeakyReLU(),
+            keras.layers.LeakyReLU(),
         ])
 
-        self.global_pool = tf_keras.layers.GlobalAveragePooling2D()
+        self.global_pool = keras.layers.GlobalAveragePooling2D()
 
         # 회전 브랜치
-        self.rotation_branch = tf_keras.Sequential([
-            tf_keras.layers.Dense(256),
-            tf_keras.layers.LeakyReLU(),
-            tf_keras.layers.Dense(3)  # 축-각도 또는 오일러 각도
+        self.rotation_branch = keras.Sequential([
+            keras.layers.Dense(256),
+            keras.layers.LeakyReLU(),
+            keras.layers.Dense(3)  # 축-각도 또는 오일러 각도
         ])
         
         # 이동 브랜치
-        self.translation_branch = tf_keras.Sequential([
-            tf_keras.layers.Dense(256),
-            tf_keras.layers.LeakyReLU(),
-            tf_keras.layers.Dense(3)  # XYZ 이동
+        self.translation_branch = keras.Sequential([
+            keras.layers.Dense(256),
+            keras.layers.LeakyReLU(),
+            keras.layers.Dense(3)  # XYZ 이동
         ])
 
     def call(self, inputs, training=False):
@@ -158,7 +157,7 @@ class PoseNetExtra(tf_keras.Model):
         return tf.concat([rotation, translation], axis=-1)
 
 
-class ImprovedPoseNet(tf_keras.Model):
+class ImprovedPoseNet(keras.Model):
     def __init__(self,
                  image_shape: tuple,
                  batch_size: int,
@@ -183,14 +182,14 @@ class ImprovedPoseNet(tf_keras.Model):
         
         # Initial pose estimation (keep existing structure)
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')
-        self.pose_act0 = tf_keras.layers.ReLU(name='pose_relu0')
+        self.pose_act0 = keras.layers.ReLU(name='pose_relu0')
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')
-        self.pose_act1 = tf_keras.layers.ReLU(name='pose_relu1')
+        self.pose_act1 = keras.layers.ReLU(name='pose_relu1')
         self.pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')
-        self.pose_act2 = tf_keras.layers.ReLU(name='pose_relu2')
+        self.pose_act2 = keras.layers.ReLU(name='pose_relu2')
         
         # Initial pose prediction
-        self.pose_conv3 = tf_keras.layers.Conv2D(
+        self.pose_conv3 = keras.layers.Conv2D(
             filters=6, kernel_size=(1, 1), strides=(1, 1),
             activation=None, name='pose_conv3'
         )
@@ -199,32 +198,32 @@ class ImprovedPoseNet(tf_keras.Model):
         self.hidden_size = 256
         
         # Feature projection to fixed size
-        self.feature_projection = tf_keras.layers.Dense(
+        self.feature_projection = keras.layers.Dense(
             self.hidden_size, 
             activation='relu',
             name='feature_projection'
         )
         
         # GRU input projection layer
-        self.gru_input_projection = tf_keras.layers.Dense(
+        self.gru_input_projection = keras.layers.Dense(
             self.hidden_size,
             activation=None,
             name='gru_input_projection'
         )
         
         # GRU for iterative refinement
-        self.gru_cell = tf_keras.layers.GRUCell(
+        self.gru_cell = keras.layers.GRUCell(
             units=self.hidden_size,
             name='pose_gru'
         )
         
         # Refinement head
-        self.refinement_dense1 = tf_keras.layers.Dense(128, activation='relu', name='refine_dense1')
-        self.refinement_dense2 = tf_keras.layers.Dense(6, activation=None, name='refine_dense2')
+        self.refinement_dense1 = keras.layers.Dense(128, activation='relu', name='refine_dense1')
+        self.refinement_dense2 = keras.layers.Dense(6, activation=None, name='refine_dense2')
         
         # Correlation layer (optional)
         if self.use_correlation:
-            self.correlation_conv = tf_keras.layers.Conv2D(
+            self.correlation_conv = keras.layers.Conv2D(
                 filters=64, kernel_size=(1, 1), strides=(1, 1),
                 activation='relu', name='correlation_conv'
             )
@@ -300,7 +299,7 @@ class ImprovedPoseNet(tf_keras.Model):
         
         return pose
 
-class SimplePoseNetWithRefinement(tf_keras.Model):
+class SimplePoseNetWithRefinement(keras.Model):
     def __init__(self,
                  image_shape: tuple,
                  batch_size: int,
@@ -323,22 +322,22 @@ class SimplePoseNetWithRefinement(tf_keras.Model):
         ).build_model()
         
         # Initial pose estimation
-        self.pose_layers = tf_keras.Sequential([
+        self.pose_layers = keras.Sequential([
             std_conv(1, 256, 1, name='pose_conv1'),
-            tf_keras.layers.ReLU(),
+            keras.layers.ReLU(),
             std_conv(3, 256, 1, name='pose_conv2'),
-            tf_keras.layers.ReLU(),
+            keras.layers.ReLU(),
             std_conv(3, 256, 1, name='pose_conv3'),
-            tf_keras.layers.ReLU(),
-            tf_keras.layers.Conv2D(6, kernel_size=1, activation=None),
-            tf_keras.layers.GlobalAveragePooling2D()
+            keras.layers.ReLU(),
+            keras.layers.Conv2D(6, kernel_size=1, activation=None),
+            keras.layers.GlobalAveragePooling2D()
         ], name='initial_pose')
         
         # Refinement network
-        self.refinement_net = tf_keras.Sequential([
-            tf_keras.layers.Dense(256, activation='relu'),
-            tf_keras.layers.Dense(128, activation='relu'),
-            tf_keras.layers.Dense(6, activation=None)
+        self.refinement_net = keras.Sequential([
+            keras.layers.Dense(256, activation='relu'),
+            keras.layers.Dense(128, activation='relu'),
+            keras.layers.Dense(6, activation=None)
         ], name='refinement')
 
     def call(self, inputs, training=False):
@@ -364,7 +363,7 @@ class SimplePoseNetWithRefinement(tf_keras.Model):
         
         return pose
 
-class PoseNet(tf_keras.Model):
+class PoseNet(keras.Model):
     def __init__(self,
                  image_shape: tuple,
                  batch_size: int,
@@ -382,20 +381,20 @@ class PoseNet(tf_keras.Model):
         
         # filter_size, out_channel, stride, pad='same', name='conv'
         self.pose_conv0 = std_conv(1, 256, 1, name='pose_conv0')  # kernel=1
-        self.pose_act0 = tf_keras.layers.ReLU(name='pose_relu')
+        self.pose_act0 = keras.layers.ReLU(name='pose_relu')
 
         self.pose_conv1 = std_conv(3, 256, 1, name='pose_conv1')  # kernel=3
-        self.pose_act1 = tf_keras.layers.ReLU(name='pose_relu1')
+        self.pose_act1 = keras.layers.ReLU(name='pose_relu1')
 
         self.pose_conv2 = std_conv(3, 256, 1, name='pose_conv2')  # kernel=3
-        self.pose_act2 = tf_keras.layers.ReLU(name='pose_relu2')
+        self.pose_act2 = keras.layers.ReLU(name='pose_relu2')
     
-        self.pose_conv3 = tf_keras.layers.Conv2D(
+        self.pose_conv3 = keras.layers.Conv2D(
             filters=6, kernel_size=(1, 1), strides=(1, 1),
             activation=None, name='pose_conv3'
         )
 
-        self.reshape_layer = tf_keras.layers.Reshape((6,), name='pose_reshape')
+        self.reshape_layer = keras.layers.Reshape((6,), name='pose_reshape')
 
     def call(self, inputs, training=False):
         x, _ = self.encoder(inputs, training=training) 

@@ -2,7 +2,6 @@ import os
 import glob
 import numpy as np
 import time
-import scipy.io as sio
 
 from PIL import Image
 import matplotlib

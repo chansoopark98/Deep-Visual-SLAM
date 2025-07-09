@@ -1,10 +1,11 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+from tensorflow import keras
 from utils.projection_utils import projective_inverse_warp
 
 class Learner(object):
     def __init__(self,
-                 depth_model: tf_keras.Model,
-                 pose_model: tf_keras.Model,
+                 depth_model: keras.Model,
+                 pose_model: keras.Model,
                  config: dict):
         self.depth_net = depth_model
         self.pose_net = pose_model

@@ -1,11 +1,12 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+from tensorflow import keras
 
 batch_norm_decay = 0.95
 batch_norm_epsilon = 1e-5
 pose_scale = 0.01
 
 def std_conv(filter_size, out_channel, stride, pad='same', name='conv'):
-    conv_layer = tf_keras.layers.Conv2D(out_channel,
+    conv_layer = keras.layers.Conv2D(out_channel,
                                         (filter_size, filter_size),
                                          strides=(stride, stride), 
                                          padding=pad,
@@ -14,19 +15,19 @@ def std_conv(filter_size, out_channel, stride, pad='same', name='conv'):
     
 
 def hard_sigmoid(x):
-    return tf_keras.layers.ReLU(6.0)(x + 3.0) * (1.0 / 6.0)
+    return keras.layers.ReLU(6.0)(x + 3.0) * (1.0 / 6.0)
 
 def hard_swish(x):
-    return tf_keras.layers.Multiply()([x, hard_sigmoid(x)])
+    return keras.layers.Multiply()([x, hard_sigmoid(x)])
 
 def reflect_conv(filter_size, out_channel, stride, name='conv', activation_fn=tf.nn.elu):
     """
-    returns a `tf_keras.Sequential` with ReflectionPadding2D + Conv2D(...).
+    returns a `keras.Sequential` with ReflectionPadding2D + Conv2D(...).
     """
     pad_size = filter_size // 2
-    conv_reflect = tf_keras.Sequential([
+    conv_reflect = keras.Sequential([
         ReflectionPadding2D(padding=(pad_size, pad_size), name=name + '_reflect_pad'),
-        tf_keras.layers.Conv2D(out_channel,
+        keras.layers.Conv2D(out_channel,
                                kernel_size=(filter_size, filter_size),
                                strides=(stride, stride),
                                padding='valid',
@@ -37,20 +38,20 @@ def reflect_conv(filter_size, out_channel, stride, name='conv', activation_fn=tf
     return conv_reflect
 
 def batch_norm(name='BatchNorm'):
-    return tf_keras.layers.BatchNormalization(momentum=batch_norm_decay,
+    return keras.layers.BatchNormalization(momentum=batch_norm_decay,
                                               epsilon=batch_norm_epsilon, name=name+'_'+'BatchNorm')
 
 def activation(type='relu', name='relu'):
     if type == 'elu':
-        activation = tf_keras.layers.ELU(name=name)
+        activation = keras.layers.ELU(name=name)
     else:
-        activation = tf_keras.layers.ReLU(name=name)
+        activation = keras.layers.ReLU(name=name)
     return activation
 
-class ReflectionPadding2D(tf_keras.layers.Layer):
+class ReflectionPadding2D(keras.layers.Layer):
     def __init__(self, padding=(1, 1), **kwargs):
         self.padding = tuple(padding)
-        self.input_spec = [tf_keras.layers.InputSpec(ndim=4)]
+        self.input_spec = [keras.layers.InputSpec(ndim=4)]
         super(ReflectionPadding2D, self).__init__(**kwargs)
 
     def compute_output_shape(self, s):
@@ -63,33 +64,33 @@ class ReflectionPadding2D(tf_keras.layers.Layer):
         w_pad,h_pad = self.padding
         return tf.pad(x, [[0,0], [h_pad,h_pad], [w_pad,w_pad], [0,0]], 'REFLECT')
 
-class ReduceMeanLayer(tf_keras.layers.Layer):
+class ReduceMeanLayer(keras.layers.Layer):
     def __init__(self, prefix='unit', **kwargs):
         super(ReduceMeanLayer, self).__init__(**kwargs)
 
     def call(self, inputs):
         return tf.reduce_mean(inputs, axis=[1, 2], keepdims=True)
 
-class ResidualBlockFirst(tf_keras.layers.Layer):
+class ResidualBlockFirst(keras.layers.Layer):
     def __init__(self, out_channel, stride, prefix='unit', **kwargs):
         super(ResidualBlockFirst, self).__init__(**kwargs)
         self.prefix = prefix
         self.out_channel = out_channel
         self.stride = stride
         
-        self.conv1 = tf_keras.layers.Conv2D(out_channel, (3, 3), strides=(stride, stride), padding='same', name=prefix+'_'+'conv1')
-        self.bn1 = tf_keras.layers.BatchNormalization(momentum=batch_norm_decay,
+        self.conv1 = keras.layers.Conv2D(out_channel, (3, 3), strides=(stride, stride), padding='same', name=prefix+'_'+'conv1')
+        self.bn1 = keras.layers.BatchNormalization(momentum=batch_norm_decay,
                                                       epsilon=batch_norm_epsilon,
                                                       name=prefix+'_'+'BatchNorm')
-        self.relu1 = tf_keras.layers.ReLU(name=prefix+'_'+'relu1')
-        self.conv2 = tf_keras.layers.Conv2D(out_channel, (3, 3), strides=(1, 1), padding='same', name=prefix+'_'+'conv2')
-        self.bn2 = tf_keras.layers.BatchNormalization(momentum=batch_norm_decay,
+        self.relu1 = keras.layers.ReLU(name=prefix+'_'+'relu1')
+        self.conv2 = keras.layers.Conv2D(out_channel, (3, 3), strides=(1, 1), padding='same', name=prefix+'_'+'conv2')
+        self.bn2 = keras.layers.BatchNormalization(momentum=batch_norm_decay,
                                                       epsilon=batch_norm_epsilon,
                                                       name=prefix+'_'+'BatchNorm_1')
-        self.relu2 = tf_keras.layers.ReLU(name=prefix+'_'+'relu2')
+        self.relu2 = keras.layers.ReLU(name=prefix+'_'+'relu2')
         
         if stride != 1 or out_channel != self.out_channel:
-            self.shortcut_conv = tf_keras.layers.Conv2D(out_channel, (1, 1), strides=(stride, stride), padding='same', name=prefix+'_'+'shortcut')
+            self.shortcut_conv = keras.layers.Conv2D(out_channel, (1, 1), strides=(stride, stride), padding='same', name=prefix+'_'+'shortcut')
         else:
             self.shortcut_conv = None
 
@@ -110,24 +111,24 @@ class ResidualBlockFirst(tf_keras.layers.Layer):
         x = self.conv2(x)
         x = self.bn2(x, training=training)
         
-        x = tf_keras.layers.add([x, short_cut], name=self.name+'_'+'add')
+        x = keras.layers.add([x, short_cut], name=self.name+'_'+'add')
         x = self.relu2(x)
         return x
 
-class ResidualBlock(tf_keras.layers.Layer):
+class ResidualBlock(keras.layers.Layer):
     def __init__(self, num_channel, prefix='unit', **kwargs):
         super(ResidualBlock, self).__init__(**kwargs)
         self.num_channel = num_channel
-        self.conv1 = tf_keras.layers.Conv2D(num_channel, (3, 3), strides=(1, 1), padding='same', name=prefix+'_conv1')
-        self.bn1 = tf_keras.layers.BatchNormalization(momentum=batch_norm_decay,
+        self.conv1 = keras.layers.Conv2D(num_channel, (3, 3), strides=(1, 1), padding='same', name=prefix+'_conv1')
+        self.bn1 = keras.layers.BatchNormalization(momentum=batch_norm_decay,
                                                       epsilon=batch_norm_epsilon,
                                                       name=prefix+'_BatchNorm')
-        self.relu1 = tf_keras.layers.ReLU(name=prefix+'_relu1')
-        self.conv2 = tf_keras.layers.Conv2D(num_channel, (3, 3), strides=(1, 1), padding='same', name=prefix+'_conv2')
-        self.bn2 = tf_keras.layers.BatchNormalization(momentum=batch_norm_decay,
+        self.relu1 = keras.layers.ReLU(name=prefix+'_relu1')
+        self.conv2 = keras.layers.Conv2D(num_channel, (3, 3), strides=(1, 1), padding='same', name=prefix+'_conv2')
+        self.bn2 = keras.layers.BatchNormalization(momentum=batch_norm_decay,
                                                       epsilon=batch_norm_epsilon,
                                                       name=prefix+'_BatchNorm_1')
-        self.relu2 = tf_keras.layers.ReLU(name=prefix+'_relu2')
+        self.relu2 = keras.layers.ReLU(name=prefix+'_relu2')
 
     def call(self, inputs, training=False):
         short_cut = inputs
@@ -136,6 +137,6 @@ class ResidualBlock(tf_keras.layers.Layer):
         x = self.relu1(x)
         x = self.conv2(x)
         x = self.bn2(x, training=training)
-        x = tf_keras.layers.add([x, short_cut], name=self.name+'_add')
+        x = keras.layers.add([x, short_cut], name=self.name+'_add')
         x = self.relu2(x)
         return x
