@@ -17,6 +17,7 @@ Train:
   use_shuffle: True
   train_plot_interval: 100 # 100
   valid_plot_interval: 20
+  num_workers: 16
   save_freq: 2
   vis_batch_size: 1
   num_source: 1 # num_source = 1 >> image pair (t-1, t, t+1) / 2 >> image pair (t-2, t-1, t, t+1, t+2) default: 1
