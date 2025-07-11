@@ -78,11 +78,10 @@ class MonoDataset(Dataset):
                 pil_images = [img.transpose(Image.FLIP_LEFT_RIGHT) for img in pil_images]
             
             # Color jitter 적용
-            seed = random.randint(0, 2**32)
+            # seed = random.randint(0, 2**32)
             augmented_images = []
             for img in pil_images:
-                random.seed(seed)
-                torch.manual_seed(seed)
+                
                 augmented_images.append(self.color_jitter(img))
             pil_images = augmented_images
         
@@ -291,34 +290,6 @@ if __name__ == '__main__':
         intrinsics = batch['intrinsic']
         
         avg_time += time.time() - start_time
-        
-        # # 첫 번째 샘플 시각화
-        # if i == 0:
-        #     # 역정규화
-        #     left_img = MonoLoader.denormalize_image(left_images[0])
-        #     target_img = MonoLoader.denormalize_image(target_images[0])
-        #     right_img = MonoLoader.denormalize_image(right_images[0])
-            
-        #     # CHW to HWC
-        #     left_img = left_img.permute(1, 2, 0).numpy()
-        #     target_img = target_img.permute(1, 2, 0).numpy()
-        #     right_img = right_img.permute(1, 2, 0).numpy()
-            
-        #     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        #     axes[0].imshow(left_img)
-        #     axes[0].set_title('Source Left')
-        #     axes[1].imshow(target_img)
-        #     axes[1].set_title('Target')
-        #     axes[2].imshow(right_img)
-        #     axes[2].set_title('Source Right')
-            
-        #     print(f"Batch size: {left_images.shape[0]}")
-        #     print(f"Image shape: {left_images.shape}")
-        #     print(f"Intrinsic shape: {intrinsics.shape}")
-        #     print(f"Intrinsic[0]: \n{intrinsics[0].numpy()}")
-            
-        #     plt.tight_layout()
-        #     plt.show()
 
         if i > 100:
             break
