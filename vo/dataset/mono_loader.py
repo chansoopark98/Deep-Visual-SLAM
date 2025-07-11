@@ -251,6 +251,7 @@ class MonoLoader:
             pin_memory=True,
             drop_last=True,
             persistent_workers=True if self.num_workers > 0 else False
+            # persistent_workers=False
         )
         
         return dataloader
