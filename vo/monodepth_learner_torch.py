@@ -179,7 +179,7 @@ class MonodepthLearner:
                 target = tgt_image
                 K_s = intrinsic
             
-            inv_K_s = torch.inverse(K_s)
+            inv_K_s = torch.inverse(K_s.float()).type(K_s.dtype)
             
             # Compute reprojection for each source
             reprojection_losses = []
@@ -332,7 +332,8 @@ class MonodepthLearner:
             T = T_4x4[:, :3, :]
             
             # Warp source to target
-            inv_K_s = torch.inverse(K_s)
+            inv_K_s = torch.inverse(K_s.float()).type(K_s.dtype)
+            
             cam_points = self.backproject_depth[scale](depth, inv_K_s)
             pix_coords = self.project_3d[scale](cam_points, K_s, T)
             

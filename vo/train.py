@@ -1,5 +1,6 @@
 import sys
 import os
+import gc
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 import torch
@@ -7,6 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import PolynomialLR
+from torch.amp import GradScaler, autocast  # AMP 추가
 
 from vo.dataset.stereo_loader import StereoLoader
 from vo.dataset.mono_loader import MonoLoader
@@ -28,6 +30,9 @@ class Trainer:
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
+        # Mixed precision 설정
+        self.use_amp = config.get('Train', {}).get('use_amp', True) and self.device.type == 'cuda'
+        
         # Update experiment name
         original_name = self.config['Directory']['exp_name']
         self.config['Directory']['exp_name'] = 'mode={0}_res={1}_ep={2}_bs={3}_initLR={4}_endLR={5}_prefix={6}'.format(
@@ -41,7 +46,7 @@ class Trainer:
         )
         
         self.configure_train_ops()
-        print('Trainer initialized')
+        print(f'Trainer initialized (AMP: {self.use_amp})')
     
     def configure_train_ops(self) -> None:
         """Configure training operations"""
@@ -65,7 +70,13 @@ class Trainer:
             num_input_images=2,
             num_frames_to_predict_for=1
         ).to(self.device)
-        
+
+        # compile torch models
+        self.depth_net = torch.compile(self.depth_net,
+                                       fullgraph=True)
+        self.pose_net = torch.compile(self.pose_net,
+                                       fullgraph=True)
+
         # 2. Data loaders
         self.stereo_loader = StereoLoader(config=self.config)
         self.mono_loader = MonoLoader(config=self.config)
@@ -103,7 +114,12 @@ class Trainer:
             power=0.9
         )
         
-        # 5. Learner
+        # 5. GradScaler for AMP
+        if self.use_amp:
+            self.stereo_scaler = GradScaler()
+            self.mono_scaler = GradScaler()
+        
+        # 6. Learner
         self.learner = MonodepthLearner(
             depth_net=self.depth_net,
             pose_net=self.pose_net,
@@ -111,10 +127,10 @@ class Trainer:
             device=str(self.device)
         )
         
-        # 6. Plot tool
+        # 7. Plot tool
         self.plot_tool = PlotTool(config=self.config)
         
-        # 7. Metrics
+        # 8. Metrics
         self.metrics = {
             'train': {
                 'total_loss': [],
@@ -128,7 +144,7 @@ class Trainer:
             }
         }
         
-        # 8. Logger
+        # 9. Logger
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
         tensorboard_path = os.path.join(
             'vo',
@@ -137,7 +153,7 @@ class Trainer:
         )
         self.writer = SummaryWriter(tensorboard_path)
         
-        # 9. Save path
+        # 10. Save path
         os.makedirs(self.config['Directory']['weights'], exist_ok=True)
         self.save_path = os.path.join(
             self.config['Directory']['weights'],
@@ -147,45 +163,75 @@ class Trainer:
         os.makedirs(self.save_path, exist_ok=True)
     
     def train_stereo_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
-        """Single training step for stereo"""
+        """Single training step for stereo with AMP support"""
         self.stereo_optimizer.zero_grad()
         
-        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
-            sample, training=True
-        )
-        
-        total_loss.backward()
+        if self.use_amp:
+            with autocast('cuda', dtype=torch.float16):
+                total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
+                    sample, training=True
+                )
+            
+            self.stereo_scaler.scale(total_loss).backward()
+            self.stereo_scaler.step(self.stereo_optimizer)
+            self.stereo_scaler.update()
+        else:
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
+                sample, training=True
+            )
+            total_loss.backward()
+            self.stereo_optimizer.step()
         
         return total_loss, pixel_loss, smooth_loss, pred_depths
     
     def train_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
-        """Single training step for mono"""
+        """Single training step for mono with AMP support"""
         self.mono_optimizer.zero_grad()
         
-        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(
-            sample, training=True
-        )
-        
-        total_loss.backward()
-        self.mono_optimizer.step()
-        self.mono_scheduler.step()
+        if self.use_amp:
+            with autocast('cuda', dtype=torch.float16):
+                total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(
+                    sample, training=True
+                )
+            
+            self.mono_scaler.scale(total_loss).backward()
+            self.mono_scaler.step(self.mono_optimizer)
+            self.mono_scaler.update()
+        else:
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(
+                sample, training=True
+            )
+            total_loss.backward()
+            self.mono_optimizer.step()
         
         return total_loss, pixel_loss, smooth_loss, pred_depths
     
     @torch.no_grad()
     def valid_stereo_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
-        """Single validation step for stereo"""
-        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
-            sample, training=False
-        )
+        """Single validation step for stereo with AMP support"""
+        if self.use_amp:
+            with autocast():
+                total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
+                    sample, training=False
+                )
+        else:
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
+                sample, training=False
+            )
         return total_loss, pixel_loss, smooth_loss, pred_depths
     
     @torch.no_grad()
     def valid_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
-        """Single validation step for mono"""
-        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(
-            sample, training=False
-        )
+        """Single validation step for mono with AMP support"""
+        if self.use_amp:
+            with autocast():
+                total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(
+                    sample, training=False
+                )
+        else:
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(
+                sample, training=False
+            )
         return total_loss, pixel_loss, smooth_loss, pred_depths
     
     def train(self) -> None:
@@ -210,8 +256,6 @@ class Trainer:
             }
             
             # Create iterators
-            # stereo_iter = iter(self.stereo_loader.train_stereo_loader)
-            # mono_iter = iter(self.mono_loader.train_mono_loader)
             stereo_iter = cycle(self.stereo_loader.train_stereo_loader)
             mono_iter = cycle(self.mono_loader.train_mono_loader)
             
@@ -232,9 +276,9 @@ class Trainer:
                 stereo_sample = next(stereo_iter)
                 t_loss_s, p_loss_s, s_loss_s, _ = self.train_stereo_step(stereo_sample)
             
+                # Mono training
                 mono_sample = next(mono_iter)
                 t_loss_m, p_loss_m, s_loss_m, pred_depths_m = self.train_mono_step(mono_sample)
-                
                 
                 # Average losses
                 avg_total = (t_loss_s.item() + t_loss_m.item()) / 2.0
@@ -259,7 +303,7 @@ class Trainer:
                         images=mono_sample['target_image'],
                         pred_depths=pred_depths_m,
                         denorm_func=self.mono_loader.denormalize_image
-                    ) # [1, 3, H, W] tensor
+                    ) # [H, W, 3] numpy array
                     self.writer.add_image(
                         'Train/Depth_Result',
                         depth_plot.transpose(2, 0, 1),
@@ -279,6 +323,11 @@ class Trainer:
             self.writer.add_scalar('Train/smooth_loss', train_metrics['smooth_loss'], epoch)
             self.writer.add_scalar('Train/learning_rate', self.mono_optimizer.param_groups[0]['lr'], epoch)
             
+            # Log scale factors if using AMP
+            if self.use_amp:
+                self.writer.add_scalar('Train/stereo_scale', self.stereo_scaler.get_scale(), epoch)
+                self.writer.add_scalar('Train/mono_scale', self.mono_scaler.get_scale(), epoch)
+            
             # Validation phase
             if epoch % self.config['Train']['valid_freq'] == 0:
                 self.validate(epoch)
@@ -287,9 +336,12 @@ class Trainer:
             if epoch % self.config['Train']['save_freq'] == 0:
                 self.save_checkpoint(epoch)
             
-            self.stereo_optimizer.step()
+            # Update schedulers
+            self.mono_scheduler.step()
             self.stereo_scheduler.step()
 
+            torch.cuda.empty_cache()
+            gc.collect()
 
     @torch.no_grad()
     def validate(self, epoch: int) -> None:
@@ -317,7 +369,6 @@ class Trainer:
         
         for batch_idx in valid_pbar:
             # Stereo validation
-            
             stereo_sample = next(stereo_iter)
             t_loss_s, p_loss_s, s_loss_s, _ = self.valid_stereo_step(stereo_sample)
             
@@ -383,6 +434,11 @@ class Trainer:
             'config': self.config
         }
         
+        # Save AMP state if using
+        if self.use_amp:
+            checkpoint['stereo_scaler_state_dict'] = self.stereo_scaler.state_dict()
+            checkpoint['mono_scaler_state_dict'] = self.mono_scaler.state_dict()
+        
         checkpoint_path = os.path.join(
             self.save_path,
             f'checkpoint_epoch_{epoch}.pth'
@@ -400,6 +456,27 @@ class Trainer:
         )
         
         print(f"Checkpoint saved: {checkpoint_path}")
+    
+    def load_checkpoint(self, checkpoint_path: str) -> None:
+        """Load model checkpoint with AMP support"""
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        self.depth_net.load_state_dict(checkpoint['depth_net_state_dict'])
+        self.pose_net.load_state_dict(checkpoint['pose_net_state_dict'])
+        self.stereo_optimizer.load_state_dict(checkpoint['stereo_optimizer_state_dict'])
+        self.mono_optimizer.load_state_dict(checkpoint['mono_optimizer_state_dict'])
+        self.stereo_scheduler.load_state_dict(checkpoint['stereo_scheduler_state_dict'])
+        self.mono_scheduler.load_state_dict(checkpoint['mono_scheduler_state_dict'])
+        
+        # Load AMP state if available and using AMP
+        if self.use_amp and 'stereo_scaler_state_dict' in checkpoint:
+            self.stereo_scaler.load_state_dict(checkpoint['stereo_scaler_state_dict'])
+            self.mono_scaler.load_state_dict(checkpoint['mono_scaler_state_dict'])
+        
+        self.metrics = checkpoint['metrics']
+        
+        print(f"Checkpoint loaded from: {checkpoint_path}")
+        return checkpoint['epoch']
 
 
 def main():
