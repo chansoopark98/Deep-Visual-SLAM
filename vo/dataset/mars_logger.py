@@ -15,7 +15,7 @@ class MarsLoggerHandler(object):
         
         self.train_data = self.generate_datasets(fold_dir='train', shuffle=True)
         self.valid_data = self.generate_datasets(fold_dir='valid', shuffle=False)
-        self.test_dir = os.path.join(self.root_dir, 'test')
+        self.test_dir = os.path.join(self.root_dir, 'S22', 'test')
         self.test_data = self.generate_test(test_dir=self.test_dir)
 
     def _extract_video(self, scene_dir: str, camera_name) -> int:
@@ -73,7 +73,8 @@ class MarsLoggerHandler(object):
         intrinsic_rescaled = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
         return intrinsic_rescaled
 
-    def _process(self, scene_dir: str, camera_name: str, is_test: bool=False) -> list:
+    def _process(self, scene_dir: str, camera_name: str, is_test: bool=False) -> dict:
+        """단일 scene 처리 - dict 반환"""
         # load video .mp4
         length, resized_intrinsic = self._extract_video(scene_dir, camera_name)
     
@@ -82,57 +83,115 @@ class MarsLoggerHandler(object):
         if is_test:
             step = 1
         else:
-            step = 1
+            step = 3
         
-        samples = []
+        source_left_paths = []
+        target_image_paths = []
+        source_right_paths = []
+        intrinsics = []
+        
         for t in range(self.num_source, length - self.num_source, step):
-            sample = {
-                'source_left': rgb_files[t - 1], # str
-                'target_image': rgb_files[t], # str
-                'source_right': rgb_files[t + 1], # str
-                'intrinsic': resized_intrinsic # np.ndarray (3, 3)
-            }
-            samples.append(sample)
-        return samples
+            source_left_paths.append(rgb_files[t - 1])
+            target_image_paths.append(rgb_files[t])
+            source_right_paths.append(rgb_files[t + 1])
+            intrinsics.append(resized_intrinsic)
+        
+        return {
+            'source_left': source_left_paths,
+            'target_image': target_image_paths,
+            'source_right': source_right_paths,
+            'intrinsic': intrinsics
+        }
             
-    def generate_datasets(self, fold_dir, shuffle=False, is_test=False):
-        # path = os.path.join(self.root_dir, fold_dir)
+    def generate_datasets(self, fold_dir, shuffle=False, is_test=False) -> dict:
+        """데이터셋 생성 - dict 형태로 반환"""
         camera_types = glob.glob(os.path.join(self.root_dir, '*'))
+        
 
-        datasets = []
+        # 전체 데이터를 저장할 리스트
+        all_source_left = []
+        all_target_image = []
+        all_source_right = []
+        all_intrinsic = []
 
         for camera_type in camera_types:
             current_fold = os.path.join(camera_type, fold_dir)
             camera_name = os.path.basename(camera_type)
 
+            if not os.path.exists(current_fold):
+                continue
+
             scene_files = sorted(glob.glob(os.path.join(current_fold, '*')))
             
             for scene in scene_files:
-                dataset = self._process(scene, camera_name, is_test)
-                datasets.append(dataset)
-            
-        datasets = np.concatenate(datasets, axis=0)
+                if os.path.isdir(scene):
+                    samples = self._process(scene, camera_name, is_test)
+                    if samples and len(samples['source_left']) > 0:
+                        all_source_left.extend(samples['source_left'])
+                        all_target_image.extend(samples['target_image'])
+                        all_source_right.extend(samples['source_right'])
+                        all_intrinsic.extend(samples['intrinsic'])
+        
+        # numpy 배열로 변환
+        dataset_dict = {
+            'source_left': np.array(all_source_left, dtype=str),
+            'target_image': np.array(all_target_image, dtype=str),
+            'source_right': np.array(all_source_right, dtype=str),
+            'intrinsic': np.array(all_intrinsic, dtype=np.float32)
+        }
 
         print('Current fold:', fold_dir)
-        print(f'  -- Camera types: {camera_types}')
-        print(f'  -- dataset size: {datasets.shape}')
+        print(f'  -- Camera types: {[os.path.basename(ct) for ct in camera_types]}')
+        print(f'  -- dataset size: {len(all_source_left)}')
 
-        if shuffle:
-            np.random.shuffle(datasets)
-        return datasets
+        # 셔플링
+        if shuffle and len(all_source_left) > 0:
+            indices = np.random.permutation(len(all_source_left))
+            for key in dataset_dict:
+                dataset_dict[key] = dataset_dict[key][indices]
+                
+        return dataset_dict
     
     def generate_test(self, test_dir):
-        datasets = []
+        """테스트 데이터셋 생성 - dict 형태로 반환"""
+        if not os.path.exists(test_dir):
+            print(f"Test directory {test_dir} does not exist")
+            return {
+                'source_left': np.array([]),
+                'target_image': np.array([]),
+                'source_right': np.array([]),
+                'intrinsic': np.array([])
+            }
+
+        # 전체 데이터를 저장할 리스트
+        all_source_left = []
+        all_target_image = []
+        all_source_right = []
+        all_intrinsic = []
 
         scene_files = sorted(glob.glob(os.path.join(test_dir, '*')))
         
         for scene in scene_files:
-            dataset = self._process(scene, 'S22')
-            datasets.append(dataset)
+            if os.path.isdir(scene):
+                samples = self._process(scene, 'S22', is_test=True)
+                if samples and len(samples['source_left']) > 0:
+                    all_source_left.extend(samples['source_left'])
+                    all_target_image.extend(samples['target_image'])
+                    all_source_right.extend(samples['source_right'])
+                    all_intrinsic.extend(samples['intrinsic'])
 
-        datasets = np.concatenate(datasets, axis=0)
-        return datasets
-
+        # numpy 배열로 변환
+        dataset_dict = {
+            'source_left': np.array(all_source_left, dtype=str),
+            'target_image': np.array(all_target_image, dtype=str),
+            'source_right': np.array(all_source_right, dtype=str),
+            'intrinsic': np.array(all_intrinsic, dtype=np.float32)
+        }
+        
+        print(f'Test dataset size: {len(all_source_left)}')
+        
+        return dataset_dict
+    
 if __name__ == '__main__':
     import yaml
     
@@ -141,7 +200,7 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
 
     dataset = MarsLoggerHandler(config)
-    data_len = dataset.train_data.shape[0]
-    for idx in range(data_len):
-        a = 1
-        # print(dataset.train_data[idx])
+
+    print(f"Train samples: {dataset.train_data['source_left'].shape}")
+    print(f"Valid samples: {dataset.valid_data['source_left'].shape}")
+    print(f"Test samples: {dataset.test_data['source_left'].shape}")

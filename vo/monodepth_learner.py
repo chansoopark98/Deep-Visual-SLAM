@@ -1,10 +1,12 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+# from tensorflow import keras
+import keras
 from utils.projection_utils import projective_inverse_warp
 
 class Learner(object):
     def __init__(self,
-                 depth_model: tf_keras.Model,
-                 pose_model: tf_keras.Model,
+                 depth_model: keras.Model,
+                 pose_model: keras.Model,
                  config: dict):
         self.depth_net = depth_model
         self.pose_net = pose_model
@@ -17,28 +19,18 @@ class Learner(object):
         self.image_shape = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.smoothness_ratio = self.config['Train']['smoothness_ratio'] # 0.001
         self.auto_mask = self.config['Train']['auto_mask'] # True
-        self.predictive_mask = self.config['Train']['predictive_mask'] # False
         self.ssim_ratio = self.config['Train']['ssim_ratio'] # 0.85
         self.min_depth = self.config['Train']['min_depth'] # 0.1
         self.max_depth = self.config['Train']['max_depth'] # 10.0
 
-        if self.config['Train']['mode'] in ['axisAngle', 'euler']:
-            self.pose_mode = self.config['Train']['mode']
-            if self.pose_mode == 'axisAngle':
-                self.is_euler = False
-            else:
-                self.is_euler = True
-        else:
-            raise ValueError('Invalid pose mode')
-
-    @tf.function() # ok
     def disp_to_depth(self, disp, min_depth, max_depth):
         min_disp = 1. / max_depth
         max_disp = 1. / min_depth
-        scaled_disp = tf.cast(min_disp, tf.float32) + tf.cast(max_disp - min_disp, tf.float32) * disp
-        depth = tf.cast(1., tf.float32) / scaled_disp
+        scaled_disp = min_disp + (max_disp - min_disp) * disp
+        depth = 1 / scaled_disp
+        depth = tf.cast(depth, tf.float32)
         return depth
-    
+        
     def compute_reprojection_loss(self, reproj_image, tgt_image):
         """
         L1 + SSIM photometric loss
@@ -47,9 +39,12 @@ class Learner(object):
         ssim_loss = tf.reduce_mean(self.ssim(reproj_image, tgt_image), axis=3, keepdims=True)
 
         loss = (self.ssim_ratio * ssim_loss) + ((1. - self.ssim_ratio) * l1_loss)
+        loss = tf.cast(loss, tf.float32)
         return loss
 
     def ssim(self, x, y):
+        x = tf.cast(x, tf.float32)
+        y = tf.cast(y, tf.float32)
         # 현재 코드 동일
         x = tf.pad(x, [[0,0],[1,1],[1,1],[0,0]], mode='REFLECT')
         y = tf.pad(y, [[0,0],[1,1],[1,1],[0,0]], mode='REFLECT')
@@ -70,29 +65,24 @@ class Learner(object):
 
         SSIM_loss = tf.clip_by_value((1.0 - SSIM_raw)*0.5, 0.0, 1.0)
         return SSIM_loss
-
+    
     def get_smooth_loss(self, disp, img):
         disp = tf.cast(disp, tf.float32)
         img = tf.cast(img, tf.float32)
+
+        """Computes the smoothness loss for a disparity image
+        The color image is used for edge-aware smoothness
         """
-        Edge-aware smoothness: disp gradients * exp(-|img grads|)
-        """
-        disp_mean = tf.reduce_mean(disp, axis=[1,2], keepdims=True) + 1e-7
-        norm_disp = disp / disp_mean
+        grad_disp_x = tf.abs(disp[:, :, :-1, :] - disp[:, :, 1:, :])
+        grad_disp_y = tf.abs(disp[:, :-1, :, :] - disp[:, 1:, :, :])
 
-        disp_dx = tf.abs(norm_disp[:, 1:, :, :] - norm_disp[:, :-1, :, :])
-        disp_dy = tf.abs(norm_disp[:, :, 1:, :] - norm_disp[:, :, :-1, :])
+        grad_img_x = tf.reduce_mean(tf.abs(img[:, :, :-1, :] - img[:, :, 1:, :]), 3, keepdims=True)
+        grad_img_y = tf.reduce_mean(tf.abs(img[:, :-1, :, :] - img[:, 1:, :, :]), 3, keepdims=True)
 
-        img_dx = tf.abs(img[:, 1:, :, :] - img[:, :-1, :, :])
-        img_dy = tf.abs(img[:, :, 1:, :] - img[:, :, :-1, :])
+        grad_disp_x *= tf.exp(-grad_img_x)
+        grad_disp_y *= tf.exp(-grad_img_y)
 
-        weight_x = tf.exp(-tf.reduce_mean(img_dx, axis=3, keepdims=True))
-        weight_y = tf.exp(-tf.reduce_mean(img_dy, axis=3, keepdims=True))
-
-        smoothness_x = disp_dx * weight_x
-        smoothness_y = disp_dy * weight_y
-
-        return tf.reduce_mean(smoothness_x) + tf.reduce_mean(smoothness_y)
+        return tf.reduce_mean(grad_disp_x) + tf.reduce_mean(grad_disp_y)
         
     @tf.function(jit_compile=True)
     def rescale_intrinsics(self, intrinsics, original_height, original_width, target_height, target_width):
@@ -118,17 +108,22 @@ class Learner(object):
         
         # 행렬 곱셈으로 스케일링 적용
         scaled_intrinsics = tf.matmul(scale_matrix, intrinsics)
+
+        # dtype 변환
+        scaled_intrinsics = tf.cast(scaled_intrinsics, tf.float32)
         
         return scaled_intrinsics
-
-    def forward_step(self, ref_images, tgt_image, intrinsic, training=True) -> tf.Tensor:
-        left_image = ref_images[0] # [B, H, W, 3]
-        right_image = ref_images[1] # [B, H, W, 3]
+    
+    def forward_mono(self, sample, training=True) -> tf.Tensor:
+        left_image = sample['source_left']  # [B, H, W, 3]
+        right_image = sample['source_right']  # [B, H, W, 3]
+        tgt_image = sample['target_image']  # [B, H, W, 3]
+        intrinsic = sample['intrinsic']  # [B, 3, 3] - target camera intrinsic
+        ref_images = [left_image, right_image]  # [B, H, W, 3] * 2
 
         pixel_losses = 0.
         smooth_losses = 0.
-        weighting_losses = 0.
-        
+
         H = tf.shape(tgt_image)[1]
         W = tf.shape(tgt_image)[2]
 
@@ -138,6 +133,7 @@ class Learner(object):
         scaled_tgts = []
 
         disp_raw = self.depth_net(tgt_image, training=training) # disp raw result (H, W, 1)
+        disp_raw = [tf.cast(disp, tf.float32) for disp in disp_raw]
 
         for scale_idx in range(self.num_scales):
             scaled_disp = disp_raw[scale_idx]
@@ -188,36 +184,51 @@ class Learner(object):
                     curr_pose,
                     intrinsics=scaled_intrinsic,
                     invert=(i == 0),
-                    euler=self.is_euler
+                    is_stereo=False,
+                    euler=False,
                 )
                 
                 # Photometric loss
                 curr_reproj_loss = self.compute_reprojection_loss(curr_proj_image, scaled_tgts[s])
                 reprojection_list.append(curr_reproj_loss)
                 
-                # Identity reprojection loss - 원본 구현처럼 여기서 계산
-                if self.auto_mask:
-                    # 스케일에 맞게 ref 이미지 조정
-                    identity_reproj_loss = self.compute_reprojection_loss(curr_src, scaled_tgts[s])
-                    identity_reprojection_list.append(identity_reproj_loss)
 
             reprojection_losses = tf.concat(reprojection_list, axis=3)  # [B, H_s, W_s, 2]
             
             if self.auto_mask:
-                identity_reprojection_losses = tf.concat(identity_reprojection_list, axis=3)
+                identity_reprojection_losses = []
                 
-                identity_reprojection_losses += tf.random.normal(
-                    tf.shape(identity_reprojection_losses), 
+                for i in range(2):  # left, right
+                    # 원본과 동일: source_scale에 따른 처리
+                    if s != 0:
+                        # v1_multiscale이 False인 경우 source_scale = 0
+                        pred = tf.image.resize(ref_images[i], [h_s, w_s], 
+                                            method=tf.image.ResizeMethod.BILINEAR)
+                    else:
+                        pred = ref_images[i]
+                    
+                    identity_loss = self.compute_reprojection_loss(pred, scaled_tgts[s])
+                    identity_reprojection_losses.append(identity_loss)
+                
+                identity_reprojection_losses = tf.concat(identity_reprojection_losses, 3)
+                
+                # identity_reprojection_loss = tf.reduce_mean(identity_reprojection_losses, 3, keepdims=True)
+                identity_reprojection_loss = identity_reprojection_losses
+                
+                # 원본과 동일: 랜덤 노이즈 추가
+                identity_reprojection_loss += tf.random.normal(
+                    tf.shape(identity_reprojection_loss), 
                     mean=0.0, 
                     stddev=1e-5
                 )
-
-                combined_losses = tf.concat([identity_reprojection_losses, reprojection_losses], axis=3)
-                combined = tf.reduce_min(combined_losses, axis=3, keepdims=True)
-            
+                
+                # 원본과 동일: identity와 reprojection loss 결합
+                combined = tf.concat([identity_reprojection_loss, reprojection_losses], axis=3)
             else:
-                combined = tf.reduce_min(reprojection_losses, axis=3, keepdims=True)
+                combined = reprojection_losses
 
+            combined = tf.reduce_min(combined, axis=3, keepdims=True)  # [B, H_s, W_s, 1]
+            
             # 최종 reprojection loss
             reprojection_loss = tf.reduce_mean(combined)
 
@@ -237,8 +248,165 @@ class Learner(object):
         
         total_loss = pixel_losses + smooth_losses
 
-        if self.predictive_mask:
-            weighting_losses = weighting_losses / num_scales_f
-            total_loss += weighting_losses
+        return total_loss, pixel_losses, smooth_losses, pred_depths
+    
+    def forward_stereo(self, sample, training=True) -> tf.Tensor:
+        src_image = sample['source_image']  # [B, H, W, 3]
+        tgt_image = sample['target_image']  # [B, H, W, 3]
+        intrinsic = sample['intrinsic']  # [B, 3, 3] - target camera intrinsic
+        stereo_pose = sample['pose'] # src to tgt pose [B, 6] (axis-angle + translation)
+
+        pixel_losses = 0.
+        smooth_losses = 0.
+        
+        H, W = self.image_shape
+
+        # Generate Depth
+        disp_raw = self.depth_net(tgt_image, training=training)  # [[B, H, W, 1], [B, H/2, W/2, 1], ...]
+        disp_raw = [tf.cast(disp, tf.float32) for disp in disp_raw]
+        
+        for s in range(self.num_scales):
+            h_s = H // (2**s)
+            w_s = W // (2**s)
+            
+            # Current scale depth
+            disp_s = disp_raw[s]
+            depth_s = self.disp_to_depth(disp_s, self.min_depth, self.max_depth)
+            
+            # Resize images to current scale
+            if s != 0:
+                src_s = tf.image.resize(src_image, [h_s, w_s], 
+                                    method=tf.image.ResizeMethod.BILINEAR)
+                tgt_s = tf.image.resize(tgt_image, [h_s, w_s], 
+                                    method=tf.image.ResizeMethod.BILINEAR)
+                scaled_intrinsic = self.rescale_intrinsics(intrinsic, H, W, h_s, w_s)
+            else:
+                src_s = src_image
+                tgt_s = tgt_image
+                scaled_intrinsic = intrinsic
+            
+            # Stereo reprojection (L->R or R->L)
+            proj_image = projective_inverse_warp(
+                src_s,
+                tf.squeeze(depth_s, axis=3),
+                stereo_pose,
+                intrinsics=scaled_intrinsic,
+                invert=False,
+                is_stereo=True,
+                euler=False,
+            )
+            
+            # Photometric loss
+            reproj_loss = self.compute_reprojection_loss(proj_image, tgt_s)
+
+            if self.auto_mask:
+                # Identity reprojection loss (no warping)
+                identity_loss = self.compute_reprojection_loss(src_s, tgt_s)
+                
+                reproj_loss = tf.minimum(reproj_loss, identity_loss)
+            
+            pixel_loss = tf.reduce_mean(reproj_loss)
+            pixel_losses += pixel_loss
+            
+            # Smoothness loss  
+            mean_disp = tf.reduce_mean(disp_raw[s], axis=[1, 2], keepdims=True)
+            norm_disp = disp_raw[s] / (mean_disp + 1e-7)
+            smooth_loss = self.get_smooth_loss(norm_disp, tgt_s)
+            smooth_loss = smooth_loss / (2.0**s)
+            smooth_losses += smooth_loss * self.smoothness_ratio
+        
+        # Average over scales
+        pixel_losses = pixel_losses / float(self.num_scales)
+        smooth_losses = smooth_losses / float(self.num_scales)
+        
+        total_loss = pixel_losses + smooth_losses
+        
+        # Return predictions
+        pred_depths = []
+        for s in range(self.num_scales):
+            depth = self.disp_to_depth(disp_raw[s], self.min_depth, self.max_depth)
+            pred_depths.append(depth)
 
         return total_loss, pixel_losses, smooth_losses, pred_depths
+
+    # @tf.function
+    def matrix_to_axis_angle_vectorized(self, matrix, depth=None):
+        """
+        4x4 변환 행렬을 6DoF axis-angle 벡터로 변환
+        pose_axis_angle_vec2mat의 역변환
+        
+        Args:
+            matrix: [B, 4, 4] 변환 행렬
+            depth: [B, H, W, 1] depth map (선택사항, 스케일 정규화용)
+        
+        Returns:
+            [B, 6] axis-angle + translation 벡터
+        """
+        batch_size = tf.shape(matrix)[0]
+        
+        # Translation 추출
+        translation = matrix[:, :3, 3]  # [B, 3]
+        
+        # Rotation matrix 추출
+        R = matrix[:, :3, :3]  # [B, 3, 3]
+        
+        # Depth 스케일링 역적용 (있는 경우)
+        if depth is not None:
+            inv_depth = 1.0 / (depth + 1e-6)
+            mean_inv_depth = tf.reduce_mean(inv_depth, axis=[1, 2, 3])  # [B]
+            mean_inv_depth = tf.reshape(mean_inv_depth, [batch_size, 1])
+            # 역스케일링 적용
+            translation = translation / (mean_inv_depth + 1e-8)
+        
+        # Rotation matrix to axis-angle
+        # 1. Trace를 이용한 angle 계산
+        trace = tf.linalg.trace(R)  # [B]
+        cos_angle = (trace - 1.0) / 2.0
+        cos_angle = tf.clip_by_value(cos_angle, -1.0, 1.0)
+        angle = tf.acos(cos_angle)  # [B]
+        
+        # 2. Axis 계산
+        # 작은 각도 처리
+        eps = 1e-7
+        is_small_angle = tf.less(tf.abs(angle), eps)
+        
+        # Skew-symmetric 부분에서 axis 추출
+        # axis = (R - R^T) / (2 * sin(angle))
+        R_transpose = tf.transpose(R, [0, 2, 1])
+        R_skew = R - R_transpose
+        
+        sin_angle = tf.sin(angle)
+        sin_angle_safe = tf.where(is_small_angle, tf.ones_like(sin_angle), sin_angle)
+        
+        axis_x = R_skew[:, 2, 1] / (2.0 * sin_angle_safe + eps)
+        axis_y = R_skew[:, 0, 2] / (2.0 * sin_angle_safe + eps)  
+        axis_z = R_skew[:, 1, 0] / (2.0 * sin_angle_safe + eps)
+        
+        # 배치 처리를 위한 조건부 axis 계산
+        axis_default = tf.stack([axis_x, axis_y, axis_z], axis=1)  # [B, 3]
+        axis_small = tf.zeros([batch_size, 3])  # 작은 각도일 때는 0 벡터
+        
+        # 최종 axis 선택
+        axis = tf.where(tf.expand_dims(is_small_angle, 1), axis_small, axis_default)
+        
+        # Axis 정규화
+        axis_norm = tf.norm(axis, axis=1, keepdims=True)
+        axis_normalized = tf.where(
+            tf.expand_dims(is_small_angle, 1),
+            axis,  # 작은 각도일 때는 정규화 안 함
+            axis / (axis_norm + eps)
+        )
+        
+        # Axis-angle 벡터 생성
+        angle_expanded = tf.expand_dims(angle, 1)  # [B, 1]
+        axis_angle = axis_normalized * angle_expanded  # [B, 3]
+        
+        # 작은 각도의 경우 0 벡터로 설정
+        axis_angle = tf.where(tf.expand_dims(is_small_angle, 1), 
+                            tf.zeros_like(axis_angle), 
+                            axis_angle)
+        
+        # Translation과 결합
+        pose_vec = tf.concat([axis_angle, translation], axis=1)  # [B, 6]
+        
+        return pose_vec

@@ -1,4 +1,6 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+# from tensorflow import keras
+import keras
 try:
     from .efficientnet_lite import efficientnet_lite_b0
 except:
@@ -23,8 +25,8 @@ class EfficientNet:
         self.return_skips = return_skips
         self.prefix = prefix
 
-    def build_model(self) -> tf_keras.Model:
-        inputs = tf_keras.Input(shape=self.image_shape)
+    def build_model(self) -> keras.Model:
+        inputs = keras.Input(shape=self.image_shape)
 
         if self.pretrained:        
             weights = 'imagenet'
@@ -37,12 +39,12 @@ class EfficientNet:
 
         # base_model.summary() 
         outputs = [base_model.get_layer(name).output for name in eff_lite_b0_layers]
-        partial_model = tf_keras.Model(inputs=base_model.inputs, outputs=outputs, name=f"{self.prefix}_partial")
+        partial_model = keras.Model(inputs=base_model.inputs, outputs=outputs, name=f"{self.prefix}_partial")
 
         for layer in partial_model.layers:
             layer._name = f"{self.prefix}_{layer.name}"        
 
-        inputs = tf_keras.Input(shape=self.image_shape, name="input_image")
+        inputs = keras.Input(shape=self.image_shape, name="input_image")
         features = partial_model(inputs)
 
         x = features[-1]  # block6o_add (H/32)
@@ -54,9 +56,9 @@ class EfficientNet:
             features[0],
         ]
         if self.return_skips:
-            return tf_keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_model")
+            return keras.Model(inputs=inputs, outputs=[x, skips], name=f"{self.prefix}_model")
         else:
-            return tf_keras.Model(inputs=inputs, outputs=x, name=f"{self.prefix}_model")
+            return keras.Model(inputs=inputs, outputs=x, name=f"{self.prefix}_model")
     
 if __name__ == '__main__':
     image_shape = (480, 640, 6)

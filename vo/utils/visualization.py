@@ -176,11 +176,12 @@ class Visualizer:
         rgb_flattened = rgb_image.reshape(-1, 3)
         
         # 세계 좌표계로 변환 후 PyVista 좌표계로 변환
-        points_world = (world_pose @ points_cam.T).T  # SLAM 세계 좌표계
-        points_pyvista = (slam_to_pyvista @ points_world.T).T[:, :3]  # PyVista 좌표계
+        points_world = (world_pose @ points_cam.T).T[:, :3]  # SLAM 세계 좌표계
+        # points_pyvista = (slam_to_pyvista @ points_world.T).T[:, :3]  # PyVista 좌표계
+        
         
         # 포인트 클라우드 생성
-        point_cloud = pv.PolyData(points_pyvista)
+        point_cloud = pv.PolyData(points_world)
         point_cloud["rgb"] = rgb_flattened
         
         self.camera_cloud.mapper.SetInputData(point_cloud)

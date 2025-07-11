@@ -1,4 +1,6 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+# from tensorflow import keras
+import keras
 from copy import deepcopy
 
 DEFAULT_BLOCKS_ARGS = [
@@ -49,9 +51,9 @@ def correct_pad(inputs, kernel_size):
         A tuple.
     """
     img_dim = 2
-    if tf_keras.backend.image_data_format() == "channels_last":
+    if keras.backend.image_data_format() == "channels_last":
         img_dim = 1
-    input_size = tf_keras.backend.int_shape(inputs)[img_dim:(img_dim + 2)]
+    input_size = keras.backend.int_shape(inputs)[img_dim:(img_dim + 2)]
 
     if isinstance(kernel_size, int):
         kernel_size = (kernel_size, kernel_size)
@@ -85,77 +87,77 @@ def block(inputs, activation_fn=tf.nn.swish, drop_rate=0., name='',
     # Returns
         output tensor for the block.
     """
-    bn_axis = 3 if tf_keras.backend.image_data_format() == 'channels_last' else 1
+    bn_axis = 3 if keras.backend.image_data_format() == 'channels_last' else 1
 
     # Expansion phase
     filters = filters_in * expand_ratio
     if expand_ratio != 1:
-        x = tf_keras.layers.Conv2D(filters, 1,
+        x = keras.layers.Conv2D(filters, 1,
                           padding='same',
                           use_bias=False,
                           kernel_initializer=CONV_KERNEL_INITIALIZER,
                           name=name + 'expand_conv')(inputs)
-        x = tf_keras.layers.BatchNormalization(axis=bn_axis, name=name + 'expand_bn')(x)
-        x = tf_keras.layers.Activation(activation_fn, name=name + 'expand_activation')(x)
+        x = keras.layers.BatchNormalization(axis=bn_axis, name=name + 'expand_bn')(x)
+        x = keras.layers.Activation(activation_fn, name=name + 'expand_activation')(x)
     else:
         x = inputs
 
     # Depthwise Convolution
     if strides == 2:
-        x = tf_keras.layers.ZeroPadding2D(padding=correct_pad(x, kernel_size),
+        x = keras.layers.ZeroPadding2D(padding=correct_pad(x, kernel_size),
                                  name=name + 'dwconv_pad')(x)
         conv_pad = 'valid'
     else:
         conv_pad = 'same'
-    x = tf_keras.layers.DepthwiseConv2D(kernel_size,
+    x = keras.layers.DepthwiseConv2D(kernel_size,
                                strides=strides,
                                padding=conv_pad,
                                use_bias=False,
                                depthwise_initializer=CONV_KERNEL_INITIALIZER,
                                name=name + 'dwconv')(x)
-    x = tf_keras.layers.BatchNormalization(axis=bn_axis, name=name + 'bn')(x)
-    x = tf_keras.layers.Activation(activation_fn, name=name + 'activation')(x)
+    x = keras.layers.BatchNormalization(axis=bn_axis, name=name + 'bn')(x)
+    x = keras.layers.Activation(activation_fn, name=name + 'activation')(x)
 
     # Squeeze and Excitation phase
     if 0 < se_ratio <= 1:
         filters_se = max(1, int(filters_in * se_ratio))
-        se = tf_keras.layers.GlobalAveragePooling2D(name=name + 'se_squeeze')(x)
+        se = keras.layers.GlobalAveragePooling2D(name=name + 'se_squeeze')(x)
         if bn_axis == 1:
-            se = tf_keras.layers.Reshape((filters, 1, 1), name=name + 'se_reshape')(se)
+            se = keras.layers.Reshape((filters, 1, 1), name=name + 'se_reshape')(se)
         else:
-            se = tf_keras.layers.Reshape((1, 1, filters), name=name + 'se_reshape')(se)
-        se = tf_keras.layers.Conv2D(filters_se, 1,
+            se = keras.layers.Reshape((1, 1, filters), name=name + 'se_reshape')(se)
+        se = keras.layers.Conv2D(filters_se, 1,
                                     padding='same',
                                     activation=activation_fn,
                                     kernel_initializer=CONV_KERNEL_INITIALIZER,
                                     name=name + 'se_reduce')(se)
-        se = tf_keras.layers.Conv2D(filters, 1,
+        se = keras.layers.Conv2D(filters, 1,
                                     padding='same',
                                     activation='sigmoid',
                                     kernel_initializer=CONV_KERNEL_INITIALIZER,
                                     name=name + 'se_expand')(se)
-        if tf_keras.backend.backend() == 'theano':
+        if keras.backend.backend() == 'theano':
             # For the Theano backend, we have to explicitly make
             # the excitation weights broadcastable.
-            se = tf_keras.layers.Lambda(
-                lambda x: tf_keras.backend.pattern_broadcast(x, [True, True, True, False]),
+            se = keras.layers.Lambda(
+                lambda x: keras.backend.pattern_broadcast(x, [True, True, True, False]),
                 output_shape=lambda input_shape: input_shape,
                 name=name + 'se_broadcast')(se)
-        x = tf_keras.layers.multiply([x, se], name=name + 'se_excite')
+        x = keras.layers.multiply([x, se], name=name + 'se_excite')
 
     # Output phase
-    x = tf_keras.layers.Conv2D(filters_out, 1,
+    x = keras.layers.Conv2D(filters_out, 1,
                                padding='same',
                                use_bias=False,
                                kernel_initializer=CONV_KERNEL_INITIALIZER,
                                name=name + 'project_conv')(x)
-    x = tf_keras.layers.BatchNormalization(axis=bn_axis, name=name + 'project_bn')(x)
+    x = keras.layers.BatchNormalization(axis=bn_axis, name=name + 'project_bn')(x)
     if (id_skip is True and strides == 1 and filters_in == filters_out):
         if drop_rate > 0:
-            x = tf_keras.layers.Dropout(drop_rate,
+            x = keras.layers.Dropout(drop_rate,
                                noise_shape=(None, 1, 1, 1),
                                name=name + 'drop')(x)
-        x = tf_keras.layers.add([x, inputs], name=name + 'add')
+        x = keras.layers.add([x, inputs], name=name + 'add')
 
     return x
 
@@ -187,9 +189,9 @@ def efficientnet_lite(width_coefficient,
             A tuple.
         """
         img_dim = 2
-        if tf_keras.backend.image_data_format() == "channels_last":
+        if keras.backend.image_data_format() == "channels_last":
             img_dim = 1
-        input_size = tf_keras.backend.int_shape(inputs)[img_dim:(img_dim + 2)]
+        input_size = keras.backend.int_shape(inputs)[img_dim:(img_dim + 2)]
 
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
@@ -218,26 +220,26 @@ def efficientnet_lite(width_coefficient,
         return int(tf.math.ceil(tf.cast(depth_coefficient * repeats, tf.float32)))
     
     if input_tensor is None:
-        img_input = tf_keras.layers.Input(shape = input_shape)
+        img_input = keras.layers.Input(shape = input_shape)
     else:
-        if not tf_keras.backend.is_keras_tensor(input_tensor):
-            img_input = tf_keras.layers.Input(tensor = input_tensor, shape = input_shape)
+        if not keras.backend.is_keras_tensor(input_tensor):
+            img_input = keras.layers.Input(tensor = input_tensor, shape = input_shape)
         else:
             img_input = input_tensor
 
     # Build stem
     x = img_input
-    x = tf_keras.layers.ZeroPadding2D(padding=correct_pad(x, 3),
+    x = keras.layers.ZeroPadding2D(padding=correct_pad(x, 3),
                                       name='stem_conv_pad')(x)
     #filters = round_filters(32) #efficientnet lite > fixed feature
-    x = tf_keras.layers.Conv2D(32, 3,
+    x = keras.layers.Conv2D(32, 3,
                                strides=2,
                                padding='valid',
                                use_bias=False,
                                kernel_initializer=conv_kernel_initializer,
                                name='stem_conv')(x)
-    x = tf_keras.layers.BatchNormalization(axis=-1, name='stem_bn')(x)
-    x = tf_keras.layers.Activation(activation_fn, name='stem_activation')(x)
+    x = keras.layers.BatchNormalization(axis=-1, name='stem_bn')(x)
+    x = keras.layers.Activation(activation_fn, name='stem_activation')(x)
 
     # Build blocks
     blocks_args = deepcopy(blocks_args)
@@ -264,28 +266,28 @@ def efficientnet_lite(width_coefficient,
     
     # Build top
     #filters = round_filters(1280) #efficientnet lite > fixed feature
-    x = tf_keras.layers.Conv2D(1280, 1,
+    x = keras.layers.Conv2D(1280, 1,
                                padding='same',
                                use_bias=False,
                                kernel_initializer=conv_kernel_initializer,
                                name='top_conv')(x)
-    x = tf_keras.layers.BatchNormalization(axis=-1, name='top_bn')(x)
-    x = tf_keras.layers.Activation(activation_fn, name='top_activation')(x)
+    x = keras.layers.BatchNormalization(axis=-1, name='top_bn')(x)
+    x = keras.layers.Activation(activation_fn, name='top_activation')(x)
     if include_top:
-        x = tf_keras.layers.GlobalAveragePooling2D(name='avg_pool')(x)
+        x = keras.layers.GlobalAveragePooling2D(name='avg_pool')(x)
         if dropout_rate > 0:
-            x = tf_keras.layers.Dropout(dropout_rate, name='top_dropout')(x)
-        x = tf_keras.layers.Dense(classes,
+            x = keras.layers.Dropout(dropout_rate, name='top_dropout')(x)
+        x = keras.layers.Dense(classes,
                          activation='softmax',
                          kernel_initializer=dense_kernel_initializer,
                          name='probs')(x)
     else:
         if pooling == 'avg':
-            x = tf_keras.layers.GlobalAveragePooling2D(name='avg_pool')(x)
+            x = keras.layers.GlobalAveragePooling2D(name='avg_pool')(x)
         elif pooling == 'max':
-            x = tf_keras.layers.GlobalMaxPooling2D(name='max_pool')(x)
+            x = keras.layers.GlobalMaxPooling2D(name='max_pool')(x)
     
-    model = tf_keras.Model(img_input, x)
+    model = keras.Model(img_input, x)
     if weights is not None:
         model.load_weights(weights)
     return model
@@ -315,7 +317,7 @@ def load_weight(model, url):
         return model
     for w, new_w in zip(model.weights, mod.variables):
         try:
-            tf_keras.backend.set_value(w, new_w.numpy())
+            keras.backend.set_value(w, new_w.numpy())
         except:
             print('Could not transfer weight for', w.name)
     return model

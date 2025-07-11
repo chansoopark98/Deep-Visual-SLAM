@@ -1,16 +1,8 @@
-tensorflowjs
-tensorflow_hub
-tensorflow==2.16.1 #2.12.1
-tensorflow_datasets
-joblib
+#tensorflow==2.19.0
 tqdm
 pyyaml
-matplotlib
 pandas
-pydot
-graphviz
-opencv-python==4.6.0.66 #4.6.0.66
+opencv-python
+matplotlib
+scipy
 pytransform3d
-pyvista
-imageio
-imageio[ffmpeg]
