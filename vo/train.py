@@ -2,8 +2,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import tensorflow as tf
-import keras
 # from tensorflow import keras
+import keras
 from vo.dataset.stereo_loader import StereoLoader
 from vo.dataset.mono_loader import MonoLoader
 from utils.plot_utils import PlotTool
@@ -16,6 +16,7 @@ from tqdm import tqdm
 import numpy as np
 from datetime import datetime
 import yaml
+
 
 np.set_printoptions(suppress=True)
 

@@ -32,7 +32,7 @@ Train:
   img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 8 # 1
+  batch_size: 16 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001
@@ -41,6 +41,6 @@ Train:
   stereo_weight: 1.0         # 스테레오 손실 가중치
 
 Experiment:
-  gpus: [1] # [0, 1]
-  gpu_vram: 24000
+  gpus: [0] # [0, 1]
+  gpu_vram: 30000
   gpu_vram_factor: 0.9

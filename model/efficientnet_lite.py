@@ -1,5 +1,6 @@
 import tensorflow as tf
-from tensorflow import keras
+# from tensorflow import keras
+import keras
 from copy import deepcopy
 
 DEFAULT_BLOCKS_ARGS = [

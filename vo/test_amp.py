@@ -2,6 +2,9 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import tensorflow as tf
+# import keras
+# from tensorflow import keras
+import tensorflow as tf, tf_keras
 import keras
 import numpy as np
 from model.depth_net import DispNet
