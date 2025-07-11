@@ -1,19 +1,22 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+# from tensorflow import keras
 import keras
-from dataset.data_loader import DataLoader
+from vo.dataset.stereo_loader import StereoLoader
+from vo.dataset.mono_loader import MonoLoader
 from utils.plot_utils import PlotTool
 from utils.train_utils import StepLR
 from eval import EvalTrajectory
-from model.pose_net import PoseNet
+from model.pose_net import ImprovedPoseNet
 from model.depth_net import DispNet
 from monodepth_learner import Learner
 from tqdm import tqdm
 import numpy as np
 from datetime import datetime
 import yaml
+
 
 np.set_printoptions(suppress=True)
 
@@ -35,6 +38,8 @@ class Trainer(object):
    
     def configure_train_ops(self) -> None:
         policy = keras.mixed_precision.Policy('mixed_float16')
+        # keras.config.set_dtype_policy('mixed_float16')
+        # keras.mixed_precision.set_global_policy('mixed_float16')
         keras.mixed_precision.set_global_policy(policy)
 
         # 1. Model
@@ -49,32 +54,43 @@ class Trainer(object):
         self.depth_net.build(dispnet_input_shape)
         _ = self.depth_net(tf.random.normal(dispnet_input_shape))
 
-        self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
-        # self.depth_net.trainable = False
+        # self.depth_net.load_weights('./assets/weights/depth/metric_epoch_30_model.weights.h5')
+        self.depth_net.trainable = True
 
-        self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        # self.pose_net = PoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
+        self.pose_net = ImprovedPoseNet(image_shape=image_shape, batch_size=self.batch_size, prefix='mono_posenet')
         posenet_input_shape = (self.batch_size, *image_shape, 6)
+        # _ = self.pose_net(tf.random.normal(posenet_input_shape))
         self.pose_net.build(posenet_input_shape)
+        self.pose_net.trainable = True
         
         # 2. Dataset
-        self.data_loader = DataLoader(config=self.config)
+        self.stereo_loader = StereoLoader(config=self.config)
+        self.mono_loader = MonoLoader(config=self.config)
         
         # 3. Optimizer
         self.lr_scehduler = keras.optimizers.schedules.PolynomialDecay(self.config['Train']['init_lr'],
-                                                                              self.config['Train']['epoch'],
-                                                                              self.config['Train']['final_lr'],
-                                                                              power=0.9)
+                                                                        self.config['Train']['epoch'],
+                                                                        self.config['Train']['final_lr'],
+                                                                        power=0.9)
         
         # self.lr_scehduler = StepLR(initial_learning_rate=self.config['Train']['init_lr'],
         #                         step_size=self.config['Train']['init_lr'] - 5,
         #                         gamma=0.1)
         
-        self.optimizer = keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
+        self.stereo_optimizer = keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
                                                beta_1=self.config['Train']['beta1'],
                                                weight_decay=self.config['Train']['weight_decay'] if self.config[
                                                    'Train']['weight_decay'] > 0 else None,
                                                )
-        self.optimizer = keras.mixed_precision.LossScaleOptimizer(self.optimizer)
+        self.stereo_optimizer = keras.mixed_precision.LossScaleOptimizer(self.stereo_optimizer)
+
+        self.mono_optimizer = keras.optimizers.Adam(learning_rate=self.config['Train']['init_lr'],
+                                               beta_1=self.config['Train']['beta1'],
+                                               weight_decay=self.config['Train']['weight_decay'] if self.config[
+                                                   'Train']['weight_decay'] > 0 else None,
+                                               )
+        self.mono_optimizer = keras.mixed_precision.LossScaleOptimizer(self.mono_optimizer)
 
         # 4. Train Method
         self.learner = Learner(depth_model=self.depth_net,
@@ -87,12 +103,12 @@ class Trainer(object):
         self.plot_tool = PlotTool(config=self.config)
 
         # 5. Metrics
-        self.train_total_loss = tf_keras.metrics.Mean(name='train_total_loss')
-        self.train_pixel_loss = tf_keras.metrics.Mean(name='train_pixel_loss')
-        self.train_smooth_loss = tf_keras.metrics.Mean(name='train_smooth_loss')
-        self.valid_total_loss = tf_keras.metrics.Mean(name='valid_total_loss')
-        self.valid_pixel_loss = tf_keras.metrics.Mean(name='valid_pixel_loss')
-        self.valid_smooth_loss = tf_keras.metrics.Mean(name='valid_smooth_loss')
+        self.train_total_loss = keras.metrics.Mean(name='train_total_loss')
+        self.train_pixel_loss = keras.metrics.Mean(name='train_pixel_loss')
+        self.train_smooth_loss = keras.metrics.Mean(name='train_smooth_loss')
+        self.valid_total_loss = keras.metrics.Mean(name='valid_total_loss')
+        self.valid_pixel_loss = keras.metrics.Mean(name='valid_pixel_loss')
+        self.valid_smooth_loss = keras.metrics.Mean(name='valid_smooth_loss')
 
         # 6. Logger
         current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -111,60 +127,97 @@ class Trainer(object):
         os.makedirs(self.save_path, exist_ok=True)
     
     @tf.function(jit_compile=True)
-    def train_step(self, ref_images, target_image, intrinsic):
+    def train_stereo(self, sample: dict):
         with tf.GradientTape() as tape:
-            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(
-                ref_images, target_image, intrinsic, training=True)
-            scaled_loss = self.optimizer.scale_loss(total_loss)
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(sample, training=True)
+            scaled_loss = self.stereo_optimizer.scale_loss(total_loss)
+        
+        all_vars = self.depth_net.trainable_variables
+        grads = tape.gradient(scaled_loss, all_vars)
+        self.stereo_optimizer.apply_gradients(zip(grads, all_vars))
+        return total_loss, pixel_loss, smooth_loss, pred_depths
+    
+    @tf.function(jit_compile=True)
+    def train_mono(self, sample: dict):
+        with tf.GradientTape() as tape:
+            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(sample, training=True)
+            scaled_loss = self.mono_optimizer.scale_loss(total_loss)
         
         all_vars = self.depth_net.trainable_variables + self.pose_net.trainable_variables
-        # all_vars = self.pose_net.trainable_variables
         grads = tape.gradient(scaled_loss, all_vars)
-        self.optimizer.apply_gradients(zip(grads, all_vars))
+        self.mono_optimizer.apply_gradients(zip(grads, all_vars))
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     @tf.function(jit_compile=True)
-    def validation_step(self, ref_images, target_image, intrinsic) -> tf.Tensor:
-        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_step(ref_images, target_image, intrinsic, training=False)
+    def valid_stereo(self, sample: dict) -> tf.Tensor:
+        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(sample, training=False)
+        return total_loss, pixel_loss, smooth_loss, pred_depths
+    
+    @tf.function(jit_compile=True)
+    def valid_mono(self, sample: dict) -> tf.Tensor:
+        total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(sample, training=False)
         return total_loss, pixel_loss, smooth_loss, pred_depths
 
     def train(self) -> None:        
-        for epoch in range(self.config['Train']['epoch']):    
+        for epoch in range(1, self.config['Train']['epoch'] + 1):
             lr = self.lr_scehduler(epoch)
 
             # Set learning rate
-            self.optimizer.learning_rate = lr
-            
-            train_tqdm = tqdm(self.data_loader.train_dataset, total=self.data_loader.num_train_samples)
-            print(' LR : {0}'.format(self.optimizer.learning_rate))
-            train_tqdm.set_description('Training   || Epoch : {0} ||'.format(epoch,
-                                                                             round(float(self.optimizer.learning_rate.numpy()), 8)))
-            for idx, (ref_images, target_image, intrinsic) in enumerate(train_tqdm):
-                train_t_loss, train_p_loss, train_s_loss, pred_train_depths = self.train_step(ref_images, target_image, intrinsic)
+            self.stereo_optimizer.learning_rate = lr
+            self.mono_optimizer.learning_rate = lr
 
-                # Update train metrics
-                self.train_total_loss(train_t_loss)
-                self.train_pixel_loss(train_p_loss)
-                self.train_smooth_loss(train_s_loss)
+            # Create iterators for both datasets
+            stereo_iter = iter(self.stereo_loader.train_stereo_datasets)
+            mono_iter = iter(self.mono_loader.train_mono_datasets)
+            
+            # Use smaller dataset size as total iterations
+            min_samples = min(self.stereo_loader.num_stereo_train, self.mono_loader.num_mono_train)
+            
+            print(f'Epoch : {epoch} / {self.config["Train"]["epoch"]}')
+            print(f'Stereo samples: {self.stereo_loader.num_stereo_train}, Mono samples: {self.mono_loader.num_mono_train}')
+            print(f'Total iterations (mono+stereo pairs): {min_samples}')
+            print(f'Learning Rate : {self.mono_optimizer.learning_rate.numpy()} \n')
+            
+            train_tqdm = tqdm(total=min_samples, desc=f'Training || Epoch : {epoch}')
+
+            for idx in range(min_samples):
+                # Get stereo sample
+                stereo_sample = next(stereo_iter)
+                train_t_loss_stereo, train_p_loss_stereo, train_s_loss_stereo, pred_train_depths_stereo = self.train_stereo(stereo_sample)
+                
+                # Get mono sample
+                mono_sample = next(mono_iter)
+                train_t_loss_mono, train_p_loss_mono, train_s_loss_mono, pred_train_depths_mono = self.train_mono(mono_sample)
+                
+                # Average losses from both
+                avg_total_loss = (train_t_loss_stereo + train_t_loss_mono) / 2.0
+                avg_pixel_loss = (train_p_loss_stereo + train_p_loss_mono) / 2.0
+                avg_smooth_loss = (train_s_loss_stereo + train_s_loss_mono) / 2.0
+                
+                # Update metrics with averaged losses
+                self.train_total_loss(avg_total_loss)
+                self.train_pixel_loss(avg_pixel_loss)
+                self.train_smooth_loss(avg_smooth_loss)
 
                 if idx % self.config['Train']['train_plot_interval'] == 0:
-                    current_step = self.data_loader.num_train_samples * epoch + idx
+                    current_step = self.stereo_loader.num_stereo_train * epoch + idx
 
                     # Draw depth plot
-                    train_depth_plot = self.plot_tool.plot_images(images=target_image, # target_image
-                                                                  pred_depths=pred_train_depths,
-                                                                  denorm_func=self.data_loader.denormalize_image)
+                    train_depth_plot = self.plot_tool.plot_images(images=mono_sample['target_image'],
+                                                                  pred_depths=pred_train_depths_mono,
+                                                                  denorm_func=self.mono_loader.denormalize_image)
 
                     with self.train_summary_writer.as_default():
                         # Logging train images
                         tf.summary.image('Train/Depth Result', train_depth_plot, step=current_step)
-                        
+
+                train_tqdm.update(1)        
                 train_tqdm.set_postfix(
                     total_loss=self.train_total_loss.result().numpy(),
                     pixel_loss=self.train_pixel_loss.result().numpy(),
                     smooth_loss=self.train_smooth_loss.result().numpy(),
                     )
-            
+                
             # Logging train metrics
             with self.train_summary_writer.as_default():
                 # Logging train total, pixel, smooth loss
@@ -176,34 +229,50 @@ class Trainer(object):
                                     self.train_smooth_loss.result(), step=epoch)
             
             # Validation
-            valid_tqdm = tqdm(self.data_loader.valid_dataset, total=self.data_loader.num_valid_samples)
-            valid_tqdm.set_description('Validation || ')
-            for idx, (ref_images, target_image, intrinsic) in enumerate(valid_tqdm):
-                valid_t_loss, valid_p_loss, valid_s_loss, pred_valid_depths = self.validation_step(ref_images, target_image, intrinsic)
+            min_samples_valid = min(self.stereo_loader.num_stereo_valid, self.mono_loader.num_mono_valid)
+            valid_tqdm = tqdm(total=min_samples_valid, desc=f'Validation || Epoch : {epoch}')
 
-                # Update valid metrics
-                self.valid_total_loss(valid_t_loss)
-                self.valid_pixel_loss(valid_p_loss)
-                self.valid_smooth_loss(valid_s_loss)
+            stereo_valid_iter = iter(self.stereo_loader.valid_stereo_datasets)
+            mono_valid_iter = iter(self.mono_loader.valid_mono_datasets)
+
+            for idx in range(min_samples_valid):
+                # Get stereo sample
+                stereo_sample = next(stereo_valid_iter)
+                valid_t_loss_stereo, valid_p_loss_stereo, valid_s_loss_stereo, pred_valid_depths_stereo = self.valid_stereo(stereo_sample)
+
+                # Get mono sample
+                mono_sample = next(mono_valid_iter)
+                valid_t_loss_mono, valid_p_loss_mono, valid_s_loss_mono, pred_valid_depths_mono = self.valid_mono(mono_sample)
+
+                # Average losses from both
+                avg_valid_total_loss = (valid_t_loss_stereo + valid_t_loss_mono) / 2.0
+                avg_valid_pixel_loss = (valid_p_loss_stereo + valid_p_loss_mono) / 2.0
+                avg_valid_smooth_loss = (valid_s_loss_stereo + valid_s_loss_mono) / 2.0
+
+                # Update metrics with averaged losses
+                self.valid_total_loss(avg_valid_total_loss)
+                self.valid_pixel_loss(avg_valid_pixel_loss)
+                self.valid_smooth_loss(avg_valid_smooth_loss)
 
                 if idx % self.config['Train']['valid_plot_interval'] == 0:
-                    current_step = self.data_loader.num_valid_samples * epoch + idx
-                    # Draw target image - target depth plot
-                    valid_depth_plot = self.plot_tool.plot_images(images=target_image,
-                                                                  pred_depths=pred_valid_depths,
-                                                                  denorm_func=self.data_loader.denormalize_image)
+                    current_step = self.stereo_loader.num_stereo_train * epoch + idx
+
+                    # Draw depth plot
+                    valid_depth_plot = self.plot_tool.plot_images(images=mono_sample['target_image'],
+                                                                  pred_depths=pred_valid_depths_mono,
+                                                                  denorm_func=self.mono_loader.denormalize_image)
 
                     with self.valid_summary_writer.as_default():
-                        # Logging valid images
+                        # Logging validation images
                         tf.summary.image('Valid/Depth Result', valid_depth_plot, step=current_step)
 
+                valid_tqdm.update(1)
                 valid_tqdm.set_postfix(
                     total_loss=self.valid_total_loss.result().numpy(),
                     pixel_loss=self.valid_pixel_loss.result().numpy(),
                     smooth_loss=self.valid_smooth_loss.result().numpy(),
-                )
-
-            # Logging valid metrics
+                    )
+            
             with self.valid_summary_writer.as_default():
                 # Logging valid total, pixel, smooth loss
                 tf.summary.scalar(f'Valid/{self.valid_total_loss.name}',
@@ -215,10 +284,10 @@ class Trainer(object):
 
             # Eval
             print('Evaluate trajectory ... Current Epoch : {0}'.format(epoch))
-            test_tqdm = tqdm(self.data_loader.test_dataset, total=self.data_loader.num_test_samples)
+            test_tqdm = tqdm(self.mono_loader.test_mono_datasets, total=self.mono_loader.num_mono_test)
             test_tqdm.set_description('Test || ')
-            for idx, (ref_images, target_image, intrinsic) in enumerate(test_tqdm):
-                self.eval_tool.update_state(ref_images, target_image, intrinsic)
+            for idx, (batch_sample) in enumerate(test_tqdm):
+                self.eval_tool.update_state(batch_sample)
 
             eval_plot = self.eval_tool.eval_plot()
             with self.test_summary_writer.as_default():

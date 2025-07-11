@@ -1,4 +1,6 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+# from tensorflow import keras
+import keras
 try:
     from .resnet_original import resnet_18, resnet_34
 except:
@@ -22,20 +24,20 @@ class Resnet:
         self.pretrained = pretrained
         self.prefix = prefix
 
-    def build_model(self) -> tf_keras.Model:
+    def build_model(self) -> keras.Model:
         """
         Builds a Resnet-based functional model with skip connections.
 
         Returns:
-            tf_keras.Model: Functional model.
+            keras.Model: Functional model.
         """
-        inputs = tf_keras.Input(shape=self.image_shape)
+        inputs = keras.Input(shape=self.image_shape)
         outputs = resnet_18(inputs=inputs, build_partial=True) # x, [skip4, skip3, skip2, skip1]
-        base_model = tf_keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet18")
+        base_model = keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet18")
 
-        if self.pretrained:
-            pretrained_weights = './assets/weights/resnet18.h5'
-            base_model.load_weights(pretrained_weights, by_name=True, skip_mismatch=True)
+        # if self.pretrained:
+        #     pretrained_weights = './assets/weights/resnet18.h5'
+        #     base_model.load_weights(pretrained_weights, by_name=True, skip_mismatch=True)
         
         for layer in base_model.layers:
             layer._name = f"{self.prefix}_{layer.name}"        
@@ -60,16 +62,16 @@ class Resnet34:
         self.pretrained = pretrained
         self.prefix = prefix
 
-    def build_model(self) -> tf_keras.Model:
+    def build_model(self) -> keras.Model:
         """
         Builds a Resnet-based functional model with skip connections.
 
         Returns:
-            tf_keras.Model: Functional model.
+            keras.Model: Functional model.
         """
-        inputs = tf_keras.Input(shape=self.image_shape)
+        inputs = keras.Input(shape=self.image_shape)
         outputs = resnet_34(inputs=inputs, build_partial=True) # x, [skip4, skip3, skip2, skip1]
-        base_model = tf_keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet34")
+        base_model = keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet34")
 
         if self.pretrained:
             pretrained_weights = './assets/weights/resnet34.h5'

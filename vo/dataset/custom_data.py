@@ -7,17 +7,12 @@ import json
 import yaml
 
 class CustomDataHandler(object):
-    def __init__(self, config):
+    def __init__(self, config, mode='stereo'):
         self.config = config
+        self.mode = mode  # 'stereo' or 'mono'
         self.root_dir = '/media/park-ubuntu/park_cs/tspxr_capture'
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         self.num_source = self.config['Train']['num_source']  # temporal frames
-        
-        # 스테레오 설정
-        self.use_stereo = self.config['Train'].get('use_stereo', True)
-        self.stereo_ratio = self.config['Train'].get('stereo_ratio', 0.5)  # 스테레오 샘플 비율
-        self.use_temporal = self.config['Train'].get('use_temporal', True)
-        self.temporal_ratio = self.config['Train'].get('temporal_ratio', 0.5)  # temporal 샘플 비율
         
         self.train_dir = os.path.join(self.root_dir, 'train')
         self.valid_dir = os.path.join(self.root_dir, 'valid')
@@ -38,94 +33,101 @@ class CustomDataHandler(object):
 
     def _load_stereo_calibration(self, sensor_dir: str):
         """스테레오 캘리브레이션 정보 로드"""
-        try:
-            # 좌우 카메라 내부 파라미터
-            left_intrinsic = np.load(os.path.join(sensor_dir, 'left_intrinsics.npy'))
-            right_intrinsic = np.load(os.path.join(sensor_dir, 'right_intrinsics.npy'))
-            
-            # 스테레오 파라미터 로드
-            stereo_params_file = os.path.join(sensor_dir, 'stereo_parameters.json')
-            if os.path.exists(stereo_params_file):
-                with open(stereo_params_file, 'r') as f:
-                    stereo_params = json.load(f)
-                    baseline_m = stereo_params.get('baseline_m', 0.05)  # ZED X Mini 기본값
-            else:
-                baseline_m = 0.05  # 5cm
-            
-            # 좌->우 변환 행렬 (4x4)
-            stereo_T_L2R = np.eye(4, dtype=np.float32)
-            stereo_T_L2R[0, 3] = baseline_m  # x축으로 이동
-            
-            # 우->좌 변환 행렬 (역변환)
-            stereo_T_R2L = np.linalg.inv(stereo_T_L2R)
-            
-            return left_intrinsic, right_intrinsic, stereo_T_L2R, stereo_T_R2L, baseline_m
-            
-        except Exception as e:
-            print(f"Error loading stereo calibration: {e}")
-            return None, None, None, None, None
+        
+        # 좌우 카메라 내부 파라미터
+        left_intrinsic = np.load(os.path.join(sensor_dir, 'left_intrinsics.npy'))
+        right_intrinsic = np.load(os.path.join(sensor_dir, 'right_intrinsics.npy'))
 
-    def _load_mono_calibration(self, sensor_dir: str):
-        """모노 카메라 캘리브레이션 정보 로드"""
-        try:
-            intrinsic = np.load(os.path.join(sensor_dir, 'intrinsics.npy'))
-            return intrinsic
-        except Exception as e:
-            print(f"Error loading mono calibration: {e}")
-            return None
+        # load json
+        with open(os.path.join(sensor_dir, 'stereo_parameters.json'), 'r') as f:
+            calibration_data = json.load(f)
+            baseline_m = calibration_data['baseline_m'] # 미터
+
+        
+        # Left to Right transformation as 6DoF vector
+        # 스테레오는 일반적으로 x축 방향 translation만 있고 회전은 없음
+        pose_L2R = np.array([0.0, 0.0, 0.0,  # axis-angle (no rotation)
+                            baseline_m, 0.0, 0.0],  # translation (x, y, z)
+                            dtype=np.float32)
+        
+        # Right to Left transformation as 6DoF vector
+        pose_R2L = np.array([0.0, 0.0, 0.0,  # axis-angle (no rotation)
+                            -baseline_m, 0.0, 0.0],  # translation (-x, y, z)
+                            dtype=np.float32)
+        
+        baseline_m = np.float32(baseline_m)  # ensure baseline is float32
+        
+        return left_intrinsic, right_intrinsic, pose_L2R, pose_R2L, baseline_m
 
     def _create_stereo_samples(self, left_files, right_files, left_K, right_K, 
-                            stereo_T_L2R, stereo_T_R2L, baseline, indices):
-        """스테레오 샘플 생성 (양방향 warping)"""
-        samples = []
+                            stereo_T_L2R, stereo_T_R2L, indices):
+        """스테레오 샘플 생성 - dict 형태로 반환"""
+        source_image_paths = []
+        target_image_paths = []
+        intrinsics = []
+        poses = []
         
         for idx in indices:
-            # 1. 좌->우 warping 샘플 (left가 source, right가 target)
-            sample_stereo = {
-                'source_left': left_files[idx],
-                'target_image': right_files[idx],
-                'source_right': right_files[idx],
-                'intrinsic': left_K,
-                'poses': np.array([stereo_T_L2R, stereo_T_R2L], dtype=np.float32),
-                'baseline': baseline,
-                'data_type': 'stereo',
-                'use_pose_net': False,  # 단일 bool 값으로 변경
-            }
-            samples.append(sample_stereo)
-   
-        return samples
-
-    def _create_temporal_samples(self, rgb_files, intrinsic, indices, camera_side='mono'):
-        """Temporal sequence 샘플 생성"""
-        samples = []
-        dummy_pose = np.eye(4, dtype=np.float32)
-        for idx in indices:
-            sample = {
-                'source_left': rgb_files[idx - 1],
-                'target_image': rgb_files[idx],
-                'source_right': rgb_files[idx + 1],
-                'intrinsic': intrinsic,
-                'poses': np.array([dummy_pose, dummy_pose], dtype=np.float32),  # 두 개의 더미 pose
-                'baseline': 0.0,
-                'data_type': 'temporal',
-                'use_pose_net': True,
-            }
-            samples.append(sample)
+            # L2R (left to right)
+            source_image_paths.append(left_files[idx])
+            target_image_paths.append(right_files[idx])
+            intrinsics.append(right_K)
+            poses.append(stereo_T_L2R)
+            
+            # R2L (right to left)
+            source_image_paths.append(right_files[idx])
+            target_image_paths.append(left_files[idx])
+            intrinsics.append(left_K)
+            poses.append(stereo_T_R2L)
         
-        return samples
+        return {
+            'source_image': source_image_paths,
+            'target_image': target_image_paths,
+            'intrinsic': intrinsics,
+            'pose': poses
+        }
 
+    
+    def _create_mono_samples(self, left_files, left_K):
+        """개별 리스트로 반환하도록 수정"""
+        source_left_paths = []
+        target_image_paths = []
+        source_right_paths = []
+        intrinsics = []
+        
+        step = 1
+        for t in range(self.num_source, len(left_files) - self.num_source, step):
+            source_left_paths.append(left_files[t - 1])
+            target_image_paths.append(left_files[t])
+            source_right_paths.append(left_files[t + 1])
+            intrinsics.append(left_K)
+        
+        return {
+            'source_left': source_left_paths,
+            'target_image': target_image_paths,
+            'source_right': source_right_paths,
+            'intrinsic': intrinsics
+        }
 
     def _process_stereo_scene(self, scene_dir: str):
-        """스테레오 시퀀스 처리"""
+        """스테레오 시퀀스 처리 - dict 반환"""
         sensor_dir = os.path.join(scene_dir, 'sensor')
         
         # 이미지 파일 로드
-        left_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb_left', '*.jpg')))
-        right_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb_right', '*.jpg')))
+        extensions = ['*.png', '*.jpg', '*.jpeg']
+        left_files = []
+        right_files = []
+
+        for ext in extensions:
+            left_files.extend(glob.glob(os.path.join(scene_dir, 'rgb_left', ext)))
+            right_files.extend(glob.glob(os.path.join(scene_dir, 'rgb_right', ext)))
+
+        left_files = sorted(left_files)
+        right_files = sorted(right_files)
         
         if not left_files or not right_files:
             print(f"No stereo images found in {scene_dir}")
-            return []
+            return None
         
         # 파일 개수 맞추기
         min_length = min(len(left_files), len(right_files))
@@ -133,168 +135,165 @@ class CustomDataHandler(object):
         right_files = right_files[:min_length]
         
         # 캘리브레이션 로드
-        left_K, right_K, stereo_T_L2R, stereo_T_R2L, baseline = self._load_stereo_calibration(sensor_dir)
+        left_K, right_K, pose_L2R, pose_R2L, baseline = self._load_stereo_calibration(sensor_dir)
         if left_K is None:
-            return []
+            return None
         
         # 이미지 크기 확인 및 내부 파라미터 스케일링
         sample_img = cv2.imread(left_files[0])
         if sample_img is None:
-            return []
+            return None
         original_size = (sample_img.shape[0], sample_img.shape[1])
         
         left_K = self._rescale_intrinsic(left_K, self.image_size, original_size)
         right_K = self._rescale_intrinsic(right_K, self.image_size, original_size)
         
-        samples = []
-        
         # 유효한 인덱스 범위 계산
-        valid_indices = list(range(1, min_length - 1))  # 첫/마지막 프레임 제외
+        valid_indices = list(range(0, min_length))  # 모든 프레임 사용
         
-        # 스테레오 샘플 생성 - 모든 유효한 프레임 사용
-        if self.use_stereo:
-            stereo_samples = self._create_stereo_samples(
-                left_files, right_files, left_K, right_K, 
-                stereo_T_L2R, stereo_T_R2L, baseline, valid_indices
-            )
-            samples.extend(stereo_samples)
-        
-        # Temporal 샘플 생성 - 모든 유효한 프레임 사용
-        if self.use_temporal:
-            # 좌측 카메라 temporal - 모든 프레임
-            left_temporal_samples = self._create_temporal_samples(
-                left_files, left_K, valid_indices, camera_side='left'
-            )
-            samples.extend(left_temporal_samples)
-            
-            # 우측 카메라 temporal - 모든 프레임
-            right_temporal_samples = self._create_temporal_samples(
-                right_files, right_K, valid_indices, camera_side='right'
-            )
-            samples.extend(right_temporal_samples)
-        
-        return samples
-
+        return self._create_stereo_samples(
+            left_files, right_files, left_K, right_K, 
+            pose_L2R, pose_R2L, valid_indices
+        )
+    
     def _process_mono_scene(self, scene_dir: str):
-        """모노큘러 시퀀스 처리"""
+        """모노 시퀀스 처리 - dict 반환"""
         sensor_dir = os.path.join(scene_dir, 'sensor')
         
         # 이미지 파일 로드
-        rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
-        if not rgb_files:
-            print(f"No mono images found in {scene_dir}")
-            return []
+        extensions = ['*.png', '*.jpg', '*.jpeg']
+        left_files = []
+
+        for ext in extensions:
+            left_files.extend(glob.glob(os.path.join(scene_dir, 'rgb_left', ext)))
+
+        left_files = sorted(left_files)
+        
+        if not left_files:
+            print(f"No images found in {scene_dir}")
+            return None
         
         # 캘리브레이션 로드
-        intrinsic = self._load_mono_calibration(sensor_dir)
-        if intrinsic is None:
-            return []
+        left_K, _, _, _, _ = self._load_stereo_calibration(sensor_dir)
+        if left_K is None:
+            return None
         
         # 이미지 크기 확인 및 내부 파라미터 스케일링
-        sample_img = cv2.imread(rgb_files[0])
+        sample_img = cv2.imread(left_files[0])
         if sample_img is None:
-            return []
+            return None
         original_size = (sample_img.shape[0], sample_img.shape[1])
         
-        intrinsic = self._rescale_intrinsic(intrinsic, self.image_size, original_size)
+        left_K = self._rescale_intrinsic(left_K, self.image_size, original_size)
         
-        # 유효한 인덱스 범위 - 모든 프레임 사용
-        valid_indices = list(range(1, len(rgb_files) - 1))
-        
-        # Temporal 샘플 생성 - 모든 프레임 사용
-        samples = self._create_temporal_samples(
-            rgb_files, intrinsic, valid_indices, camera_side='mono'
-        )
-        
-        return samples
+        return self._create_mono_samples(left_files, left_K)
 
     def _process(self, scene_dir: str):
         """씬 디렉토리 처리 - 스테레오/모노 자동 감지"""
         # 디렉토리 구조 확인
         has_stereo = (os.path.exists(os.path.join(scene_dir, 'rgb_left')) and 
                      os.path.exists(os.path.join(scene_dir, 'rgb_right')))
-        has_mono = os.path.exists(os.path.join(scene_dir, 'rgb'))
         
-        if has_stereo and self.use_stereo:
-            print(f"Processing stereo scene: {os.path.basename(scene_dir)}")
+        if self.mode == 'stereo':
             return self._process_stereo_scene(scene_dir)
-        elif has_mono:
-            print(f"Processing mono scene: {os.path.basename(scene_dir)}")
+        elif self.mode == 'mono':
             return self._process_mono_scene(scene_dir)
         else:
-            print(f"No valid image directory found in {scene_dir}")
-            return []
+            raise ValueError(f"Unsupported mode: {self.mode}. Use 'stereo' or 'mono'.")
+
 
     def generate_datasets(self, fold_dir, shuffle=False):
-        """데이터셋 생성"""
+        """데이터셋 생성 - dict 형태로 반환"""
         if not os.path.exists(fold_dir):
             print(f"Directory {fold_dir} does not exist")
-            return np.array([])
-        
-        scene_dirs = sorted(glob.glob(os.path.join(fold_dir, '*')))
-        all_samples = []
-        
-        for scene_dir in scene_dirs:
-            if os.path.isdir(scene_dir):
-                samples = self._process(scene_dir)
-                if samples:
-                    all_samples.extend(samples)
-        
-        if not all_samples:
-            print(f"No samples generated from {fold_dir}")
-            return np.array([])
-        
-        all_samples = np.array(all_samples)
-        
-        if shuffle:
-            np.random.shuffle(all_samples)
-        
-        print(f"Generated {len(all_samples)} samples from {fold_dir}")
-        return all_samples
-
-    def get_data_statistics(self):
-        """데이터셋 통계 정보 출력"""
-        def analyze_samples(samples):
-            if len(samples) == 0:
+            
+            if self.mode == 'mono':
                 return {
-                    'total': 0,
-                    'stereo': 0,
-                    'temporal': {'left': 0, 'right': 0, 'mono': 0}
+                    'source_left': np.array([]),
+                    'target_image': np.array([]),
+                    'source_right': np.array([]),
+                    'intrinsic': np.array([])
+                }
+            else:  # stereo
+                return {
+                    'source_image': np.array([]),
+                    'target_image': np.array([]),
+                    'intrinsic': np.array([]),
+                    'pose': np.array([])
                 }
             
-            stats = {
-                'total': len(samples),
-                'stereo': 0,
-                'temporal': {'left': 0, 'right': 0, 'mono': 0}
+        scene_dirs = sorted(glob.glob(os.path.join(fold_dir, '*')))
+        
+        if self.mode == 'mono':
+            # 전체 데이터를 저장할 리스트
+            all_source_left = []
+            all_target_image = []
+            all_source_right = []
+            all_intrinsic = []
+
+            for scene_dir in scene_dirs:
+                if os.path.isdir(scene_dir):
+                    
+                        samples = self._process_mono_scene(scene_dir)
+                        if samples:
+                            all_source_left.extend(samples['source_left'])
+                            all_target_image.extend(samples['target_image'])
+                            all_source_right.extend(samples['source_right'])
+                            all_intrinsic.extend(samples['intrinsic'])
+            
+            # numpy 배열로 변환
+            dataset_dict = {
+                'source_left': np.array(all_source_left, dtype=str),
+                'target_image': np.array(all_target_image, dtype=str),
+                'source_right': np.array(all_source_right, dtype=str),
+                'intrinsic': np.array(all_intrinsic, dtype=np.float32)
             }
             
-            for sample in samples:
-                if sample['data_type'] == 'stereo':
-                    stats['stereo'] += 1
-                elif sample['data_type'] == 'temporal':
-                    camera_side = sample.get('camera_side', 'mono')
-                    stats['temporal'][camera_side] += 1
+            # 셔플링
+            if shuffle and len(all_source_left) > 0:
+                indices = np.random.permutation(len(all_source_left))
+                for key in dataset_dict:
+                    dataset_dict[key] = dataset_dict[key][indices]
             
-            return stats
+            print(f"Generated {len(all_source_left)} samples from {fold_dir}")
+            return dataset_dict
         
-        train_stats = analyze_samples(self.train_data)
-        valid_stats = analyze_samples(self.valid_data)
-        test_stats = analyze_samples(self.test_data)
-        
-        print("\n=== Dataset Statistics ===")
-        print(f"Training set: {train_stats['total']} samples")
-        print(f"  - Stereo: {train_stats['stereo']}")
-        print(f"  - Temporal: left={train_stats['temporal']['left']}, right={train_stats['temporal']['right']}, mono={train_stats['temporal']['mono']}")
-        
-        print(f"\nValidation set: {valid_stats['total']} samples")
-        print(f"  - Stereo: {valid_stats['stereo']}")
-        print(f"  - Temporal: left={valid_stats['temporal']['left']}, right={valid_stats['temporal']['right']}, mono={valid_stats['temporal']['mono']}")
+        elif self.mode == 'stereo':
+            # 전체 데이터를 저장할 리스트
+            all_source_image = []
+            all_target_image = []
+            all_intrinsic = []
+            all_pose = []
 
-        print(f"\nTest set: {test_stats['total']} samples")
-        print(f"  - Stereo: {test_stats['stereo']}")
-        print(f"  - Temporal: left={test_stats['temporal']['left']}, right={test_stats['temporal']['right']}, mono={test_stats['temporal']['mono']}")
-        print("\n=== End of Statistics ===")
-
+            for scene_dir in scene_dirs:
+                if os.path.isdir(scene_dir):
+                    samples = self._process_stereo_scene(scene_dir)
+                    if samples:
+                        all_source_image.extend(samples['source_image'])
+                        all_target_image.extend(samples['target_image'])
+                        all_intrinsic.extend(samples['intrinsic'])
+                        all_pose.extend(samples['pose'])
+            
+            # numpy 배열로 변환
+            dataset_dict = {
+                'source_image': np.array(all_source_image, dtype=str),
+                'target_image': np.array(all_target_image, dtype=str),
+                'intrinsic': np.array(all_intrinsic, dtype=np.float32),
+                'pose': np.array(all_pose, dtype=np.float32)
+            }
+            
+            # 셔플링
+            if shuffle and len(all_source_image) > 0:
+                indices = np.random.permutation(len(all_source_image))
+                for key in dataset_dict:
+                    dataset_dict[key] = dataset_dict[key][indices]
+            
+            print(f"Generated {len(all_source_image)} stereo samples from {fold_dir}")
+            return dataset_dict
+        
+        else:
+            raise ValueError(f"Unsupported mode: {self.mode}. Use 'stereo' or 'mono'.")
+       
 if __name__ == '__main__':
     # 설정 파일 로드
     with open('./vo/config.yaml', 'r') as f:
@@ -302,21 +301,3 @@ if __name__ == '__main__':
     
     # 데이터셋 생성
     dataset = CustomDataHandler(config)
-    dataset.get_data_statistics()
-    
-    # 샘플 데이터 확인
-    if len(dataset.train_data) > 0:
-        print("\n=== Sample Data ===")
-        for i in range(min(5, len(dataset.train_data))):
-            sample = dataset.train_data[i]
-            print(f"\nSample {i}:")
-            print(f"  Type: {sample['data_type']}")
-            print(f"  Target: {os.path.basename(sample['target_image'])}")
-
-            print(f"  Use pose net: {sample['use_pose_net']}")
-            print(f"  Baseline: {sample['baseline']:.3f}m")
-            
-            if sample['data_type'] == 'stereo':
-                print(f"  Stereo direction: {sample.get('stereo_direction', 'N/A')}")
-            elif sample['data_type'] == 'temporal':
-                print(f"  Camera side: {sample.get('camera_side', 'N/A')}")

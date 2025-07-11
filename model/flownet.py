@@ -1,21 +1,23 @@
-import tensorflow as tf, tf_keras
+import tensorflow as tf
+# from tensorflow import keras
+import keras
 try:
     from .model_utils import *
-    from .mobilenetv3 import MobilenetV3Large
+    # from .mobilenetv3 import MobilenetV3Large
     from .efficientnet import EfficientNet
-    from .resnet import resnet_18
-    from .resnet_tf import Resnet
+    # from .resnet import resnet_18
+    # from .resnet_tf import Resnet
 except:
     from model_utils import *
-    from mobilenetv3 import MobilenetV3Large
+    # from mobilenetv3 import MobilenetV3Large
     from efficientnet import EfficientNet
-    from resnet import resnet_18
-    from resnet_tf import Resnet
+    # from resnet import resnet_18
+    # from resnet_tf import Resnet
 
-class PredictFlow(tf_keras.layers.Layer):
+class PredictFlow(keras.layers.Layer):
     def __init__(self, name=None):
         super(PredictFlow, self).__init__()
-        self.conv_out = tf_keras.layers.Conv2D(filters=2,
+        self.conv_out = keras.layers.Conv2D(filters=2,
                                       kernel_size=3, 
                                       strides=1,
                                       name=name,
@@ -24,7 +26,7 @@ class PredictFlow(tf_keras.layers.Layer):
     def call(self, inputs):
         return self.conv_out(inputs)
     
-class Flownet(tf_keras.Model):
+class Flownet(keras.Model):
     def __init__(self,
                  image_shape: tuple,
                  batch_size: int,
@@ -51,7 +53,7 @@ class Flownet(tf_keras.Model):
         filters = [16, 32, 64, 128, 256]
 
         # base
-        self.common_resize = tf_keras.layers.Resizing(
+        self.common_resize = keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
             interpolation='bilinear',
@@ -59,7 +61,7 @@ class Flownet(tf_keras.Model):
         )
 
         self.conv5 = std_conv(3, 256, 1, name='conv5')
-        self.iconv5_resize = tf_keras.layers.Resizing(
+        self.iconv5_resize = keras.layers.Resizing(
             height=self.image_height // 16,
             width=self.image_width // 16,
             interpolation='bilinear',
@@ -69,7 +71,7 @@ class Flownet(tf_keras.Model):
         self.upflow5 = PredictFlow(name='upflow5')
 
         self.conv4 = reflect_conv(3, filters[3], 1, 'conv4', activation_fn=tf.nn.leaky_relu)
-        self.iconv4_resize = tf_keras.layers.Resizing(
+        self.iconv4_resize = keras.layers.Resizing(
             height=self.image_height // 8,
             width=self.image_width // 8,
             interpolation='bilinear',
@@ -79,7 +81,7 @@ class Flownet(tf_keras.Model):
         self.upflow4 = PredictFlow(name='upflow4')
 
         self.conv3 = reflect_conv(3, filters[2], 1, 'conv3', activation_fn=tf.nn.leaky_relu)
-        self.iconv3_resize = tf_keras.layers.Resizing(
+        self.iconv3_resize = keras.layers.Resizing(
             height=self.image_height // 4,
             width=self.image_width // 4,
             interpolation='bilinear',
@@ -89,7 +91,7 @@ class Flownet(tf_keras.Model):
         self.upflow3 = PredictFlow(name='upflow3')
 
         self.conv2 = reflect_conv(3, filters[1], 1, 'conv2', activation_fn=tf.nn.leaky_relu)
-        self.iconv2_resize = tf_keras.layers.Resizing(
+        self.iconv2_resize = keras.layers.Resizing(
             height=self.image_height // 2,
             width=self.image_width // 2,
             interpolation='bilinear',
@@ -99,7 +101,7 @@ class Flownet(tf_keras.Model):
         self.upflow2 = PredictFlow(name='upflow2')
 
         self.conv1 = reflect_conv(3, filters[0], 1, 'conv1', activation_fn=tf.nn.leaky_relu)
-        self.iconv1_resize = tf_keras.layers.Resizing(
+        self.iconv1_resize = keras.layers.Resizing(
             height=self.image_height,
             width=self.image_width,
             interpolation='bilinear',
@@ -170,7 +172,7 @@ class CustomFlow:
         self.pretrained = pretrained
         self.prefix = prefix
 
-    def build_model(self) -> tf_keras.Model:
+    def build_model(self) -> keras.Model:
         base_model = Flownet(image_shape=(self.image_shape[0], self.image_shape[1], 6),
                              batch_size=self.batch_size,
                              prefix='flownet')
@@ -184,12 +186,12 @@ class CustomFlow:
         # base_model.summary()
         
         # make new partial model from base_model
-        new_input = tf_keras.layers.Input(shape=(self.image_shape[0], self.image_shape[1], 6),
+        new_input = keras.layers.Input(shape=(self.image_shape[0], self.image_shape[1], 6),
                                           batch_size=self.batch_size)
         
         encoded_feature, _ = base_model.get_layer('flownet_efficientnet_lite_b0_model')(new_input)
 
-        partial_model = tf_keras.Model(
+        partial_model = keras.Model(
             inputs=new_input,
             outputs=encoded_feature,
             name=f"{self.prefix}_partial"

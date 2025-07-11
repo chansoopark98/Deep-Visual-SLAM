@@ -1,5 +1,5 @@
 import keras
-import tensorflow as tf, tf_keras
+import tensorflow as tf
 
 class StepLR(keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, initial_learning_rate, step_size, gamma):
