@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import PolynomialLR
-from torch.amp import GradScaler, autocast  # AMP 추가
+from torch.amp import GradScaler, autocast
 
 from vo.dataset.stereo_loader import StereoLoader
 from vo.dataset.mono_loader import MonoLoader
@@ -71,11 +71,10 @@ class Trainer:
             num_frames_to_predict_for=1
         ).to(self.device)
 
-        # compile torch models
-        self.depth_net = torch.compile(self.depth_net,
-                                       fullgraph=True)
-        self.pose_net = torch.compile(self.pose_net,
-                                       fullgraph=True)
+        # torch.compile 제거 또는 옵션화 (메모리 누수 가능성)
+        if self.config.get('Train', {}).get('use_compile', False):
+            self.depth_net = torch.compile(self.depth_net, fullgraph=True)
+            self.pose_net = torch.compile(self.pose_net, fullgraph=True)
 
         # 2. Data loaders
         self.stereo_loader = StereoLoader(config=self.config)
@@ -97,27 +96,22 @@ class Trainer:
         )
         
         # 4. Learning rate schedulers
-        total_iters = self.config['Train']['epoch'] * max(
-            self.stereo_loader.num_stereo_train,
-            self.mono_loader.num_mono_train
-        )
-        
         self.stereo_scheduler = PolynomialLR(
             self.stereo_optimizer,
-            total_iters=total_iters,
+            total_iters=self.config['Train']['epoch'],
             power=0.9
         )
         
         self.mono_scheduler = PolynomialLR(
             self.mono_optimizer,
-            total_iters=total_iters,
+            total_iters=self.config['Train']['epoch'],
             power=0.9
         )
         
         # 5. GradScaler for AMP
         if self.use_amp:
-            self.stereo_scaler = GradScaler()
-            self.mono_scaler = GradScaler()
+            self.stereo_scaler = GradScaler('cuda')
+            self.mono_scaler = GradScaler('cuda')
         
         # 6. Learner
         self.learner = MonodepthLearner(
@@ -164,7 +158,7 @@ class Trainer:
     
     def train_stereo_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Single training step for stereo with AMP support"""
-        self.stereo_optimizer.zero_grad()
+        self.stereo_optimizer.zero_grad(set_to_none=True)  # 더 효율적인 메모리 정리
         
         if self.use_amp:
             with autocast('cuda', dtype=torch.float16):
@@ -182,11 +176,17 @@ class Trainer:
             total_loss.backward()
             self.stereo_optimizer.step()
         
+        # 메모리 정리를 위해 detach
+        total_loss = total_loss.detach()
+        pixel_loss = pixel_loss.detach()
+        smooth_loss = smooth_loss.detach()
+        pred_depths = [d.detach() for d in pred_depths]
+        
         return total_loss, pixel_loss, smooth_loss, pred_depths
     
     def train_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Single training step for mono with AMP support"""
-        self.mono_optimizer.zero_grad()
+        self.mono_optimizer.zero_grad(set_to_none=True)  # 더 효율적인 메모리 정리
         
         if self.use_amp:
             with autocast('cuda', dtype=torch.float16):
@@ -204,13 +204,19 @@ class Trainer:
             total_loss.backward()
             self.mono_optimizer.step()
         
+        # 메모리 정리를 위해 detach
+        total_loss = total_loss.detach()
+        pixel_loss = pixel_loss.detach()
+        smooth_loss = smooth_loss.detach()
+        pred_depths = [d.detach() for d in pred_depths]
+        
         return total_loss, pixel_loss, smooth_loss, pred_depths
     
     @torch.no_grad()
     def valid_stereo_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Single validation step for stereo with AMP support"""
         if self.use_amp:
-            with autocast():
+            with autocast('cuda', dtype=torch.float16):
                 total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
                     sample, training=False
                 )
@@ -224,7 +230,7 @@ class Trainer:
     def valid_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Single validation step for mono with AMP support"""
         if self.use_amp:
-            with autocast():
+            with autocast('cuda', dtype=torch.float16):
                 total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_mono(
                     sample, training=False
                 )
@@ -256,8 +262,11 @@ class Trainer:
             }
             
             # Create iterators
-            stereo_iter = cycle(self.stereo_loader.train_stereo_loader)
-            mono_iter = cycle(self.mono_loader.train_mono_loader)
+            # stereo_iter = cycle(self.stereo_loader.train_stereo_loader)
+            # mono_iter = cycle(self.mono_loader.train_mono_loader)
+            stereo_iter = iter(self.stereo_loader.train_stereo_loader)
+            mono_iter = iter(self.mono_loader.train_mono_loader)
+
             
             # Use minimum of both dataset sizes
             min_batches = min(
@@ -274,13 +283,13 @@ class Trainer:
             for batch_idx in train_pbar:
                 # Stereo training    
                 stereo_sample = next(stereo_iter)
-                t_loss_s, p_loss_s, s_loss_s, _ = self.train_stereo_step(stereo_sample)
+                t_loss_s, p_loss_s, s_loss_s, pred_depths_s = self.train_stereo_step(stereo_sample)
             
                 # Mono training
                 mono_sample = next(mono_iter)
                 t_loss_m, p_loss_m, s_loss_m, pred_depths_m = self.train_mono_step(mono_sample)
                 
-                # Average losses
+                # Average losses - use .item() to prevent graph retention
                 avg_total = (t_loss_s.item() + t_loss_m.item()) / 2.0
                 avg_pixel = (p_loss_s.item() + p_loss_m.item()) / 2.0
                 avg_smooth = (s_loss_s.item() + s_loss_m.item()) / 2.0
@@ -299,16 +308,28 @@ class Trainer:
                 
                 # Log images periodically
                 if batch_idx % self.config['Train']['train_plot_interval'] == 0:
-                    depth_plot = self.plot_tool.plot_images(
-                        images=mono_sample['target_image'],
-                        pred_depths=pred_depths_m,
-                        denorm_func=self.mono_loader.denormalize_image
-                    ) # [H, W, 3] numpy array
-                    self.writer.add_image(
-                        'Train/Depth_Result',
-                        depth_plot.transpose(2, 0, 1),
-                        global_step
-                    )
+                    with torch.no_grad():  # 추가 보호
+                        depth_plot = self.plot_tool.plot_images(
+                            images=mono_sample['target_image'].detach(),
+                            pred_depths=[d.detach() for d in pred_depths_m],
+                            denorm_func=self.mono_loader.denormalize_image
+                        )
+                        self.writer.add_image(
+                            'Train/Depth_Result',
+                            depth_plot.transpose(2, 0, 1),
+                            global_step
+                        )
+                        del depth_plot  # 명시적 삭제
+                
+                # 주기적으로 메모리 정리
+                if batch_idx % 50 == 0:
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                
+                # 명시적으로 불필요한 변수 삭제
+                del stereo_sample, mono_sample
+                del t_loss_s, p_loss_s, s_loss_s, pred_depths_s
+                del t_loss_m, p_loss_m, s_loss_m, pred_depths_m
                 
                 global_step += 1
             
@@ -322,6 +343,13 @@ class Trainer:
             self.writer.add_scalar('Train/pixel_loss', train_metrics['pixel_loss'], epoch)
             self.writer.add_scalar('Train/smooth_loss', train_metrics['smooth_loss'], epoch)
             self.writer.add_scalar('Train/learning_rate', self.mono_optimizer.param_groups[0]['lr'], epoch)
+            
+            # Log memory usage
+            if torch.cuda.is_available():
+                self.writer.add_scalar('Memory/allocated_gb', 
+                                     torch.cuda.memory_allocated() / 1024**3, epoch)
+                self.writer.add_scalar('Memory/reserved_gb', 
+                                     torch.cuda.memory_reserved() / 1024**3, epoch)
             
             # Log scale factors if using AMP
             if self.use_amp:
@@ -339,8 +367,10 @@ class Trainer:
             # Update schedulers
             self.mono_scheduler.step()
             self.stereo_scheduler.step()
-
+            
+            # 에폭 끝에서 철저한 메모리 정리
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
             gc.collect()
 
     @torch.no_grad()
@@ -396,8 +426,8 @@ class Trainer:
             # Log validation images
             if batch_idx % self.config['Train']['valid_plot_interval'] == 0:
                 depth_plot = self.plot_tool.plot_images(
-                    images=mono_sample['target_image'],
-                    pred_depths=pred_depths_m,
+                    images=mono_sample['target_image'].detach(),
+                    pred_depths=[d.detach() for d in pred_depths_m],
                     denorm_func=self.mono_loader.denormalize_image
                 )
                 self.writer.add_image(
@@ -405,6 +435,12 @@ class Trainer:
                     depth_plot.transpose(2, 0, 1),
                     batch_idx
                 )
+                del depth_plot
+            
+            # 명시적 메모리 정리
+            del stereo_sample, mono_sample
+            del t_loss_s, p_loss_s, s_loss_s
+            del t_loss_m, p_loss_m, s_loss_m, pred_depths_m
         
         # Average validation metrics
         for key in ['total_loss', 'pixel_loss', 'smooth_loss']:
@@ -419,6 +455,10 @@ class Trainer:
         print(f"\nValidation - Total: {valid_metrics['total_loss']:.4f}, "
               f"Pixel: {valid_metrics['pixel_loss']:.4f}, "
               f"Smooth: {valid_metrics['smooth_loss']:.4f}")
+        
+        # 검증 후 메모리 정리
+        torch.cuda.empty_cache()
+        gc.collect()
     
     def save_checkpoint(self, epoch: int) -> None:
         """Save model checkpoint"""

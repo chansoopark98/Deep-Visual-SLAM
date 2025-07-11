@@ -35,7 +35,8 @@ class MonodepthLearner:
         # Hyperparameters
         self.num_scales = 4
         self.num_source = config['Train']['num_source']  # 2
-        
+        self.batch_size = config['Train']['batch_size']  # 8
+
         self.image_shape = (config['Train']['img_h'], config['Train']['img_w'])
         self.smoothness_ratio = config['Train']['smoothness_ratio']  # 0.001
         self.auto_mask = config['Train']['auto_mask']  # True
@@ -51,17 +52,14 @@ class MonodepthLearner:
         self.backproject_depth = {}
         self.project_3d = {}
         
+        # 실제 배치 크기는 동적으로 처리
         for scale in range(self.num_scales):
             h = self.image_shape[0] // (2 ** scale)
             w = self.image_shape[1] // (2 ** scale)
             
-            self.backproject_depth[scale] = BackprojectDepth(
-                config['Train']['batch_size'], h, w
-            ).to(self.device)
-            
-            self.project_3d[scale] = Project3D(
-                config['Train']['batch_size'], h, w
-            ).to(self.device)
+            # 실제 배치 크기로 설정
+            self.backproject_depth[scale] = BackprojectDepth(self.batch_size, h, w).to(self.device)
+            self.project_3d[scale] = Project3D(self.batch_size, h, w).to(self.device)
     
     def compute_reprojection_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Computes reprojection loss between a batch of predicted and target images"""
@@ -89,7 +87,7 @@ class MonodepthLearner:
             [0, 0, 1]
         ], dtype=torch.float32, device=intrinsics.device)
         
-        scale_matrix = scale_matrix.unsqueeze(0).repeat(batch_size, 1, 1)
+        scale_matrix = scale_matrix.unsqueeze(0).expand(batch_size, -1, -1)
         
         # Apply scaling
         scaled_intrinsics = torch.matmul(scale_matrix, intrinsics)
@@ -98,16 +96,17 @@ class MonodepthLearner:
     
     def forward_mono(self, sample: Dict[str, torch.Tensor], training: bool = True) -> Tuple[torch.Tensor, ...]:
         """Forward pass for monocular training"""
-        
-        # Move data to device
         for key in sample:
-            sample[key] = sample[key].to(self.device)
-        
+            if isinstance(sample[key], torch.Tensor):
+                sample[key] = sample[key].to(self.device)
+
         # Extract inputs
         left_image = sample['source_left']  # [B, 3, H, W]
         right_image = sample['source_right']  # [B, 3, H, W]
         tgt_image = sample['target_image']  # [B, 3, H, W]
         intrinsic = sample['intrinsic']  # [B, 3, 3]
+        
+        batch_size = tgt_image.shape[0]
         
         outputs = {}
         pixel_losses = 0.
@@ -118,8 +117,10 @@ class MonodepthLearner:
         # Depth prediction
         if training:
             self.depth_net.train()
+            self.pose_net.train()
         else:
             self.depth_net.eval()
+            self.pose_net.eval()
             
         depth_outputs = self.depth_net(tgt_image)
         
@@ -128,11 +129,6 @@ class MonodepthLearner:
             outputs[("disp", scale)] = depth_outputs[("disp", scale)]
         
         # Pose prediction
-        if training:
-            self.pose_net.train()
-        else:
-            self.pose_net.eval()
-        
         # Concatenate images for pose network
         # Left -> Target
         concat_left_tgt = torch.cat([left_image, tgt_image], dim=1)
@@ -179,7 +175,9 @@ class MonodepthLearner:
                 target = tgt_image
                 K_s = intrinsic
             
-            inv_K_s = torch.inverse(K_s.float()).type(K_s.dtype)
+            # Compute inverse of intrinsics in FP32 to avoid AMP issues
+            with torch.amp.autocast(device_type='cuda', enabled=False):
+                inv_K_s = torch.inverse(K_s.float()).type(K_s.dtype)
             
             # Compute reprojection for each source
             reprojection_losses = []
@@ -261,6 +259,12 @@ class MonodepthLearner:
             smooth_loss = get_smooth_loss(norm_disp, target)
             smooth_loss = smooth_loss / (2 ** scale)
             smooth_losses += smooth_loss * self.smoothness_ratio
+            
+            # 중간 변수 정리
+            del cam_points, pix_coords, left_warped, right_warped
+            if self.auto_mask:
+                del identity_reprojection_losses
+            del reprojection_losses, combined, to_optimise
         
         # Average losses
         pixel_losses = pixel_losses / self.num_scales
@@ -277,16 +281,17 @@ class MonodepthLearner:
     
     def forward_stereo(self, sample: Dict[str, torch.Tensor], training: bool = True) -> Tuple[torch.Tensor, ...]:
         """Forward pass for stereo training"""
-        
-        # Move data to device
         for key in sample:
-            sample[key] = sample[key].to(self.device)
-        
+            if isinstance(sample[key], torch.Tensor):
+                sample[key] = sample[key].to(self.device)
+
         # Extract inputs
         src_image = sample['source_image']  # [B, 3, H, W]
         tgt_image = sample['target_image']  # [B, 3, H, W]
         intrinsic = sample['intrinsic']  # [B, 3, 3]
         stereo_pose = sample['pose']  # [B, 6]
+        
+        batch_size = tgt_image.shape[0]
         
         outputs = {}
         pixel_losses = 0.
@@ -331,9 +336,11 @@ class MonodepthLearner:
             # Extract 3x4 matrix for projection
             T = T_4x4[:, :3, :]
             
-            # Warp source to target
-            inv_K_s = torch.inverse(K_s.float()).type(K_s.dtype)
+            # Compute inverse of intrinsics in FP32 to avoid AMP issues
+            with torch.amp.autocast(device_type='cuda', enabled=False):
+                inv_K_s = torch.inverse(K_s.float()).type(K_s.dtype)
             
+            # Warp source to target
             cam_points = self.backproject_depth[scale](depth, inv_K_s)
             pix_coords = self.project_3d[scale](cam_points, K_s, T)
             
@@ -359,6 +366,9 @@ class MonodepthLearner:
             smooth_loss = get_smooth_loss(norm_disp, tgt_s)
             smooth_loss = smooth_loss / (2 ** scale)
             smooth_losses += smooth_loss * self.smoothness_ratio
+            
+            # 중간 변수 정리
+            del cam_points, pix_coords, warped
         
         # Average losses
         pixel_losses = pixel_losses / self.num_scales

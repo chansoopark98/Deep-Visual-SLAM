@@ -243,6 +243,7 @@ class StereoLoader:
             pin_memory=True,
             drop_last=True if is_train else False,
             persistent_workers=True if optimal_workers > 0 else False,
+            # persistent_workers=False,
             prefetch_factor=2 if optimal_workers > 0 else 2,
             worker_init_fn=self._worker_init_fn
         )
