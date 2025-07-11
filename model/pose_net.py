@@ -1,5 +1,6 @@
 import tensorflow as tf
-from tensorflow import keras
+# from tensorflow import keras
+import keras
 try:
     from .flownet import CustomFlow
     from .resnet_tf import Resnet

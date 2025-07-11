@@ -16,7 +16,7 @@ for idx, gpu in enumerate(gpus):
     print(f"   [{idx}] {gpu}")
 
 # 2) 간단한 행렬 곱을 CPU와 GPU에서 각각 실행해 속도 비교
-M = 2048  # 행렬 크기 (원하면 수정)
+M = 2048 * 10  # 행렬 크기 (원하면 수정)
 with tf.device('/CPU:0'):
     a_cpu = tf.random.uniform([M, M])
     b_cpu = tf.random.uniform([M, M])

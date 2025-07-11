@@ -35,9 +35,9 @@ class Resnet:
         outputs = resnet_18(inputs=inputs, build_partial=True) # x, [skip4, skip3, skip2, skip1]
         base_model = keras.Model(inputs=inputs, outputs=outputs, name=f"{self.prefix}_resnet18")
 
-        if self.pretrained:
-            pretrained_weights = './assets/weights/resnet18.h5'
-            base_model.load_weights(pretrained_weights, by_name=True, skip_mismatch=True)
+        # if self.pretrained:
+        #     pretrained_weights = './assets/weights/resnet18.h5'
+        #     base_model.load_weights(pretrained_weights, by_name=True, skip_mismatch=True)
         
         for layer in base_model.layers:
             layer._name = f"{self.prefix}_{layer.name}"        
