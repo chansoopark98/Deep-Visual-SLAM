@@ -13,7 +13,6 @@ from model.layers import (
     SSIM
 )
 
-
 class MonodepthLearner:
     """PyTorch implementation of monodepth2 learner"""
     
@@ -52,12 +51,10 @@ class MonodepthLearner:
         self.backproject_depth = {}
         self.project_3d = {}
         
-        # 실제 배치 크기는 동적으로 처리
         for scale in range(self.num_scales):
             h = self.image_shape[0] // (2 ** scale)
             w = self.image_shape[1] // (2 ** scale)
             
-            # 실제 배치 크기로 설정
             self.backproject_depth[scale] = BackprojectDepth(self.batch_size, h, w).to(self.device)
             self.project_3d[scale] = Project3D(self.batch_size, h, w).to(self.device)
     

@@ -30,15 +30,15 @@ class TFRecordLoader:
         self.depth_dtype = depth_dtype
         self.use_intrinsic = use_intrinsic
 
-        metadata_path = os.path.join(self.root_dir, 'metadata.json')
-        if not os.path.exists(metadata_path):
-            raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+        # metadata_path = os.path.join(self.root_dir, 'metadata.json')
+        # if not os.path.exists(metadata_path):
+        #     raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
         
         if self.use_intrinsic:
             self.intrinsic = np.load(os.path.join(self.root_dir, 'intrinsic.npy'))
             self.intrinsic = tf.convert_to_tensor(self.intrinsic, dtype=tf.float32)
 
-        self.train_samples, self.valid_samples, self.test_samples = self._load_metadata(metadata_path)
+        # self.train_samples, self.valid_samples, self.test_samples = self._load_metadata(metadata_path)
 
         if self.is_train:
             train_path = os.path.join(self.root_dir, 'train.tfrecord')

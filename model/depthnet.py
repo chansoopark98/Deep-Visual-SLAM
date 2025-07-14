@@ -88,12 +88,6 @@ class DepthNet(nn.Module):
             x = self.convs[("upconv", i, 1)](x)
             if i in self.scales:
                 self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
-                
-                # Optionally compute depth
-                # if self.use_encoder and not self.training:
-                #     _, depth = disp_to_depth(self.outputs[("disp", i)], 
-                #                            self.min_depth, self.max_depth)
-                    # self.outputs[("depth", i)] = depth
 
         return self.outputs
 
