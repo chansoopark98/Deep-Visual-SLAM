@@ -1,69 +1,68 @@
-import io
 import matplotlib
 matplotlib.use('Agg')
+import io
 import matplotlib.pyplot as plt
-import tensorflow as tf
+import numpy as np
+import torch
+from typing import List, Dict, Optional, Callable
+from PIL import Image
 
-def plot_images(image: tf.Tensor,
-                pred_depths: tf.Tensor,
-                gt_depth: tf.Tensor,
-                mode: str,
-                depth_max: float) -> tf.Tensor:
-    """
-    Generates a visualization of input images, ground truth depth maps, and predicted depth maps.
+class PlotTool:
+    def __init__(self, config: dict) -> None:
+        self.batch_size = config['Train']['batch_size']
+        self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
+        self.num_scales = config['Train']['num_scale']  # 4
 
-    Args:
-        image (tf.Tensor): Input RGB image tensor of shape [B, H, W, 3].
-        pred_depths (tf.Tensor): List of predicted depth tensors, each of shape [B, H, W, 1].
-        gt_depth (tf.Tensor): Ground truth depth tensor of shape [B, H, W, 1].
-        mode (str): Evaluation mode, either 'relative' or 'metric'.
-        depth_max (float): Maximum depth value for visualization (used in 'metric' mode).
+    def plot_images(self, images: torch.Tensor, pred_depths: List[torch.Tensor], 
+                   denorm_func: Callable) -> np.ndarray:
+        """Plot images with multi-scale depth predictions
+        
+        Args:
+            images: [B, 3, H, W] tensor
+            pred_depths: List of [B, 1, H, W] tensors at different scales
+            denorm_func: Function to denormalize images
+            
+        Returns:
+            [H, W, 3] numpy array for visualization
+        """
+        # Get first image from batch and denormalize
+        image = denorm_func(images[0].cpu())  # denorm_func returns [3, H, W] tensor
 
-    Returns:
-        tf.Tensor: A single image tensor suitable for TensorBoard logging, of shape [1, H, W, 4].
-    """
-    if mode not in ['relative', 'metric']:
-        raise ValueError("Mode must be either 'relative' or 'metric'.")
+        
+        # Convert to numpy and transpose to [H, W, 3] for matplotlib
+        image = image.numpy().transpose(1, 2, 0)  # [3, H, W] -> [H, W, 3]
+        
+        pred_depths = [depth[0] for depth in pred_depths]  # Get first batch
+        
+        fig, axes = plt.subplots(1, 1 + self.num_scales, figsize=(10, 10))
 
-    if mode == 'relative':
-        prefix = 'Relative GT Depth'
-        depth_max = 1.0
-    elif mode == 'metric':
-        prefix = 'Metric GT Depth'
+        # Plot original image - now [H, W, 3]
+        axes[0].imshow(image.astype(np.uint8))
+        axes[0].set_title('Image')
+        axes[0].axis('off')
+    
+        # Plot depth maps at different scales
+        for idx in range(self.num_scales):
+            depth = pred_depths[idx].detach().cpu().numpy()[0]  # [H, W]
+            axes[idx + 1].imshow(depth, vmin=0., vmax=10., cmap='plasma')
+            axes[idx + 1].set_title(f'Scale {idx}')
+            axes[idx + 1].axis('off')
 
-    # Extract the first image and depth maps for visualization
-    image = image[0]
-    gt_depth = tf.clip_by_value(gt_depth[0], 0.0, depth_max)
+        fig.tight_layout()
 
-    # Plot settings
-    depth_len = len(pred_depths)
-    fig, axes = plt.subplots(1, 2 + depth_len, figsize=(20, 5))
-
-    # Input image
-    axes[0].imshow(image)
-    axes[0].set_title('Image')
-    axes[0].axis('off')
-
-    # Ground truth depth
-    axes[1].imshow(gt_depth.numpy(), vmin=0.0, vmax=depth_max, cmap='plasma')
-    axes[1].set_title(f'{prefix} ({depth_max})')
-    axes[1].axis('off')
-
-    # Predicted depth maps
-    for idx, pred_depth in enumerate(pred_depths):
-        pred_depth = tf.clip_by_value(pred_depth[0], 0.0, depth_max)
-        axes[2 + idx].imshow(pred_depth.numpy(), vmin=0.0, vmax=depth_max, cmap='plasma')
-        axes[2 + idx].set_title(f'Pred Depth Scale {idx}')
-        axes[2 + idx].axis('off')
-
-    fig.tight_layout()
-
-    # Save the plot to a buffer and convert it to a TensorFlow tensor
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
-    plt.close(fig)
-
-    # Decode the PNG buffer into a TensorFlow tensor
-    image_tensor = tf.image.decode_png(buf.getvalue(), channels=4)
-    return tf.expand_dims(image_tensor, 0)
+        # Save to buffer
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png')
+        buf.seek(0)
+        plt.close(fig)
+        
+        # Load from buffer
+        pil_image = Image.open(buf)
+        image_array = np.array(pil_image)  # [H, W, 4] RGBA or [H, W, 3] RGB
+        
+        # Convert RGBA to RGB if needed
+        if image_array.shape[-1] == 4:
+            image_array = image_array[:, :, :3]  # Remove alpha channel
+        
+        # Return [H, W, 3] for visualization
+        return image_array

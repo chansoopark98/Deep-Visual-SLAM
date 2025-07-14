@@ -1,199 +1,169 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from typing import Dict, Any, List, Tuple
-import tensorflow as tf, tf_keras
 
 class DepthLearner:
-    def __init__(self, model: tf_keras.Model, config: Dict[str, Any]) -> None:
+    def __init__(self, model: nn.Module,
+                 config: Dict[str, Any],
+                 device: torch.device) -> None:
         """
-        Initializes the DepthLearner class.
-
         Args:
-            model (tf.keras.Model): The Keras model for training and inference.
-            config (Dict[str, Any]): Configuration dictionary containing training parameters.
+            model (nn.Module): PyTorch model that outputs a list of disparity tensors.
+            config (Dict[str, Any]): Configuration dict with keys:
+                - Train.mode: 'relative' or 'metric'
+                - Train.min_depth: float
+                - Train.max_depth: float
         """
         self.model = model
-        self.train_mode: str = config['Train']['mode']  # 'relative' or 'metric'
-        self.min_depth: float = config['Train']['min_depth']  # Minimum depth (e.g., 0.1)
-        self.max_depth: float = config['Train']['max_depth']  # Maximum depth (e.g., 10.0)
-        self.num_scales: int = 4  # Number of scales used
+        self.train_mode = config['Train']['mode']
+        self.min_depth = config['Train']['min_depth']
+        self.max_depth = config['Train']['max_depth']
+        self.num_scales = 4
+        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
+        # Weights for multi-scale losses
+        self.alphas = [1/2, 1/4, 1/8, 1/16]
 
-    @tf.function(jit_compile=True)
-    def disp_to_depth(self, disp: tf.Tensor) -> tf.Tensor:
-        """
-        Converts disparity to depth.
-
-        Args:
-            disp (tf.Tensor): Input disparity map.
-
-        Returns:
-            tf.Tensor: Converted depth map.
-        """
+    def disp_to_depth(self, disp: torch.Tensor) -> torch.Tensor:
+        """Convert network's output disparity to depth."""
         min_disp = 1.0 / self.max_depth
         max_disp = 1.0 / self.min_depth
         scaled_disp = min_disp + (max_disp - min_disp) * disp
         depth = 1.0 / scaled_disp
-        return tf.cast(depth, tf.float32)
+        return depth.float()
 
-    @tf.function(jit_compile=True)
-    def scaled_depth_to_disp(self, depth: tf.Tensor) -> tf.Tensor:
-        """
-        Converts scaled depth to disparity.
-
-        Args:
-            depth (tf.Tensor): Input depth map.
-
-        Returns:
-            tf.Tensor: Converted disparity map.
-        """
+    def scaled_depth_to_disp(self, depth: torch.Tensor) -> torch.Tensor:
+        """Convert depth back to normalized disparity."""
         min_disp = 1.0 / self.max_depth
         max_disp = 1.0 / self.min_depth
         scaled_disp = 1.0 / depth
         disp = (scaled_disp - min_disp) / (max_disp - min_disp)
-        return tf.cast(disp, tf.float32)
+        return disp.float()
 
-    @tf.function(jit_compile=True)
-    def get_smooth_loss(self, disp: tf.Tensor, img: tf.Tensor) -> tf.Tensor:
+    @staticmethod
+    def compute_gradients(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Computes the edge-aware smoothness loss.
-
-        Args:
-            disp (tf.Tensor): Disparity map.
-            img (tf.Tensor): Reference image.
-
-        Returns:
-            tf.Tensor: Smoothness loss value.
+        Compute absolute gradients in x and y directions.
+        Expects x of shape [B, C, H, W].
+        Returns dx: [B, C, H, W-1], dy: [B, C, H-1, W].
         """
-        disp_mean = tf.reduce_mean(disp, axis=[1, 2], keepdims=True) + 1e-7
+        dx = torch.abs(x[:, :, :, 1:] - x[:, :, :, :-1])
+        dy = torch.abs(x[:, :, 1:, :] - x[:, :, :-1, :])
+        return dx, dy
+
+    def get_smooth_loss(self, disp: torch.Tensor, img: torch.Tensor) -> torch.Tensor:
+        """
+        Edge-aware smoothness loss on disparity.
+        disp: [B,1,H,W], img: [B,3,H,W]
+        """
+        # normalize disparity
+        disp_mean = disp.mean(dim=[2, 3], keepdim=True) + 1e-7
         norm_disp = disp / disp_mean
 
         disp_dx, disp_dy = self.compute_gradients(norm_disp)
         img_dx, img_dy = self.compute_gradients(img)
 
-        weight_x = tf.exp(-tf.reduce_mean(img_dx, axis=3, keepdims=True))
-        weight_y = tf.exp(-tf.reduce_mean(img_dy, axis=3, keepdims=True))
+        # compute edge-aware weights
+        weight_x = torch.exp(-img_dx.mean(dim=1, keepdim=True))
+        weight_y = torch.exp(-img_dy.mean(dim=1, keepdim=True))
 
-        smoothness_x = disp_dx * weight_x
-        smoothness_y = disp_dy * weight_y
+        smooth_x = disp_dx * weight_x
+        smooth_y = disp_dy * weight_y
 
-        return tf.reduce_mean(smoothness_x) + tf.reduce_mean(smoothness_y)
+        return smooth_x.mean() + smooth_y.mean()
 
-    @tf.function(jit_compile=True)
-    def compute_gradients(self, tensor: tf.Tensor) -> tf.Tensor:
+    def l1_loss(self, pred: torch.Tensor, gt: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
         """
-        Computes gradients in the x and y directions for a tensor.
-
-        Args:
-            tensor (tf.Tensor): Input tensor.
-
-        Returns:
-            Tuple[tf.Tensor, tf.Tensor]: Gradients in the x and y directions.
+        L1 loss over valid pixels.
+        pred, gt: [B,1,H,W], valid_mask: [B,1,H,W] bool
         """
-        tensor_dx = tf.abs(tensor[:, 1:, :, :] - tensor[:, :-1, :, :])
-        tensor_dy = tf.abs(tensor[:, :, 1:, :] - tensor[:, :, :-1, :])
-        return tensor_dx, tensor_dy
+        diff = torch.abs(pred - gt)
+        # mask out invalid pixels
+        valid = diff[valid_mask]
+        return valid.mean()
 
-    @tf.function(jit_compile=True)
-    def l1_loss(self, pred: tf.Tensor, gt: tf.Tensor, valid_mask: tf.Tensor) -> tf.Tensor:
+    def silog_loss(
+        self,
+        prediction: torch.Tensor,
+        target: torch.Tensor,
+        valid_mask: torch.Tensor,
+        variance_focus: float = 0.5
+    ) -> torch.Tensor:
         """
-        Computes the L1 loss for valid pixels only.
-
-        Args:
-            pred (tf.Tensor): Predicted depth map.
-            gt (tf.Tensor): Ground truth depth map.
-            valid_mask (tf.Tensor): Boolean mask indicating valid pixels.
-
-        Returns:
-            tf.Tensor: Scalar L1 loss value.
-        """
-        abs_diff = tf.abs(pred - gt)
-        masked_abs_diff = tf.boolean_mask(abs_diff, valid_mask)
-        return tf.reduce_mean(masked_abs_diff)
-
-    # @tf.function(jit_compile=True)
-    def silog_loss(self, prediction: tf.Tensor, target: tf.Tensor, valid_mask: tf.Tensor,
-                   variance_focus: float = 0.5) -> tf.Tensor:
-        """
-        Computes the scale-invariant logarithmic (SILog) loss.
-
-        Args:
-            prediction (tf.Tensor): Predicted depth map.
-            target (tf.Tensor): Ground truth depth map.
-            valid_mask (tf.Tensor): Boolean mask indicating valid pixels.
-            variance_focus (float): Weight for the variance term in SILog loss (default: 0.5).
-
-        Returns:
-            tf.Tensor: Scalar SILog loss value.
+        Scale-invariant log loss.
+        prediction, target: [B,1,H,W], valid_mask: [B,1,H,W] bool
         """
         eps = 1e-6
-        prediction = tf.maximum(prediction, eps)
+        pred = torch.clamp(prediction, min=eps)
+        # select valid pixels
+        pred_v = pred[valid_mask]
+        tgt_v = target[valid_mask]
+        d = torch.log(pred_v) - torch.log(tgt_v)
+        d2_mean = (d ** 2).mean()
+        d_mean = d.mean()
+        silog = d2_mean - variance_focus * (d_mean ** 2)
+        return torch.sqrt(silog)
 
-        valid_prediction = tf.boolean_mask(prediction, valid_mask)
-        valid_target = tf.boolean_mask(target, valid_mask)
-
-        d = tf.math.log(valid_prediction) - tf.math.log(valid_target)
-        d2_mean = tf.reduce_mean(tf.square(d))
-        d_mean = tf.reduce_mean(d)
-        silog_expr = d2_mean - variance_focus * tf.square(d_mean)
-
-        return tf.sqrt(silog_expr)
-
-    # @tf.function(jit_compile=True)
-    def multi_scale_loss(self, pred_depths: List[tf.Tensor], gt_depth: tf.Tensor,
-                         rgb: tf.Tensor, valid_mask: tf.Tensor) -> Dict[str, tf.Tensor]:
-        alpha = [1 / 2, 1 / 4, 1 / 8, 1 / 16]
-        smooth_losses, log_losses, l1_losses = 0.0, 0.0, 0.0
-
-        smooth_loss_factor = 1.0
-        log_loss_factor = 1.0
-        l1_loss_factor = 0.1
-
-        original_shape = gt_depth.shape[1:3]
-
-        for i in range(self.num_scales):
-            pred_depth = pred_depths[i]
-
-            pred_depth_resized = tf.image.resize(
-                pred_depth, original_shape, method=tf.image.ResizeMethod.BILINEAR
-            )
-
-            resized_disp = self.scaled_depth_to_disp(pred_depth_resized)
-
-            smooth_losses += self.get_smooth_loss(resized_disp, rgb) * alpha[i]
-            log_losses += self.silog_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
-            # l1_losses += self.l1_loss(pred_depth_resized, gt_depth, valid_mask) * alpha[i]
-
-        return {
-            'smooth_loss': smooth_losses * smooth_loss_factor,
-            'log_loss': log_losses * log_loss_factor,
-            'l1_loss': l1_losses * l1_loss_factor
-        }
-    
-    def forward_step(self, rgb: tf.Tensor, depth: tf.Tensor, intrinsic, training: bool = True
-                    ) -> Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
+    def multi_scale_loss(
+        self,
+        pred_depths: List[torch.Tensor],
+        gt_depth: torch.Tensor,
+        rgb: torch.Tensor,
+        valid_mask: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
         """
-        Performs a forward step, predicting depth and calculating losses.
-
-        Args:
-            rgb (tf.Tensor): Input RGB image tensor of shape [B, H, W, 3].
-            depth (tf.Tensor): Ground truth depth tensor of shape [B, H, W] or [B, H, W, 1].
-            training (bool): Flag indicating whether the model is in training mode.
-
-        Returns:
-            Tuple[Dict[str, tf.Tensor], List[tf.Tensor]]:
-                - Loss dictionary containing smoothness, SILog, and L1 losses.
-                - List of predicted depth maps at different scales.
+        Combine smoothness, SILog, and (optionally) L1 losses across scales.
+        pred_depths: list of 4 tensors, each [B,1,h_i,w_i]
+        gt_depth, rgb: [B,1,H,W], [B,3,H,W]
+        valid_mask: [B,1,H,W] bool
         """
+        B, _, H, W = gt_depth.shape
+        total_smooth = 0.0
+        total_silog = 0.0
+        total_loss = 0.0
 
-        pred_disps = self.model(rgb, training=training)
+        for i, alpha in enumerate(self.alphas):
+            pd = pred_depths[i]
+            # upsample to match ground truth resolution
+            pd_up = F.interpolate(pd, size=(H, W), mode='bilinear', align_corners=False)
+            # convert to disparity to compute smoothness
+            disp_up = self.scaled_depth_to_disp(pd_up)
 
-        valid_mask = (depth > 0.) & (depth < (1. if self.train_mode == 'relative' else self.max_depth))
+            total_smooth += self.get_smooth_loss(disp_up, rgb) * alpha
+            total_silog += self.silog_loss(pd_up, gt_depth, valid_mask) * alpha
 
-        pred_depths = [self.disp_to_depth(disp) for disp in pred_disps]
+        total_loss = total_smooth + total_silog
 
-        loss_dict = self.multi_scale_loss(
-            pred_depths=pred_depths,
-            gt_depth=depth,
-            rgb=rgb,
-            valid_mask=valid_mask
-        )
+        return total_loss, total_silog, total_smooth
 
-        return loss_dict, pred_depths
+    def forward_step(
+        self,
+        sample: Dict[str, torch.Tensor],
+    ) -> Tuple[Dict[str, torch.Tensor], List[torch.Tensor]]:
+        """
+        Execute a forward pass, compute losses.
+        rgb: [B,3,H,W], depth: [B,1,H,W] or [B,H,W]
+        """
+        rgb = sample['image'].to(self.device)  # [B,3,H,W]
+        depth = sample['depth'].to(self.device)  # [B,1,H,W] or [B,H,W]
+
+        # ensure depth has channel dim
+        if depth.dim() == 3:
+            depth = depth.unsqueeze(1)
+
+        # get list of predicted disparities
+        pred_disps = self.model(rgb)  # list of [B,1,h_i,w_i]
+        # build valid mask
+        max_d = 1.0 if self.train_mode == 'relative' else self.max_depth
+        valid = (depth > 0.0) & (depth < max_d)
+
+        # convert to depth predictions
+        pred_depths = []
+        for scale in range(len(pred_disps)):
+            pred_disp = pred_disps[("disp", scale)]
+            pred_depth = self.disp_to_depth(pred_disp)
+            pred_depths.append(pred_depth)
+        # compute multi-scale losses
+        total_loss, total_silog, total_smooth = self.multi_scale_loss(pred_depths, depth, rgb, valid)
+
+        return total_loss, total_silog, total_smooth, pred_depths

@@ -8,7 +8,7 @@ Directory:
 Dataset: # True is using the dataset, False is not using the dataset
   Nyu_depth_v2:
     train: True  
-    valid: True  
+    valid: True
   Diode:
     train: True  
     valid: False 
@@ -27,7 +27,10 @@ Dataset: # True is using the dataset, False is not using the dataset
 
 Train:
   mode: 'metric' # 'relative' (normalized depth) or 'metric' (absolute depth)
+  use_amp: True # Use automatic mixed precision for training
   use_shuffle: True # Whether to shuffle training data
+  num_scale: 4 # Number of scales for multi-scale training
+  num_workers: 16 # Number of workers for data loading
   train_plot_interval: 200 # Interval for plotting during training
   valid_plot_interval: 10 # Interval for plotting during validation
   save_freq: 2 # Frequency for saving checkpoints
