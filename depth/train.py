@@ -253,10 +253,10 @@ class Trainer:
             
             # Log training metrics
             self.writer.add_scalar('Train/total_loss', train_metrics['total_loss'], epoch)
-            self.writer.add_scalar('Train/depth_loss', train_metrics['depth _loss'], epoch)
+            self.writer.add_scalar('Train/depth_loss', train_metrics['depth_loss'], epoch)
             self.writer.add_scalar('Train/smooth_loss', train_metrics['smooth_loss'], epoch)
-            self.writer.add_scalar('Train/learning_rate', self.mono_optimizer.param_groups[0]['lr'], epoch)
-            
+            self.writer.add_scalar('Train/learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
+
             # Log memory usage
             if torch.cuda.is_available():
                 self.writer.add_scalar('Memory/allocated_gb', 
@@ -298,8 +298,7 @@ class Trainer:
         # Create iterators
         valid_dataset = iter(self.depth_loader.valid_depth_loader)
 
-
-        valid_pbar = tqdm(range(valid_dataset), desc=f'Validation Epoch {epoch}')
+        valid_pbar = tqdm(range(len(valid_dataset)), desc=f'Validation Epoch {epoch}')
         
         for batch_idx in valid_pbar:
             # Depth validation
