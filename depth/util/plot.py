@@ -12,14 +12,17 @@ class PlotTool:
         self.batch_size = config['Train']['batch_size']
         self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
         self.num_scales = config['Train']['num_scale']  # 4
+        self.max_depth = config['Train']['max_depth']  # 10.0
 
-    def plot_images(self, images: torch.Tensor, pred_depths: List[torch.Tensor], 
-                   denorm_func: Callable) -> np.ndarray:
+    def plot_images(self, images: torch.Tensor, pred_depths: List[torch.Tensor],
+                    gt_depth: Optional[torch.Tensor],
+                    denorm_func: Callable) -> np.ndarray:
         """Plot images with multi-scale depth predictions
         
         Args:
             images: [B, 3, H, W] tensor
             pred_depths: List of [B, 1, H, W] tensors at different scales
+            gt_depth: Optional [B, 1, H, W] tensor
             denorm_func: Function to denormalize images
             
         Returns:
@@ -28,25 +31,41 @@ class PlotTool:
         # Get first image from batch and denormalize
         image = denorm_func(images[0].cpu())  # denorm_func returns [3, H, W] tensor
 
-        
         # Convert to numpy and transpose to [H, W, 3] for matplotlib
         image = image.numpy().transpose(1, 2, 0)  # [3, H, W] -> [H, W, 3]
         
         pred_depths = [depth[0] for depth in pred_depths]  # Get first batch
         
-        fig, axes = plt.subplots(1, 1 + self.num_scales, figsize=(10, 10))
+        # Calculate number of plots
+        num_plots = 1 + self.num_scales  # RGB + depth scales
+        if gt_depth is not None:
+            num_plots += 1  # Add GT depth
+        
+        fig, axes = plt.subplots(1, num_plots, figsize=(10, 10))
 
+        plot_idx = 0
+        
         # Plot original image - now [H, W, 3]
-        axes[0].imshow(image.astype(np.uint8))
-        axes[0].set_title('Image')
-        axes[0].axis('off')
-    
+        axes[plot_idx].imshow(image.astype(np.uint8))
+        axes[plot_idx].set_title('Image')
+        axes[plot_idx].axis('off')
+        plot_idx += 1
+        
+        # Plot GT depth if available
+        if gt_depth is not None:
+            gt_depth_np = gt_depth[0, 0].detach().cpu().numpy()  # [H, W]
+            axes[plot_idx].imshow(gt_depth_np, vmin=0., vmax=self.max_depth, cmap='plasma')
+            axes[plot_idx].set_title('GT Depth')
+            axes[plot_idx].axis('off')
+            plot_idx += 1
+        
         # Plot depth maps at different scales
         for idx in range(self.num_scales):
             depth = pred_depths[idx].detach().cpu().numpy()[0]  # [H, W]
-            axes[idx + 1].imshow(depth, vmin=0., vmax=10., cmap='plasma')
-            axes[idx + 1].set_title(f'Scale {idx}')
-            axes[idx + 1].axis('off')
+            axes[plot_idx].imshow(depth, vmin=0., vmax=self.max_depth, cmap='plasma')
+            axes[plot_idx].set_title(f'Scale {idx}')
+            axes[plot_idx].axis('off')
+            plot_idx += 1
 
         fig.tight_layout()
 

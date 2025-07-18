@@ -2,7 +2,7 @@ import os
 import glob
 import numpy as np
 import yaml
-from common import BaseDepthDataset
+from .common import BaseDepthDataset
 
 
 class RedwoodDataset(BaseDepthDataset):
