@@ -70,10 +70,8 @@ class DepthNet(nn.Module):
             outputs: dict with disparity (and optionally depth) predictions
         """
         # Encode if using integrated encoder
-        if self.use_encoder:
-            input_features = self.encoder(input_data)
-        else:
-            input_features = input_data
+        
+        input_features = self.encoder(input_data)
             
         self.outputs = {}
 

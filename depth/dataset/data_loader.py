@@ -9,8 +9,12 @@ import random
 
 try:
     from .nyu_depth_v2 import NyuDepthHandler
+    from .redwood_handler import RedwoodHandler
+    from .custom_loader import CustomDataHandler
 except:
     from nyu_depth_v2 import NyuDepthHandler
+    from redwood_handler import RedwoodHandler
+    from custom_loader import CustomDataHandler
 
 class DepthDataset(Dataset):
     """PyTorch Dataset for depth estimation"""
@@ -174,6 +178,30 @@ class DepthLoader:
             if self.config['Dataset']['Nyu_depth_v2']['valid']:
                 valid_data_list.append(dataset.valid_data)
                 self.num_depth_valid += len(dataset.valid_data['image'])
+        
+        if self.config['Dataset']['Redwood']['train']:
+            # Redwood 데이터
+            dataset = RedwoodHandler(config=self.config)
+
+            if self.config['Dataset']['Redwood']['train']:
+                train_data_list.append(dataset.train_data)
+                self.num_depth_train += len(dataset.train_data['image'])
+
+            if self.config['Dataset']['Redwood']['valid']:
+                valid_data_list.append(dataset.valid_data)
+                self.num_depth_valid += len(dataset.valid_data['image'])
+
+        if self.config['Dataset']['Custom']['train']:
+            # Custom 데이터
+            dataset = CustomDataHandler(config=self.config)
+
+            if self.config['Dataset']['Custom']['train']:
+                train_data_list.append(dataset.train_data)
+                self.num_depth_train += len(dataset.train_data['image'])
+
+            if self.config['Dataset']['Custom']['valid']:
+                valid_data_list.append(dataset.valid_data)
+                self.num_depth_valid += len(dataset.valid_data['image'])
 
         # 데이터 결합
         self.train_depth_data = self._combine_datasets(train_data_list)
@@ -249,7 +277,7 @@ if __name__ == '__main__':
     data_loader = DepthLoader(config)
     
     # 데이터 로드 테스트
-    debug = False
+    debug = True
     avg_time = 0.0
     for i, batch in enumerate(data_loader.train_depth_loader):
         start_time = time.time()

@@ -22,7 +22,8 @@ class DepthLearner:
         self.num_scales = 4
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         # Weights for multi-scale losses
-        self.alphas = [1/2, 1/4, 1/8, 1/16]
+        # self.alphas = [1/2, 1/4, 1/8, 1/16]
+        self.alphas = [0.5, 0.25, 0.125, 0.125]
 
     def disp_to_depth(self, disp: torch.Tensor) -> torch.Tensor:
         """Convert network's output disparity to depth."""
@@ -110,7 +111,7 @@ class DepthLearner:
         gt_depth: torch.Tensor,
         rgb: torch.Tensor,
         valid_mask: torch.Tensor
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Combine smoothness, SILog, and (optionally) L1 losses across scales.
         pred_depths: list of 4 tensors, each [B,1,h_i,w_i]
@@ -136,10 +137,11 @@ class DepthLearner:
 
         return total_loss, total_silog, total_smooth
 
+    @torch.compile
     def forward_step(
         self,
         sample: Dict[str, torch.Tensor],
-    ) -> Tuple[Dict[str, torch.Tensor], List[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[torch.Tensor]]:
         """
         Execute a forward pass, compute losses.
         rgb: [B,3,H,W], depth: [B,1,H,W] or [B,H,W]

@@ -60,9 +60,8 @@ class Trainer:
             use_skips=True
         ).to(self.device)
 
-        # torch.compile 제거 또는 옵션화 (메모리 누수 가능성)
         if self.config.get('Train', {}).get('use_compile', False):
-            self.depth_net = torch.compile(self.depth_net, fullgraph=True)
+            self.depth_net = torch.compile(self.depth_net)
 
         # 2. Data loaders
         self.depth_loader = DepthLoader(config=self.config)
@@ -190,17 +189,17 @@ class Trainer:
             }
             
             # Create iterators
-            depth_dataset = iter(self.depth_loader.train_depth_loader)
+            # depth_dataset = iter(self.depth_loader.train_depth_loader)
 
             print(f"\nEpoch {epoch}/{self.config['Train']['epoch']}")
             print(f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
             
             # Training loop
-            train_pbar = tqdm(range(len(depth_dataset)), desc=f'Training Epoch {epoch}')
+            # train_pbar = tqdm(range(len(depth_dataset)), desc=f'Training Epoch {epoch}')
+            train_pbar = tqdm(self.depth_loader.train_depth_loader, desc=f'Training Epoch {epoch}')
 
-            for batch_idx in train_pbar:
+            for batch_idx, depth_sample in enumerate(train_pbar):
                 # Depth training
-                depth_sample = next(depth_dataset)
                 t_loss_d, p_loss_d, s_loss_d, pred_depths_d = self.train_step(depth_sample)
                 
                 # Average losses - use .item() to prevent graph retention
@@ -236,13 +235,13 @@ class Trainer:
                         del depth_plot  # 명시적 삭제
                 
                 # 주기적으로 메모리 정리
-                if batch_idx % 50 == 0:
-                    torch.cuda.empty_cache()
-                    gc.collect()
+                # if batch_idx % 50 == 0:
+                #     torch.cuda.empty_cache()
+                #     gc.collect()
                 
                 # 명시적으로 불필요한 변수 삭제
-                del depth_sample
-                del t_loss_d, p_loss_d, s_loss_d, pred_depths_d
+                # del depth_sample
+                # del t_loss_d, p_loss_d, s_loss_d, pred_depths_d
 
                 global_step += 1
             
@@ -296,13 +295,14 @@ class Trainer:
         }
         
         # Create iterators
-        valid_dataset = iter(self.depth_loader.valid_depth_loader)
+        # valid_dataset = iter(self.depth_loader.valid_depth_loader)
 
-        valid_pbar = tqdm(range(len(valid_dataset)), desc=f'Validation Epoch {epoch}')
+        # valid_pbar = tqdm(range(len(valid_dataset)), desc=f'Validation Epoch {epoch}')
+        valid_pbar = tqdm(self.depth_loader.valid_depth_loader, desc=f'Validation Epoch {epoch}')
         
-        for batch_idx in valid_pbar:
+        for batch_idx, depth_sample in enumerate(valid_pbar):
             # Depth validation
-            depth_sample = next(valid_dataset)
+            # depth_sample = next(valid_dataset)
             t_loss_d, p_loss_d, s_loss_d, pred_depths_d = self.valid_step(depth_sample)
 
             # Average losses
@@ -373,7 +373,7 @@ class Trainer:
         
         # Save AMP state if using
         if self.use_amp:
-            checkpoint['optimizer_state_dict'] = self.grad_scaler.state_dict()
+            checkpoint['grad_scaler_state_dict'] = self.grad_scaler.state_dict()
         
         checkpoint_path = os.path.join(
             self.save_path,
@@ -390,11 +390,10 @@ class Trainer:
         print(f"Checkpoint saved: {checkpoint_path}")
 
 def main():
-    # Load configuration
     with open('./depth/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
     
-    # GPU configuration
+    # GPU configuration - compile 전에 먼저 설정
     gpu_config = config.get('Experiment', {})
     visible_gpus = gpu_config.get('gpus', [])
     
@@ -402,6 +401,10 @@ def main():
         # Set visible GPUs
         os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, visible_gpus))
         print(f"Using GPUs: {visible_gpus}")
+        
+        # CUDA 디바이스 재초기화
+        torch.cuda.init()
+        torch.cuda.synchronize()
     else:
         print("Using CPU or all available GPUs")
     
