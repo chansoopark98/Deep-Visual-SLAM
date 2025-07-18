@@ -2,23 +2,33 @@ import os
 import glob
 import numpy as np
 import yaml
+from common import BaseDepthDataset
 
-class CustomDataHandler:
-    def __init__(self, config):
-        self.config = config
-        self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'redwood')
-        self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
-        self.depth_factor = 1000.
-        
-        self.train_dir = os.path.join(self.root_dir, 'train')
-        self.valid_dir = os.path.join(self.root_dir, 'valid')
-        self.intrinsic = np.load(os.path.join(self.root_dir, 'intrinsic.npy'))
-        
-        self.train_data = self.generate_datasets(fold_dir=self.train_dir, shuffle=True)
-        self.valid_data = self.generate_datasets(fold_dir=self.valid_dir, shuffle=False)
 
-    def generate_datasets(self, fold_dir, shuffle=False):
-        # 전체 데이터를 저장할 리스트
+class CustomDataset(BaseDepthDataset):
+    """Custom RGBD Dataset"""
+    
+    def __init__(self, root_dir: str, fold: str, image_size: tuple, is_train: bool = True, augment: bool = True):
+        super().__init__(image_size, is_train, augment)
+        
+        self.root_dir = root_dir
+        self.fold = fold
+        self.depth_factor = 1000.0  # Custom depth is in mm
+        
+        # intrinsic 파일 로드 (있는 경우)
+        intrinsic_path = os.path.join(self.root_dir, 'intrinsic.npy')
+        if os.path.exists(intrinsic_path):
+            self.intrinsic = np.load(intrinsic_path)
+        else:
+            self.intrinsic = None
+        
+        # 데이터 경로 로드
+        self._load_file_paths()
+        
+    def _load_file_paths(self):
+        """파일 경로 로드"""
+        fold_dir = os.path.join(self.root_dir, self.fold)
+        
         all_rgb_files = []
         all_depth_files = []
         
@@ -43,19 +53,46 @@ class CustomDataHandler:
                     else:
                         print(f"Warning: Mismatch in {scene_dir} - RGB: {len(rgb_files)}, Depth: {len(depth_files)}")
         
-        print(f"Found {len(all_rgb_files)} RGB-Depth pairs in {fold_dir}")
+        self.image_paths = all_rgb_files
+        self.depth_paths = all_depth_files
         
-        dataset_dict = {
-            'image': np.array(all_rgb_files, dtype=str),
-            'depth': np.array(all_depth_files, dtype=str),
-        }
+        # 셔플링 (훈련 데이터의 경우)
+        if self.is_train and len(self.image_paths) > 0:
+            indices = np.random.permutation(len(self.image_paths))
+            self.image_paths = [self.image_paths[i] for i in indices]
+            self.depth_paths = [self.depth_paths[i] for i in indices]
         
-        # 셔플링
-        if shuffle and len(all_rgb_files) > 0:
-            indices = np.random.permutation(len(all_rgb_files))
-            for key in dataset_dict:
-                dataset_dict[key] = dataset_dict[key][indices]
-        return dataset_dict
+        print(f"Custom {self.fold}: Found {len(self.image_paths)} RGB-Depth pairs")
+
+
+class CustomDataHandler:
+    def __init__(self, config):
+        self.config = config
+        self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'tspxr_capture')
+        self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        
+        # 데이터셋 생성
+        self.train_dataset = None
+        self.valid_dataset = None
+        
+        if os.path.exists(os.path.join(self.root_dir, 'train')):
+            self.train_dataset = CustomDataset(
+                root_dir=self.root_dir,
+                fold='train',
+                image_size=self.image_size,
+                is_train=True,
+                augment=True
+            )
+        
+        if os.path.exists(os.path.join(self.root_dir, 'valid')):
+            self.valid_dataset = CustomDataset(
+                root_dir=self.root_dir,
+                fold='valid',
+                image_size=self.image_size,
+                is_train=False,
+                augment=False
+            )
+
 
 if __name__ == '__main__':
     # 설정 파일 로드
@@ -63,14 +100,10 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
     
     # 데이터셋 생성
-    redwood_dataset = CustomDataHandler(config)
+    custom_handler = CustomDataHandler(config)
     
     # 데이터 확인
-    print(f"Train samples: {len(redwood_dataset.train_data['image'])}")
-    print(f"Valid samples: {len(redwood_dataset.valid_data['image'])}")
-    
-    # 첫 번째 샘플 확인
-    if len(redwood_dataset.train_data['image']) > 0:
-        print(f"\nFirst train sample:")
-        print(f"RGB: {redwood_dataset.train_data['image'][0]}")
-        print(f"Depth: {redwood_dataset.train_data['depth'][0]}")
+    if custom_handler.train_dataset:
+        print(f"Train samples: {len(custom_handler.train_dataset)}")
+    if custom_handler.valid_dataset:
+        print(f"Valid samples: {len(custom_handler.valid_dataset)}")

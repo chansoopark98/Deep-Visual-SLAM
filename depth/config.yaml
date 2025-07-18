@@ -19,7 +19,7 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: False 
     valid: False 
   Custom:
-    train: False
+    train: True
     valid: False
   Redwood:
     train: True
