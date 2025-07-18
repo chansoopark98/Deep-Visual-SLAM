@@ -10,7 +10,7 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: True  
     valid: True
   Diode:
-    train: True  
+    train: False  
     valid: False 
   DIML:
     train: False
@@ -19,7 +19,7 @@ Dataset: # True is using the dataset, False is not using the dataset
     train: False 
     valid: False 
   Custom:
-    train: True
+    train: False
     valid: False
   Redwood:
     train: True
@@ -27,6 +27,7 @@ Dataset: # True is using the dataset, False is not using the dataset
 
 Train:
   mode: 'metric' # 'relative' (normalized depth) or 'metric' (absolute depth)
+  use_compile: True # Use PyTorch's compile feature for performance
   use_amp: True # Use automatic mixed precision for training
   use_shuffle: True # Whether to shuffle training data
   num_scale: 4 # Number of scales for multi-scale training
@@ -48,6 +49,6 @@ Train:
   power: 0.9  # Learning rate scheduler power factor
 
 Experiment:
-  gpus: [1] # List of GPU IDs to use for training
-  gpu_vram: 24000 # Total VRAM (MB) available
-  gpu_vram_factor: 0.8 # Fraction of VRAM to use (0.0 to 1.0)
+  gpus: [0] # List of GPU IDs to use for training
+  gpu_vram: 30000 # Total VRAM (MB) available
+  gpu_vram_factor: 0.9 # Fraction of VRAM to use (0.0 to 1.0)
