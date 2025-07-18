@@ -221,10 +221,11 @@ class Trainer:
                 
                 # Log images periodically
                 if batch_idx % self.config['Train']['train_plot_interval'] == 0:
-                    with torch.no_grad():  # 추가 보호
+                    with torch.no_grad():
                         depth_plot = self.plot_tool.plot_images(
                             images=depth_sample['image'].detach(),
                             pred_depths=[d.detach() for d in pred_depths_d],
+                            gt_depth=depth_sample['depth'].detach(),
                             denorm_func=self.depth_loader.denormalize_image
                         )
                         self.writer.add_image(
@@ -232,16 +233,8 @@ class Trainer:
                             depth_plot.transpose(2, 0, 1),
                             global_step
                         )
-                        del depth_plot  # 명시적 삭제
+                        del depth_plot
                 
-                # 주기적으로 메모리 정리
-                # if batch_idx % 50 == 0:
-                #     torch.cuda.empty_cache()
-                #     gc.collect()
-                
-                # 명시적으로 불필요한 변수 삭제
-                # del depth_sample
-                # del t_loss_d, p_loss_d, s_loss_d, pred_depths_d
 
                 global_step += 1
             
@@ -327,10 +320,11 @@ class Trainer:
                 depth_plot = self.plot_tool.plot_images(
                     images=depth_sample['image'].detach(),
                     pred_depths=[d.detach() for d in pred_depths_d],
+                    gt_depth=depth_sample['depth'].detach(),
                     denorm_func=self.depth_loader.denormalize_image
                 )
                 self.writer.add_image(
-                    f'Valid/Depth_Result_epoch{epoch}',
+                    f'Valid/Depth_Result',
                     depth_plot.transpose(2, 0, 1),
                     batch_idx
                 )
