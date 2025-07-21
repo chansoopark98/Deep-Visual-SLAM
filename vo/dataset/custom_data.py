@@ -258,6 +258,54 @@ class CustomStereoDataset(StereoDataset):
             'intrinsic': intrinsics,
             'pose': poses
         }
+    
+class CustomDataHandler:
+    def __init__(self, config):
+        self.config = config
+        self.root_dir = '/home/park-ubuntu/park/Deep-Visual-SLAM/depth/data/tspxr_capture'
+        self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        
+        # 데이터셋 생성
+        self.train_mono_dataset = None
+        self.valid_mono_dataset = None
+        self.train_stereo_dataset = None
+        self.valid_stereo_dataset = None
+
+        # Monocular Dataset
+        if self.config['Dataset']['custom_data']['mono']:
+            if os.path.exists(os.path.join(self.root_dir, 'train')):
+                self.train_mono_dataset = CustomMonoDataset(
+                    config=self.config,
+                    fold='train',
+                    is_train=True,
+                    augment=True
+                )
+            
+            if os.path.exists(os.path.join(self.root_dir, 'valid')):
+                self.valid_mono_dataset = CustomMonoDataset(
+                    config=self.config,
+                    fold='valid',
+                    is_train=False,
+                    augment=False
+                )
+
+        # Stereo Dataset
+        if self.config['Dataset']['custom_data']['stereo']:
+            if os.path.exists(os.path.join(self.root_dir, 'train')):
+                self.train_stereo_dataset = CustomStereoDataset(
+                    config=self.config,
+                    fold='train',
+                    is_train=True,
+                    augment=True
+                )
+            
+            if os.path.exists(os.path.join(self.root_dir, 'valid')):
+                self.valid_stereo_dataset = CustomStereoDataset(
+                    config=self.config,
+                    fold='valid',
+                    is_train=False,
+                    augment=False
+                )
        
 if __name__ == '__main__':
     # 설정 파일 로드
