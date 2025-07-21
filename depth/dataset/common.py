@@ -10,11 +10,16 @@ import random
 class BaseDepthDataset(Dataset):
     """Base PyTorch Dataset for depth estimation"""
     
-    def __init__(self, image_size: Tuple[int, int], is_train: bool = True, augment: bool = True):
+    def __init__(self,
+                 image_size: Tuple[int, int],
+                 is_train: bool = True, 
+                 augment: bool = True,
+                 max_depth: float = 10.0):
         self.image_size = image_size
         self.is_train = is_train
         self.augment = augment and is_train
-        
+        self.max_depth = max_depth
+
         # ImageNet 정규화 값
         self.mean = torch.tensor([0.485, 0.456, 0.406])
         self.std = torch.tensor([0.229, 0.224, 0.225])
@@ -68,6 +73,16 @@ class BaseDepthDataset(Dataset):
         
         return depth
     
+    def _process_depth(self, depth: Image.Image) -> torch.Tensor:
+        """16-bit 깊이 이미지를 Tensor로 변환"""
+        depth_array = np.array(depth, dtype=np.float32)
+        depth_tensor = torch.from_numpy(depth_array).unsqueeze(0) / self.depth_factor
+
+        # get valid mask
+        valid_mask = (depth_tensor > 0) & (depth_tensor < self.max_depth)
+
+        return depth_tensor, valid_mask
+
     def _apply_augmentation(self, image, depth) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         image(PIL Image): RGB 이미지
@@ -86,10 +101,9 @@ class BaseDepthDataset(Dataset):
         image = self.to_tensor(image)
         
         # mm depth to meter depth
-        depth_array = np.array(depth, dtype=np.float32)
-        depth_tensor = torch.from_numpy(depth_array).unsqueeze(0) / self.depth_factor
+        depth_tensor, valid_mask = self._process_depth(depth)
 
-        return image, depth_tensor
+        return image, depth_tensor, valid_mask
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """데이터 샘플 반환"""
@@ -102,9 +116,10 @@ class BaseDepthDataset(Dataset):
         depth = self._read_depth(depth_path)
 
         # 증강 적용
-        image, depth = self._apply_augmentation(image, depth)
+        image, depth, valid_mask = self._apply_augmentation(image, depth)
 
         return {
             'image': image,
             'depth': depth,
+            'valid_mask': valid_mask,
         }
