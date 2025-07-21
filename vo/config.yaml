@@ -6,11 +6,15 @@ Directory:
   results: ./results
 
 Dataset:
-  custom_data: True
-  mars_logger: True
-  irs: True
-  redwood: False
-  tspxr_capture: False        # 새로운 플래그 추가
+  custom_data:
+    mono: True
+    stereo: True
+  mars_logger:
+    mono: True
+    stereo: False
+  irs:
+    mono: True
+    stereo: True
 
 Train:
   mode: axisAngle # axisAngle, euler
