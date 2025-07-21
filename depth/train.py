@@ -32,8 +32,7 @@ class Trainer:
         
         # Update experiment name
         original_name = self.config['Directory']['exp_name']
-        self.config['Directory']['exp_name'] = 'mode={0}_res={1}_ep={2}_bs={3}_initLR={4}_endLR={5}_prefix={6}'.format(
-            self.config['Train']['mode'],
+        self.config['Directory']['exp_name'] = 'res={0}_ep={1}_bs={2}_initLR={3}_endLR={4}_prefix={5}'.format(
             (self.config['Train']['img_h'], self.config['Train']['img_w']),
             self.config['Train']['epoch'],
             self.config['Train']['batch_size'],
@@ -248,17 +247,6 @@ class Trainer:
             self.writer.add_scalar('Train/depth_loss', train_metrics['depth_loss'], epoch)
             self.writer.add_scalar('Train/smooth_loss', train_metrics['smooth_loss'], epoch)
             self.writer.add_scalar('Train/learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
-
-            # Log memory usage
-            if torch.cuda.is_available():
-                self.writer.add_scalar('Memory/allocated_gb', 
-                                     torch.cuda.memory_allocated() / 1024**3, epoch)
-                self.writer.add_scalar('Memory/reserved_gb', 
-                                     torch.cuda.memory_reserved() / 1024**3, epoch)
-            
-            # Log scale factors if using AMP
-            if self.use_amp:
-                self.writer.add_scalar('Train/gradient_scale', self.grad_scaler.get_scale(), epoch)
             
             # Validation phase
             if epoch % self.config['Train']['valid_freq'] == 0:
@@ -326,7 +314,7 @@ class Trainer:
                 self.writer.add_image(
                     f'Valid/Depth_Result',
                     depth_plot.transpose(2, 0, 1),
-                    batch_idx
+                    epoch * len(self.depth_loader.valid_depth_loader) + batch_idx
                 )
                 del depth_plot
             

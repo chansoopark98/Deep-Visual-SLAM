@@ -22,7 +22,8 @@ class DepthLoader:
         self.batch_size = config['Train']['batch_size']
         self.use_shuffle = config['Train']['use_shuffle']
         self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
-        self.num_workers = config.get('Train', {}).get('num_workers', 16)
+        self.num_workers = config['Train']['num_workers']
+        print(f"Using {self.num_workers} workers for data loading")
         
         # 데이터셋 로드
         self._load_datasets()
