@@ -190,6 +190,44 @@ class MarsMonoDataset(MonoDataset):
                 
         return dataset_dict
     
+class MarsDataHandler:
+    def __init__(self, config):
+        self.config = config
+        self.root_dir = '/media/park-ubuntu/park_cs/slam_data/mars_logger'
+        self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        
+        # 데이터셋 생성
+        self.train_mono_dataset = None
+        self.valid_mono_dataset = None
+        self.test_mono_dataset = None
+        
+        if os.path.exists(os.path.join(self.root_dir, 'train')):
+            self.train_mono_dataset = MarsMonoDataset(
+                config=self.config,
+                fold='train',
+                shuffle=True,
+                is_train=True,
+                augment=True
+            )
+        
+        if os.path.exists(os.path.join(self.root_dir, 'valid')):
+            self.valid_mono_dataset = MarsMonoDataset(
+                config=self.config,
+                fold='valid',
+                shuffle=False,
+                is_train=False,
+                augment=False
+            )
+        if os.path.exists(os.path.join(self.root_dir, 'test')):
+            self.test_mono_dataset = MarsMonoDataset(
+                config=self.config,
+                fold='test',
+                shuffle=False,
+                is_train=False,
+                augment=False
+            )
+
+    
 if __name__ == '__main__':
     import yaml
     import matplotlib.pyplot as plt
