@@ -6,9 +6,13 @@ import yaml
 
 try:
     from .custom_data import CustomDataHandler
+    from .mars_logger import MarsDataHandler
+    from .irs import IrsDataHandler
     
 except:
     from custom_data import CustomDataHandler
+    from mars_logger import MarsDataHandler
+    from irs import IrsDataHandler
     
 
 class VoDataLoader:
@@ -123,17 +127,58 @@ class VoDataLoader:
             if custom_handler.valid_stereo_dataset:
                 self.valid_stereo_datasets.append(custom_handler.valid_stereo_dataset)
                 print(f"Added Custom Stereo valid dataset: {len(custom_handler.valid_stereo_dataset)} samples")
+        
+        # mars_logger 데이터셋 로드
+        if self.config['Dataset']['mars_logger']:
+            mars_handler = MarsDataHandler(config=self.config)
+
+            if mars_handler.train_mono_dataset:
+                self.train_mono_datasets.append(mars_handler.train_mono_dataset)
+                print(f"Added Mars Logger train dataset: {len(mars_handler.train_mono_dataset)} samples")\
+            
+            if mars_handler.valid_mono_dataset:
+                self.valid_mono_datasets.append(mars_handler.valid_mono_dataset)
+                print(f"Added Mars Logger valid dataset: {len(mars_handler.valid_mono_dataset)} samples")
+            
+            if mars_handler.test_mono_dataset:
+                self.test_mono_datasets.append(mars_handler.test_mono_dataset)
+                print(f"Added Mars Logger test dataset: {len(mars_handler.test_mono_dataset)} samples")
+
+        # IRS 데이터셋 로드
+        if self.config['Dataset']['irs']:
+            irs_handler = IrsDataHandler(config=self.config)
+
+            if irs_handler.train_mono_dataset:
+                self.train_mono_datasets.append(irs_handler.train_mono_dataset)
+                print(f"Added IRS train dataset: {len(irs_handler.train_mono_dataset)} samples")
+            
+            if irs_handler.valid_mono_dataset:
+                self.valid_mono_datasets.append(irs_handler.valid_mono_dataset)
+                print(f"Added IRS valid dataset: {len(irs_handler.valid_mono_dataset)} samples")
+            
+            if irs_handler.train_stereo_dataset:
+                self.train_stereo_datasets.append(irs_handler.train_stereo_dataset)
+                print(f"Added IRS Stereo train dataset: {len(irs_handler.train_stereo_dataset)} samples")
+            
+            if irs_handler.valid_stereo_dataset:
+                self.valid_stereo_datasets.append(irs_handler.valid_stereo_dataset)
+                print(f"Added IRS Stereo valid dataset: {len(irs_handler.valid_stereo_dataset)} samples")
+        
 
         # 전체 샘플 수 출력
         total_train_mono = sum(len(d) for d in self.train_mono_datasets)
         total_valid_mono = sum(len(d) for d in self.valid_mono_datasets)
+        total_test_mono = sum(len(d) for d in self.test_mono_datasets)
         print(f"\nTotal train samples: {total_train_mono}")
         print(f"Total valid samples: {total_valid_mono}")
+        print(f"Total test samples: {total_test_mono}")
 
         total_train_stereo = sum(len(d) for d in self.train_stereo_datasets)
         total_valid_stereo = sum(len(d) for d in self.valid_stereo_datasets)
+        total_test_stereo = sum(len(d) for d in self.test_stereo_datasets)
         print(f"Total Stereo train samples: {total_train_stereo}")
         print(f"Total Stereo valid samples: {total_valid_stereo}")
+        print(f"Total Stereo test samples: {total_test_stereo}")
 
     def _create_dataloader(self, datasets: List, batch_size: int, shuffle: bool) -> DataLoader:
         """DataLoader 생성"""
@@ -182,32 +227,59 @@ if __name__ == '__main__':
     debug = True
     avg_time = 0.0
     
-    for i, batch in enumerate(data_loader.train_mono_loader):
+    # for i, batch in enumerate(data_loader.train_mono_loader):
+    #     start_time = time.time()
+
+    #     source_left = batch['source_left']
+    #     target_image = batch['target_image']
+    #     source_right = batch['source_right']
+    #     intrinsic = batch['intrinsic']
+
+    #     if debug:
+    #         if i % 10 == 0:
+    #             print(f"Batch {i}: images shape: {source_left.shape}, intrinsic: {intrinsic.shape}")
+    #             print(f'Intrinsic matrix:\n{intrinsic[0]}')
+    #             # 이미지 시각화
+    #             fig, axs = plt.subplots(1, 3, figsize=(10, 5))
+    #             axs[0].imshow(data_loader.denormalize_image(source_left[0]).permute(1, 2, 0).numpy())
+    #             axs[0].set_title('Source Left')
+    #             axs[1].imshow(data_loader.denormalize_image(target_image[0]).permute(1, 2, 0).numpy())
+    #             axs[1].set_title('Target Image')
+    #             axs[2].imshow(data_loader.denormalize_image(source_right[0]).permute(1, 2, 0).numpy())
+    #             axs[2].set_title('Source Right')
+    #             plt.show()
+
+
+    #     avg_time += time.time() - start_time
+
+    #     if i > 100:
+    #         break
+
+    # print(f"Average time per batch: {avg_time / (i + 1):.4f} seconds")
+
+
+    for i, batch in enumerate(data_loader.train_stereo_loader):
         start_time = time.time()
 
-        source_left = batch['source_left']
+        source_image = batch['source_image']
         target_image = batch['target_image']
-        source_right = batch['source_right']
         intrinsic = batch['intrinsic']
+        pose = batch['pose']
 
         if debug:
             if i % 10 == 0:
-                print(f"Batch {i}: images shape: {source_left.shape}, intrinsic: {intrinsic.shape}")
+                print(f"Batch {i}: images shape: {source_image.shape}, intrinsic: {intrinsic.shape}, pose: {pose.shape}")
                 print(f'Intrinsic matrix:\n{intrinsic[0]}')
+                print(f'Pose:\n{pose[0]}')
                 # 이미지 시각화
-                fig, axs = plt.subplots(1, 3, figsize=(10, 5))
-                axs[0].imshow(data_loader.denormalize_image(source_left[0]).permute(1, 2, 0).numpy())
-                axs[0].set_title('Source Left')
+                fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+                axs[0].imshow(data_loader.denormalize_image(source_image[0]).permute(1, 2, 0).numpy())
+                axs[0].set_title('Source Image')
                 axs[1].imshow(data_loader.denormalize_image(target_image[0]).permute(1, 2, 0).numpy())
                 axs[1].set_title('Target Image')
-                axs[2].imshow(data_loader.denormalize_image(source_right[0]).permute(1, 2, 0).numpy())
-                axs[2].set_title('Source Right')
                 plt.show()
-
 
         avg_time += time.time() - start_time
 
         if i > 100:
             break
-
-    print(f"Average time per batch: {avg_time / (i + 1):.4f} seconds")

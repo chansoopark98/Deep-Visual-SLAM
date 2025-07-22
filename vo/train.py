@@ -10,8 +10,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import PolynomialLR
 from torch.amp import GradScaler, autocast
 
-from vo.dataset.stereo_loader import StereoLoader
-from vo.dataset.mono_loader import MonoLoader
+from vo.dataset.vo_loader import VoDataLoader
+# from vo.dataset.mono_loader import MonoLoader
 from vo.monodepth_learner_torch import MonodepthLearner
 from model.depthnet import DepthNet
 from model.posenet import PoseNet
@@ -24,6 +24,16 @@ import yaml
 import matplotlib.pyplot as plt
 from typing import Dict, Tuple
 from itertools import cycle
+
+def remove_prefix_from_state_dict(state_dict, prefix="_orig_mod."):
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith(prefix):
+            new_k = k[len(prefix):]
+        else:
+            new_k = k
+        new_state_dict[new_k] = v
+    return new_state_dict
 
 class Trainer:
     def __init__(self, config: dict):
@@ -62,8 +72,20 @@ class Trainer:
             num_output_channels=1,
             use_skips=True
         ).to(self.device)
-        
-        # Pose network  
+
+        # load pretrained weights(depth_net)
+        """
+        torch.save(
+            self.depth_net.state_dict(),
+            os.path.join(self.save_path, f'depth_net_epoch_{epoch}.pth')
+        )
+        """
+        path = 'weights/depth/depth_net_epoch_26.pth'
+        state_dict = torch.load(path, map_location=self.device)
+        state_dict = remove_prefix_from_state_dict(state_dict, prefix="_orig_mod.")
+        self.depth_net.load_state_dict(state_dict)
+
+        # Pose network
         self.pose_net = PoseNet(
             num_layers=18,
             pretrained=True,
@@ -77,8 +99,11 @@ class Trainer:
             self.pose_net = torch.compile(self.pose_net, fullgraph=True)
 
         # 2. Data loaders
-        self.stereo_loader = StereoLoader(config=self.config)
-        self.mono_loader = MonoLoader(config=self.config)
+        # self.stereo_loader = StereoLoader(config=self.config)
+        # self.mono_loader = MonoLoader(config=self.config)
+
+        self.data_loader = VoDataLoader(config=self.config)
+        
         
         # 3. Optimizers
         self.stereo_optimizer = optim.Adam(
@@ -243,9 +268,9 @@ class Trainer:
     def train(self) -> None:
         """Main training loop"""
         print(f"Starting training on {self.device}")
-        print(f"Stereo batches: {self.stereo_loader.num_stereo_train}")
-        print(f"Mono batches: {self.mono_loader.num_mono_train}")
-        
+        print(f"Stereo batches: {self.data_loader.num_train_stereo}")
+        print(f"Mono batches: {self.data_loader.num_train_mono}")
+
         global_step = 0
         
         for epoch in range(1, self.config['Train']['epoch'] + 1):
@@ -264,14 +289,14 @@ class Trainer:
             # Create iterators
             # stereo_iter = cycle(self.stereo_loader.train_stereo_loader)
             # mono_iter = cycle(self.mono_loader.train_mono_loader)
-            stereo_iter = iter(self.stereo_loader.train_stereo_loader)
-            mono_iter = iter(self.mono_loader.train_mono_loader)
+            stereo_iter = iter(self.data_loader.train_stereo_loader)
+            mono_iter = iter(self.data_loader.train_mono_loader)
 
             
             # Use minimum of both dataset sizes
             min_batches = min(
-                self.stereo_loader.num_stereo_train,
-                self.mono_loader.num_mono_train
+                self.data_loader.num_train_stereo,
+                self.data_loader.num_train_mono
             )
             
             print(f"\nEpoch {epoch}/{self.config['Train']['epoch']}")
@@ -312,7 +337,7 @@ class Trainer:
                         depth_plot = self.plot_tool.plot_images(
                             images=mono_sample['target_image'].detach(),
                             pred_depths=[d.detach() for d in pred_depths_m],
-                            denorm_func=self.mono_loader.denormalize_image
+                            denorm_func=self.data_loader.denormalize_image
                         )
                         self.writer.add_image(
                             'Train/Depth_Result',
@@ -387,12 +412,12 @@ class Trainer:
         }
         
         # Create iterators
-        stereo_iter = iter(self.stereo_loader.valid_stereo_loader)
-        mono_iter = iter(self.mono_loader.valid_mono_loader)
-        
+        stereo_iter = iter(self.data_loader.valid_stereo_loader)
+        mono_iter = iter(self.data_loader.valid_mono_loader)
+
         min_batches = min(
-            self.stereo_loader.num_stereo_valid,
-            self.mono_loader.num_mono_valid
+            self.data_loader.num_valid_stereo,
+            self.data_loader.num_valid_mono
         )
         
         valid_pbar = tqdm(range(min_batches), desc=f'Validation Epoch {epoch}')
@@ -428,7 +453,7 @@ class Trainer:
                 depth_plot = self.plot_tool.plot_images(
                     images=mono_sample['target_image'].detach(),
                     pred_depths=[d.detach() for d in pred_depths_m],
-                    denorm_func=self.mono_loader.denormalize_image
+                    denorm_func=self.data_loader.denormalize_image
                 )
                 self.writer.add_image(
                     f'Valid/Depth_Result_epoch{epoch}',

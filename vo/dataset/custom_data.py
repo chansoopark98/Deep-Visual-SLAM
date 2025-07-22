@@ -316,8 +316,8 @@ if __name__ == '__main__':
     valid_data = CustomMonoDataset(config=config, fold='valid', is_train=False, augment=False)
 
     # iteration test
-    for i in range(len(train_data)):
-        sample = train_data[i]
+    for i in range(len(valid_data)):
+        sample = valid_data[i]
         print(f"Sample {i}:")
         print(f"  Source Left: {sample['source_left']}")
         print(f"  Target Image: {sample['target_image']}")

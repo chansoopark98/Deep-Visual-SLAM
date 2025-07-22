@@ -252,6 +252,52 @@ class IrsStereoDataset(StereoDataset):
             'intrinsic': intrinsics,
             'pose': poses
         }
+    
+class IrsDataHandler:
+    def __init__(self, config):
+        self.config = config
+        self.root_dir = os.path.join(self.config['Directory']['data_dir'], 'irs')
+        self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
+        
+        # 데이터셋 생성
+        self.train_mono_dataset = None
+        self.valid_mono_dataset = None
+        self.train_stereo_dataset = None
+        self.valid_stereo_dataset = None
+        
+        if self.config['Dataset']['custom_data']['mono']:
+            if os.path.exists(os.path.join(self.root_dir, 'train')):
+                self.train_mono_dataset = IrsMonoDataset(
+                    config=self.config,
+                    fold='train',
+                    is_train=True,
+                    augment=True
+                )
+
+            if os.path.exists(os.path.join(self.root_dir, 'valid')):
+                self.valid_mono_dataset = IrsMonoDataset(
+                    config=self.config,
+                    fold='valid',
+                    is_train=False,
+                    augment=False
+                )
+        
+        if self.config['Dataset']['custom_data']['stereo']:
+            if os.path.exists(os.path.join(self.root_dir, 'train')):
+                self.train_stereo_dataset = IrsStereoDataset(
+                    config=self.config,
+                    fold='train',
+                    is_train=True,
+                    augment=True
+                )
+
+            if os.path.exists(os.path.join(self.root_dir, 'valid')):
+                self.valid_stereo_dataset = IrsStereoDataset(
+                    config=self.config,
+                    fold='valid',
+                    is_train=False,
+                    augment=False
+            )
        
 if __name__ == '__main__':
     # 설정 파일 로드
@@ -293,7 +339,7 @@ if __name__ == '__main__':
 
     #     plt.show()
 
-    train_data = IrsStereoDataset(config=config, fold='train', is_train=True, augment=True)
+    train_data = IrsStereoDataset(config=config, fold='valid', is_train=True, augment=True)
 
     for i in range(len(train_data)):
         sample = train_data[i]
