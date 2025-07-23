@@ -11,20 +11,16 @@ from torch.optim.lr_scheduler import PolynomialLR
 from torch.amp import GradScaler, autocast
 
 from vo.dataset.vo_loader import VoDataLoader
-# from vo.dataset.mono_loader import MonoLoader
-from vo.monodepth_learner_torch import MonodepthLearner
 from vo.learner_new import MonodepthTrainer
+from eval_traj import EvalTrajectory
 from model.depthnet import DepthNet
 from model.posenet import PoseNet
 from utils.plot_utils import PlotTool
 
 from tqdm import tqdm
-import numpy as np
 from datetime import datetime
 import yaml
-import matplotlib.pyplot as plt
 from typing import Dict, Tuple
-from itertools import cycle
 
 def remove_prefix_from_state_dict(state_dict, prefix="_orig_mod."):
     new_state_dict = {}
@@ -91,61 +87,39 @@ class Trainer:
             num_layers=18,
             pretrained=True,
             num_input_images=2,
-            num_frames_to_predict_for=1
         ).to(self.device)
 
-        # torch.compile 제거 또는 옵션화 (메모리 누수 가능성)
         if self.config.get('Train', {}).get('use_compile', False):
             self.depth_net = torch.compile(self.depth_net, fullgraph=True)
             self.pose_net = torch.compile(self.pose_net, fullgraph=True)
 
-        # 2. Data loaders
-        # self.stereo_loader = StereoLoader(config=self.config)
-        # self.mono_loader = MonoLoader(config=self.config)
-
+        # 2. Data loader
         self.data_loader = VoDataLoader(config=self.config)
-        
-        
-        # 3. Optimizers
-        self.stereo_optimizer = optim.Adam(
-            self.depth_net.parameters(),
-            lr=self.config['Train']['init_lr'],
-            betas=(self.config['Train']['beta1'], 0.999),
-            weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else 0
+        self.eval_tool = EvalTrajectory(
+            depth_model= self.depth_net,
+            pose_model=self.pose_net,
+            config=self.config,
+            device=self.device
         )
         
-        self.mono_optimizer = optim.Adam(
+        # 3. Optimizers
+        self.optimizer = optim.Adam(
             list(self.depth_net.parameters()) + list(self.pose_net.parameters()),
             lr=self.config['Train']['init_lr'],
-            betas=(self.config['Train']['beta1'], 0.999),
-            weight_decay=self.config['Train']['weight_decay'] if self.config['Train']['weight_decay'] > 0 else 0
         )
         
         # 4. Learning rate schedulers
-        self.stereo_scheduler = PolynomialLR(
-            self.stereo_optimizer,
-            total_iters=self.config['Train']['epoch'],
-            power=0.9
-        )
-        
-        self.mono_scheduler = PolynomialLR(
-            self.mono_optimizer,
+        self.scheduler = PolynomialLR(
+            self.optimizer,
             total_iters=self.config['Train']['epoch'],
             power=0.9
         )
         
         # 5. GradScaler for AMP
         if self.use_amp:
-            self.stereo_scaler = GradScaler('cuda')
-            self.mono_scaler = GradScaler('cuda')
-        
+            self.mono_scaler = GradScaler()
+
         # 6. Learner
-        # self.learner = MonodepthLearner(
-        #     depth_net=self.depth_net,
-        #     pose_net=self.pose_net,
-        #     config=self.config,
-        #     device=str(self.device)
-        # )
         self.learner = MonodepthTrainer(
             depth_net=self.depth_net,
             pose_net=self.pose_net,
@@ -188,46 +162,19 @@ class Trainer:
         )
         os.makedirs(self.save_path, exist_ok=True)
     
-    def train_stereo_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
-        """Single training step for stereo with AMP support"""
-        self.stereo_optimizer.zero_grad(set_to_none=True)  # 더 효율적인 메모리 정리
-        
-        if self.use_amp:
-            with autocast('cuda', dtype=torch.float16):
-                total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
-                    sample
-                )
-            
-            self.stereo_scaler.scale(total_loss).backward()
-            self.stereo_scaler.step(self.stereo_optimizer)
-            self.stereo_scaler.update()
-        else:
-            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
-                sample
-            )
-            total_loss.backward()
-            self.stereo_optimizer.step()
-        
-        # 메모리 정리를 위해 detach
-        total_loss = total_loss.detach()
-        pixel_loss = pixel_loss.detach()
-        smooth_loss = smooth_loss.detach()
-        pred_depths = [d.detach() for d in pred_depths]
-        
-        return total_loss, pixel_loss, smooth_loss, pred_depths
-    
     def train_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Single training step for mono with AMP support"""
-        self.mono_optimizer.zero_grad(set_to_none=True)
+        self.optimizer.zero_grad(set_to_none=True)
         
         if self.use_amp:
-            with autocast('cuda', dtype=torch.float16):
+            # with autocast('cuda', dtype=torch.float16):
+            with autocast(device_type=self.device.type, enabled=self.use_amp):
                 outputs, losses = self.learner.process_batch(
                     sample
                 )
             total_loss = losses['loss']
             self.mono_scaler.scale(total_loss).backward()
-            self.mono_scaler.step(self.mono_optimizer)
+            self.mono_scaler.step(self.optimizer)
             self.mono_scaler.update()
         else:
             outputs, losses = self.learner.process_batch(
@@ -235,27 +182,13 @@ class Trainer:
             )
             total_loss = losses['loss']
             total_loss.backward()
-            self.mono_optimizer.step()
+            self.optimizer.step()
         
         total_loss = total_loss.detach()
         pred_depths = [outputs[("depth", scale)].detach() for scale in range(self.learner.num_scales)]
 
         
         return total_loss, pred_depths
-    
-    @torch.no_grad()
-    def valid_stereo_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
-        """Single validation step for stereo with AMP support"""
-        if self.use_amp:
-            with autocast('cuda', dtype=torch.float16):
-                total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
-                    sample, training=False
-                )
-        else:
-            total_loss, pixel_loss, smooth_loss, pred_depths = self.learner.forward_stereo(
-                sample, training=False
-            )
-        return total_loss, pixel_loss, smooth_loss, pred_depths
     
     @torch.no_grad()
     def valid_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
@@ -298,7 +231,7 @@ class Trainer:
             min_batches = self.data_loader.num_train_mono
             
             print(f"\nEpoch {epoch}/{self.config['Train']['epoch']}")
-            print(f"Learning Rate: {self.mono_optimizer.param_groups[0]['lr']:.6f}")
+            print(f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
             
             # Training loop
             train_pbar = tqdm(range(min_batches), desc=f'Training Epoch {epoch}')
@@ -309,7 +242,6 @@ class Trainer:
                 t_loss_m, pred_depths_m = self.train_mono_step(mono_sample)
                 
                 avg_total = t_loss_m.item()
-
 
                 train_metrics['total_loss'] += avg_total
                 train_metrics['count'] += 1
@@ -350,7 +282,7 @@ class Trainer:
             
             # Log training metrics
             self.writer.add_scalar('Train/total_loss', train_metrics['total_loss'], epoch)
-            self.writer.add_scalar('Train/learning_rate', self.mono_optimizer.param_groups[0]['lr'], epoch)
+            self.writer.add_scalar('Train/learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
             
             # Validation phase
             if epoch % self.config['Train']['valid_freq'] == 0:
@@ -359,10 +291,9 @@ class Trainer:
             # Save checkpoint
             if epoch % self.config['Train']['save_freq'] == 0:
                 self.save_checkpoint(epoch)
-            
+                
             # Update schedulers
-            self.mono_scheduler.step()
-            self.stereo_scheduler.step()
+            self.scheduler.step()
             
             # 에폭 끝에서 철저한 메모리 정리
             torch.cuda.empty_cache()
@@ -388,7 +319,9 @@ class Trainer:
         for batch_idx in valid_pbar:
             # Mono validation
             mono_sample = next(mono_iter)
+            
             t_loss_m, pred_depths_m = self.valid_mono_step(mono_sample)
+            self.eval_tool.update_state(sample=mono_sample)
 
             avg_total = t_loss_m.item()
             
@@ -408,7 +341,7 @@ class Trainer:
                     denorm_func=self.data_loader.denormalize_image
                 )
                 self.writer.add_image(
-                    f'Valid/Depth_Result_epoch{epoch}',
+                    f'Valid/Depth_Result',
                     depth_plot.transpose(2, 0, 1),
                     batch_idx
                 )
@@ -424,6 +357,15 @@ class Trainer:
         # Log validation metrics
         self.writer.add_scalar('Valid/total_loss', valid_metrics['total_loss'], epoch)
 
+        # Evaluate trajectory
+        eval_plot_image = self.eval_tool.eval_plot()
+        self.writer.add_image(
+            f'Valid/Trajectory',
+            eval_plot_image.transpose(2, 0, 1),
+            epoch
+        )
+        del eval_plot_image
+
         print(f"\nValidation - Total: {valid_metrics['total_loss']:.4f}")
 
         # 검증 후 메모리 정리
@@ -436,17 +378,14 @@ class Trainer:
             'epoch': epoch,
             'depth_net_state_dict': self.depth_net.state_dict(),
             'pose_net_state_dict': self.pose_net.state_dict(),
-            'stereo_optimizer_state_dict': self.stereo_optimizer.state_dict(),
-            'mono_optimizer_state_dict': self.mono_optimizer.state_dict(),
-            'stereo_scheduler_state_dict': self.stereo_scheduler.state_dict(),
-            'mono_scheduler_state_dict': self.mono_scheduler.state_dict(),
+            'mono_optimizer_state_dict': self.optimizer.state_dict(),
+            'mono_scheduler_state_dict': self.scheduler.state_dict(),
             'metrics': self.metrics,
             'config': self.config
         }
         
         # Save AMP state if using
         if self.use_amp:
-            checkpoint['stereo_scaler_state_dict'] = self.stereo_scaler.state_dict()
             checkpoint['mono_scaler_state_dict'] = self.mono_scaler.state_dict()
         
         checkpoint_path = os.path.join(

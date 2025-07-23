@@ -6,6 +6,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
 from typing import Dict, Tuple
+from torchvision.transforms import functional as TF
+
 
 class MonoDataset(Dataset):
     """Monodepth2용 모노 데이터셋"""
@@ -53,22 +55,43 @@ class MonoDataset(Dataset):
                      self.source_right[idx]):
             imgs.append(self._read_image(path))
 
-        batch = torch.stack([self.to_tensor(im) for im in imgs], dim=0)
+        # batch = torch.stack([self.to_tensor(im) for im in imgs], dim=0)
 
         for scale in range(4):
-            K = self.intrinsic[idx].copy()
-            K[0, :] *= self.image_shape[1] // (2 ** scale) # width
-            K[1, :] *= self.image_shape[0] // (2 ** scale) # height
+            Wnew = self.image_shape[1] // (2**scale)
+            Hnew = self.image_shape[0] // (2**scale)
+
+            K = self.intrinsic[idx].copy()  # 절대 픽셀 단위
+            K[0, :] *= (Wnew / self.image_shape[1])
+            K[1, :] *= (Hnew / self.image_shape[0])
 
             inv_K = np.linalg.pinv(K)
-
-            inputs[("K", scale)] = torch.from_numpy(K).float()
+            inputs[("K", scale)]     = torch.from_numpy(K).float()
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K).float()
 
         if self.augment:
             
             if random.random() < 0.5:
-                batch = self.color_jitter(batch)
+            #     batch = self.color_jitter(batch)
+
+                fn_idx, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
+                self.color_jitter.get_params(
+                    self.color_jitter.brightness,
+                    self.color_jitter.contrast,
+                    self.color_jitter.saturation,
+                    self.color_jitter.hue
+                )
+                # 2) 뽑은 파라미터로 모든 이미지에 동일하게 적용
+                jittered = []
+                for im in imgs:
+                    im = TF.adjust_brightness(im, brightness_factor)
+                    im = TF.adjust_contrast(im, contrast_factor)
+                    im = TF.adjust_saturation(im, saturation_factor)
+                    im = TF.adjust_hue(im, hue_factor)
+                    jittered.append(im)
+                imgs = jittered
+        
+        batch = torch.stack([self.to_tensor(im) for im in imgs], dim=0)
 
         inputs["source_left"] = batch[0]
         inputs["target_image"] = batch[1]

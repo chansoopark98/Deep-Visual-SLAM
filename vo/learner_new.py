@@ -91,11 +91,14 @@ class MonodepthTrainer:
         concat_tgt_right = torch.cat([sample['target_image'], sample['source_right']], dim=1)
         axisangle_right, translation_right = self.pose_net(concat_tgt_right)  # [B, 1, 3]
 
+        # test
+        print(f'left axisAgngle: {axisangle_left[0]}, translation: {translation_left[0]}')
+        print(f'right axisAgngle: {axisangle_right[0]}, translation: {translation_right[0]}')
+
         outputs[("axisangle", 0, -1)] = axisangle_left
         outputs[("translation", 0, -1)] = translation_left
         outputs[("axisangle", 0, 1)] = axisangle_right
         outputs[("translation", 0, 1)] = translation_right
-
 
         # Invert the matrix if the frame id is negative
         outputs[("cam_T_cam", 0, -1)] = transformation_from_parameters(
@@ -135,7 +138,7 @@ class MonodepthTrainer:
                 cam_points = self.backproject_depth[source_scale](
                     depth, sample[("inv_K", source_scale)])
                 pix_coords = self.project_3d[source_scale](
-                    cam_points, sample[("K", source_scale)], T[:, :3, :])
+                    cam_points, sample[("K", source_scale)], T )
 
                 outputs[("sample", frame_id, scale)] = pix_coords
 
@@ -172,10 +175,7 @@ class MonodepthTrainer:
             loss = 0
             reprojection_losses = []
 
-            source_scale = 0
-
             disp = outputs[("disp", scale)]
-            # color = inputs[("color", 0, scale)]
             target = inputs["target_image"]
 
             for frame_id in [-1, 1]:
@@ -222,8 +222,9 @@ class MonodepthTrainer:
             mean_disp = disp.mean(2, True).mean(3, True)
             norm_disp = disp / (mean_disp + 1e-7)
             target_resized = F.interpolate(
-                target, [self.image_shape[0] // (2 ** scale), self.image_shape[1] // (2 ** scale)],
-                mode="bilinear", align_corners=False)
+                target,
+                [self.image_shape[0] // (2 ** scale), self.image_shape[1] // (2 ** scale)],
+                mode="bilinear")
             smooth_loss = get_smooth_loss(norm_disp, target_resized)
 
             loss += self.smoothness_ratio * smooth_loss / (2 ** scale)
