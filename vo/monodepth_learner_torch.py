@@ -3,8 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional
 import numpy as np
-
-from model.layers import (
+from learner_func import (
     disp_to_depth, 
     BackprojectDepth, 
     Project3D, 
@@ -90,8 +89,9 @@ class MonodepthLearner:
         scaled_intrinsics = torch.matmul(scale_matrix, intrinsics)
         
         return scaled_intrinsics
-    
-    def forward_mono(self, sample: Dict[str, torch.Tensor], training: bool = True) -> Tuple[torch.Tensor, ...]:
+
+    # @torch.compile
+    def forward_mono(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Forward pass for monocular training"""
         for key in sample:
             if isinstance(sample[key], torch.Tensor):
@@ -110,14 +110,6 @@ class MonodepthLearner:
         smooth_losses = 0.
         
         H, W = self.image_shape
-        
-        # Depth prediction
-        if training:
-            self.depth_net.train()
-            self.pose_net.train()
-        else:
-            self.depth_net.eval()
-            self.pose_net.eval()
             
         depth_outputs = self.depth_net(tgt_image)
         
@@ -133,18 +125,18 @@ class MonodepthLearner:
         
         # Target -> Right  
         concat_tgt_right = torch.cat([tgt_image, right_image], dim=1)
-        axisangle_right, translation_right = self.pose_net(concat_tgt_right)
+        axisangle_right, translation_right = self.pose_net(concat_tgt_right) # [B, 1, 3]
         
         # Create transformation matrices (4x4)
         # Left to Target (invert=True because we want Target to Left)
         T_left_to_tgt_4x4 = transformation_from_parameters(
-            axisangle_left[:, 0], translation_left[:, 0], invert=True
-        )
+            axisangle_left, translation_left, invert=True
+        ) # [B, 4, 4]
         
         # Target to Right (invert=False)
         T_tgt_to_right_4x4 = transformation_from_parameters(
-            axisangle_right[:, 0], translation_right[:, 0], invert=False
-        )
+            axisangle_right, translation_right, invert=False
+        ) # [B, 4, 4]
         
         # Extract 3x4 matrices for projection
         T_left_to_tgt = T_left_to_tgt_4x4[:, :3, :]
@@ -276,7 +268,7 @@ class MonodepthLearner:
         
         return total_loss, pixel_losses, smooth_losses, pred_depths
     
-    def forward_stereo(self, sample: Dict[str, torch.Tensor], training: bool = True) -> Tuple[torch.Tensor, ...]:
+    def forward_stereo(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Forward pass for stereo training"""
         for key in sample:
             if isinstance(sample[key], torch.Tensor):
@@ -295,12 +287,6 @@ class MonodepthLearner:
         smooth_losses = 0.
         
         H, W = self.image_shape
-        
-        # Depth prediction
-        if training:
-            self.depth_net.train()
-        else:
-            self.depth_net.eval()
             
         depth_outputs = self.depth_net(tgt_image)
         

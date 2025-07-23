@@ -61,7 +61,7 @@ class DepthNet(nn.Module):
         self.sigmoid = nn.Sigmoid()
         
 
-    def forward(self, input_data):
+    def forward(self, input_data) -> dict:
         """
         Args:
             input_data: Either image tensor [B, C, H, W] if using encoder,

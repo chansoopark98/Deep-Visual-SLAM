@@ -27,7 +27,8 @@ class MarsMonoDataset(MonoDataset):
 
         self.dataset_dict = self._process_mono_scene(fold_dir=fold)
 
-        super().__init__(dataset_dict=self.dataset_dict,
+        super().__init__(config=self.config,
+                         dataset_dict=self.dataset_dict,
                          image_size=self.image_size,
                          is_train=is_train,
                          augment=augment)
@@ -201,7 +202,7 @@ class MarsDataHandler:
         self.valid_mono_dataset = None
         self.test_mono_dataset = None
         
-        if os.path.exists(os.path.join(self.root_dir, 'train')):
+        if config['Dataset']['mars_logger']['mono']:
             self.train_mono_dataset = MarsMonoDataset(
                 config=self.config,
                 fold='train',
@@ -209,8 +210,7 @@ class MarsDataHandler:
                 is_train=True,
                 augment=True
             )
-        
-        if os.path.exists(os.path.join(self.root_dir, 'valid')):
+
             self.valid_mono_dataset = MarsMonoDataset(
                 config=self.config,
                 fold='valid',
@@ -218,7 +218,6 @@ class MarsDataHandler:
                 is_train=False,
                 augment=False
             )
-        if os.path.exists(os.path.join(self.root_dir, 'test')):
             self.test_mono_dataset = MarsMonoDataset(
                 config=self.config,
                 fold='test',

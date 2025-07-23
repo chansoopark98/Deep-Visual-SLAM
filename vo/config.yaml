@@ -7,14 +7,14 @@ Directory:
 
 Dataset:
   custom_data:
-    mono: True
-    stereo: True
+    mono: False
+    stereo: False
   mars_logger:
     mono: True
     stereo: False
   irs:
-    mono: True
-    stereo: True
+    mono: False
+    stereo: False
 
 Train:
   mode: axisAngle # axisAngle, euler
@@ -23,7 +23,7 @@ Train:
   valid_plot_interval: 20
   num_workers: 16
   use_amp: True
-  use_compile: True
+  use_compile: False
   valid_freq: 1
   save_freq: 2
   vis_batch_size: 1
@@ -40,7 +40,7 @@ Train:
   img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 32 # 1
+  batch_size: 8 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001
