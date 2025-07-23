@@ -1,3 +1,4 @@
+from curses import raw
 import numpy as np
 import torch
 import random
@@ -9,10 +10,14 @@ from typing import Dict, Tuple
 class MonoDataset(Dataset):
     """Monodepth2용 모노 데이터셋"""
     def __init__(self,
+                 config: Dict,
                  dataset_dict: Dict[str, list],
                  image_size: Tuple[int, int],
                  is_train: bool = True, 
                  augment: bool = True):
+        self.config = config
+        self.image_shape = (config['Train']['img_h'], config['Train']['img_w'])
+        self.num_scale = config['Train']['num_scale']
         self.source_left = dataset_dict['source_left']
         self.target_image = dataset_dict['target_image']
         self.source_right = dataset_dict['source_right']
@@ -40,6 +45,8 @@ class MonoDataset(Dataset):
         return len(self.target_image)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        inputs = {}
+
         imgs = []
         for path in (self.source_left[idx],
                      self.target_image[idx],
@@ -48,24 +55,27 @@ class MonoDataset(Dataset):
 
         batch = torch.stack([self.to_tensor(im) for im in imgs], dim=0)
 
-        K = torch.from_numpy(self.intrinsic[idx].copy())
+        for scale in range(4):
+            K = self.intrinsic[idx].copy()
+            K[0, :] *= self.image_shape[1] // (2 ** scale) # width
+            K[1, :] *= self.image_shape[0] // (2 ** scale) # height
+
+            inv_K = np.linalg.pinv(K)
+
+            inputs[("K", scale)] = torch.from_numpy(K).float()
+            inputs[("inv_K", scale)] = torch.from_numpy(inv_K).float()
 
         if self.augment:
-            if random.random() < 0.5:
-                batch = torch.flip(batch, dims=[-1])
-                W = self.image_size[1]
-                K[0, 2] = W - K[0, 2]
             
             if random.random() < 0.5:
                 batch = self.color_jitter(batch)
 
-        return {
-            'source_left':  batch[0],
-            'target_image': batch[1],
-            'source_right': batch[2],
-            'intrinsic':    K
-        }
+        inputs["source_left"] = batch[0]
+        inputs["target_image"] = batch[1]
+        inputs["source_right"] = batch[2]
 
+        return inputs
+    
 class StereoDataset(Dataset):
     """Monodepth2용 스테레오 데이터셋 (baseline 기반 pose 사용)"""
     def __init__(self,
@@ -109,13 +119,13 @@ class StereoDataset(Dataset):
         K = torch.from_numpy(self.intrinsic[idx].copy())
 
         if self.augment:
-            if random.random() < 0.5:
-                batch = torch.flip(batch, dims=[-1])
+            # if random.random() < 0.5:
+                # batch = torch.flip(batch, dims=[-1])
                 # principal point c_x = width - old_cx
                 # image_size: (H, W)
-                W = self.image_size[1]
-                K[0, 2] = W - K[0, 2]
-                pose[3] = -pose[3]
+                # W = self.image_size[1]
+                # K[0, 2] = W - K[0, 2]
+                # pose[3] = -pose[3]
 
             if random.random() < 0.5:
                 batch = self.color_jitter(batch)
