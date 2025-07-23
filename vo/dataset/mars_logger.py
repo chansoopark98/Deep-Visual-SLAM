@@ -33,41 +33,32 @@ class MarsMonoDataset(MonoDataset):
                          is_train=is_train,
                          augment=augment)
 
-    def _rescale_intrinsic(self, intrinsic: np.ndarray, target_size: tuple, current_size: tuple) -> np.ndarray:
-        """내부 파라미터를 타겟 이미지 크기에 맞게 스케일링"""
+    def _rescale_intrinsic(self,
+                        intrinsic: np.ndarray,
+                        target_size: tuple,
+                        current_size: tuple) -> np.ndarray:
+        """내부 파라미터를 타겟 이미지 크기에 맞게 스케일링하고, 4×4 homogeneous 형태로 반환"""
+        # 1) 3×3 intrinsics 스케일링
         fx = intrinsic[0, 0] * target_size[1] / current_size[1]
         fy = intrinsic[1, 1] * target_size[0] / current_size[0]
         cx = intrinsic[0, 2] * target_size[1] / current_size[1]
         cy = intrinsic[1, 2] * target_size[0] / current_size[0]
-        intrinsic_rescaled = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
-        return intrinsic_rescaled
+        K3 = np.array([[fx, 0,  cx],
+                    [0,  fy, cy],
+                    [0,   0,  1 ]], dtype=np.float32)
+
+        # 2) 4×4 homogeneous intrinsics로 확장
+        K4 = np.eye(4, dtype=np.float32)
+        K4[:3, :3] = K3
+        # (원하면 K4[:3, 3] = [0,0,0] 으로 translation 항목도 조정 가능)
+
+        return K4
     
     def _load_calibration(self, sensor_dir: str):
         """캘리브레이션 정보 로드"""
         # 카메라 내부 파라미터
         left_intrinsic = np.load(os.path.join(sensor_dir, 'left_intrinsics.npy'))
         return left_intrinsic
-
-    def _create_mono_samples(self, left_files, left_K):
-        """개별 리스트로 반환하도록 수정"""
-        source_left_paths = []
-        target_image_paths = []
-        source_right_paths = []
-        intrinsics = []
-        
-        step = 1
-        for t in range(self.num_source, len(left_files) - self.num_source, step):
-            source_left_paths.append(left_files[t - 1])
-            target_image_paths.append(left_files[t])
-            source_right_paths.append(left_files[t + 1])
-            intrinsics.append(left_K)
-        
-        return {
-            'source_left': source_left_paths,
-            'target_image': target_image_paths,
-            'source_right': source_right_paths,
-            'intrinsic': intrinsics
-        }
     
     def _extract_video(self, scene_dir: str, camera_name) -> int:
         video_file = os.path.join(scene_dir, 'movie.mp4')
@@ -132,8 +123,8 @@ class MarsMonoDataset(MonoDataset):
         target_image_paths = []
         source_right_paths = []
         intrinsics = []
-        
-        for t in range(self.num_source, length - self.num_source, step):
+
+        for t in range(step, length - step, step):
             source_left_paths.append(rgb_files[t - 1])
             target_image_paths.append(rgb_files[t])
             source_right_paths.append(rgb_files[t + 1])
@@ -165,7 +156,11 @@ class MarsMonoDataset(MonoDataset):
 
             for scene in scene_files:
                 if os.path.isdir(scene):
-                    samples = self._process(scene, camera_name, is_test=False)
+                    if fold_dir == 'test':
+                        is_test = True
+                    else:
+                        is_test = False
+                    samples = self._process(scene, camera_name, is_test=is_test)
                     source_left_images.extend(samples['source_left'])
                     target_images.extend(samples['target_image'])
                     source_right_images.extend(samples['source_right'])
@@ -184,10 +179,10 @@ class MarsMonoDataset(MonoDataset):
         print(f'  -- dataset size: {len(source_left_images)}')
 
         # 셔플링
-        if self.shuffle and len(source_left_images) > 0:
-            indices = np.random.permutation(len(source_left_images))
-            for key in dataset_dict:
-                dataset_dict[key] = dataset_dict[key][indices]
+        # if self.shuffle and len(source_left_images) > 0:
+        #     indices = np.random.permutation(len(source_left_images))
+        #     for key in dataset_dict:
+        #         dataset_dict[key] = dataset_dict[key][indices]
                 
         return dataset_dict
     
@@ -243,7 +238,8 @@ if __name__ == '__main__':
         print(f"  Source Left: {sample['source_left']}")
         print(f"  Target Image: {sample['target_image']}")
         print(f"  Source Right: {sample['source_right']}")
-        print(f"  Intrinsic: {sample['intrinsic']}")
+        print(f"  Intrinsic: {sample[('K', 0)]}")
+        print(f"  Intrinsic (inv_K): {sample[('inv_K', 0)]}")
         
         left_image = sample['source_left'].permute(1, 2, 0).numpy()
         target_image = sample['target_image'].permute(1, 2, 0).numpy()
