@@ -7,7 +7,7 @@ from torchvision import transforms
 from PIL import Image
 from typing import Dict, Tuple
 from torchvision.transforms import functional as TF
-
+import os
 
 class MonoDataset(Dataset):
     """Monodepth2용 모노 데이터셋"""
@@ -55,8 +55,6 @@ class MonoDataset(Dataset):
                      self.source_right[idx]):
             imgs.append(self._read_image(path))
 
-        # batch = torch.stack([self.to_tensor(im) for im in imgs], dim=0)
-
         for scale in range(4):
             Wnew = self.image_shape[1] // (2**scale)
             Hnew = self.image_shape[0] // (2**scale)
@@ -70,18 +68,14 @@ class MonoDataset(Dataset):
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K).float()
 
         if self.augment:
-            
             if random.random() < 0.5:
-            #     batch = self.color_jitter(batch)
-
-                fn_idx, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
+                _, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
                 self.color_jitter.get_params(
                     self.color_jitter.brightness,
                     self.color_jitter.contrast,
                     self.color_jitter.saturation,
                     self.color_jitter.hue
                 )
-                # 2) 뽑은 파라미터로 모든 이미지에 동일하게 적용
                 jittered = []
                 for im in imgs:
                     im = TF.adjust_brightness(im, brightness_factor)
@@ -91,11 +85,21 @@ class MonoDataset(Dataset):
                     jittered.append(im)
                 imgs = jittered
         
-        batch = torch.stack([self.to_tensor(im) for im in imgs], dim=0)
+        source_left = imgs[0]
+        target_image = imgs[1]
+        source_right = imgs[2]
 
-        inputs["source_left"] = batch[0]
-        inputs["target_image"] = batch[1]
-        inputs["source_right"] = batch[2]
+        for scale in range(4):
+            Wnew = self.image_shape[1] // (2**scale)
+            Hnew = self.image_shape[0] // (2**scale)
+
+            source_left = TF.resize(source_left, [Hnew, Wnew])
+            target_image = TF.resize(target_image, [Hnew, Wnew])
+            source_right = TF.resize(source_right, [Hnew, Wnew])
+
+            inputs[("source_left", scale)] = self.to_tensor(source_left)
+            inputs[("target_image", scale)] = self.to_tensor(target_image)
+            inputs[("source_right", scale)] = self.to_tensor(source_right)
 
         return inputs
     

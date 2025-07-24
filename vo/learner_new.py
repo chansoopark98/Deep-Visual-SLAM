@@ -38,38 +38,69 @@ class MonodepthTrainer:
         self.ssim_ratio = config['Train']['ssim_ratio']  # 0.85
         self.min_depth = config['Train']['min_depth']  # 0.1
         self.max_depth = config['Train']['max_depth']  # 10.0
-        self.auto_mask = True
+        self.use_multiscale = config['Train']['use_multiscale']  # True
         
         # Initialize SSIM
         self.ssim = SSIM()
         self.ssim.to(self.device)
-        
+
         # Initialize backprojection and projection layers
-        self.backproject_depth = {}
-        self.project_3d = {}
-        
+        self.backproject_depth: Dict[int, BackprojectDepth] = {}
+        self.project_3d: Dict[int, Project3D] = {}
+
         for scale in range(self.num_scales):
             h = self.image_shape[0] // (2 ** scale)
             w = self.image_shape[1] // (2 ** scale)
-            
-            self.backproject_depth[scale] = BackprojectDepth(self.batch_size, h, w).to(self.device)
-            self.project_3d[scale] = Project3D(self.batch_size, h, w).to(self.device)
+
+            self.backproject_depth[scale] = BackprojectDepth(self.batch_size, h, w)
+            self.backproject_depth[scale].to(self.device)
+
+            self.project_3d[scale] = Project3D(self.batch_size, h, w)
+            self.project_3d[scale].to(self.device)
+
+    def _compute_reprojection_loss(self, pred: torch.Tensor, target: torch.Tensor):
+        """Computes reprojection loss between a batch of predicted and target images
+        """
+        abs_diff = torch.abs(target - pred)
+        l1_loss = abs_diff.mean(1, True)
+
+        ssim_loss = self.ssim(pred, target).mean(1, True)
+        reprojection_loss = (self.ssim_ratio * ssim_loss) + ((1 - self.ssim_ratio) * l1_loss)
+
+        return reprojection_loss
 
     def process_batch(self, sample: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
         sample: Dict[str, torch.Tensor]
-            'source_left': [B, 3, H, W] tensor
-            'target_image': [B, 3, H, W] tensor
-            'source_right': [B, 3, H, W] tensor
-            (K, scale=4): [B, 3, 3] tensor
-            (inv_K, scale=4): [B, 3, 3] tensor
+        {
+            ('K', 0):        # torch.FloatTensor [4, 4] (intrinsic, scale 0)
+            ('inv_K', 0):    # torch.FloatTensor [4, 4] (inverse intrinsic, scale 0)
+            ('K', 1):        # torch.FloatTensor [4, 4] (intrinsic, scale 1)
+            ('inv_K', 1):    # torch.FloatTensor [4, 4] (inverse intrinsic, scale 1)
+            ('K', 2):        # ...
+            ('inv_K', 2):    # ...
+            ('K', 3):        # ...
+            ('inv_K', 3):    # ...
+            ('source_left', 0):   # torch.FloatTensor [3, H0, W0] (scale 0)
+            ('target_image', 0):  # torch.FloatTensor [3, H0, W0] (scale 0)
+            ('source_right', 0):  # torch.FloatTensor [3, H0, W0] (scale 0)
+            ('source_left', 1):   # torch.FloatTensor [3, H1, W1] (scale 1)
+            ('target_image', 1):  # torch.FloatTensor [3, H1, W1] (scale 1)
+            ('source_right', 1):  # torch.FloatTensor [3, H1, W1] (scale 1)
+            ('source_left', 2):   # ...
+            ('target_image', 2):  # ...
+            ('source_right', 2):  # ...
+            ('source_left', 3):   # ...
+            ('target_image', 3):  # ...
+            ('source_right', 3):  # ...
+        }
         """
         for key in sample:
             if isinstance(sample[key], torch.Tensor):
                 sample[key] = sample[key].to(self.device)
 
 
-        outputs: dict = self.depth_net(sample['target_image'])
+        outputs: dict = self.depth_net(sample[('target_image', 0)])
 
         outputs.update(self._predict_poses(sample))
 
@@ -79,21 +110,18 @@ class MonodepthTrainer:
         return outputs, losses
 
     def _predict_poses(self, sample: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Predict poses between input frames for monocular sequences.
-        """
         outputs = {}
-        
         # Left -> Target (invert=True)
-        concat_left_tgt = torch.cat([sample['source_left'], sample['target_image']], dim=1)
+        concat_left_tgt = torch.cat([sample[('source_left', 0)], sample[('target_image', 0)]], dim=1)
         axisangle_left, translation_left = self.pose_net(concat_left_tgt)
 
         # Target -> Right (invert=False)
-        concat_tgt_right = torch.cat([sample['target_image'], sample['source_right']], dim=1)
+        concat_tgt_right = torch.cat([sample[('target_image', 0)], sample[('source_right', 0)]], dim=1)
         axisangle_right, translation_right = self.pose_net(concat_tgt_right)  # [B, 1, 3]
 
         # test
-        print(f'left axisAgngle: {axisangle_left[0]}, translation: {translation_left[0]}')
-        print(f'right axisAgngle: {axisangle_right[0]}, translation: {translation_right[0]}')
+        # print(f'left axisAgngle: {axisangle_left[0]}, translation: {translation_left[0]}')
+        # print(f'right axisAgngle: {axisangle_right[0]}, translation: {translation_right[0]}')
 
         outputs[("axisangle", 0, -1)] = axisangle_left
         outputs[("translation", 0, -1)] = translation_left
@@ -109,20 +137,20 @@ class MonodepthTrainer:
         return outputs
 
     def _generate_images_pred(self, sample: Dict[str, torch.Tensor], outputs: Dict[str, torch.Tensor]) -> None:
-        """
-        sample: Dict
-            source_left: [B, 3, H, W] tensor
-            target_image: [B, 3, H, W] tensor
-            source_right: [B, 3, H, W] tensor
-            (K, scale=4): [B, 3, 3] tensor
-            (inv_K, scale=4): [B, 3, 3] tensor
-        """
         for scale in range(self.num_scales):
             disp = outputs[("disp", scale)]
+            # clip
+            disp = torch.clamp(disp, 0.001, 1.0)
             
-            disp = F.interpolate(
-                    disp, [self.image_shape[0], self.image_shape[1]], mode="bilinear", align_corners=False)
-            source_scale = 0
+            if self.use_multiscale:
+                source_scale = scale
+            else:
+                disp = F.interpolate(
+                    disp,
+                    [self.image_shape[0], self.image_shape[1]], 
+                    mode="bilinear", 
+                    align_corners=False)
+                source_scale = 0
 
             _, depth = disp_to_depth(disp, self.min_depth, self.max_depth)
 
@@ -138,35 +166,44 @@ class MonodepthTrainer:
                 cam_points = self.backproject_depth[source_scale](
                     depth, sample[("inv_K", source_scale)])
                 pix_coords = self.project_3d[source_scale](
-                    cam_points, sample[("K", source_scale)], T )
+                    cam_points, sample[("K", source_scale)], T)
 
                 outputs[("sample", frame_id, scale)] = pix_coords
 
                 if frame_id == -1:
-                    source_image = sample['source_left']
+                    source_image = sample[('source_left', source_scale)]
                 else:
-                    source_image = sample['source_right']
-
+                    source_image = sample[('source_right', source_scale)]
+                    
                 outputs[("color", frame_id, scale)] = F.grid_sample(
                     source_image,
                     outputs[("sample", frame_id, scale)],
-                    padding_mode="border")
+                    padding_mode="border",
+                    align_corners=True
+                    )
     
                 outputs[("color_identity", frame_id, scale)] = source_image
 
-    def _compute_reprojection_loss(self, pred, target):
-        """Computes reprojection loss between a batch of predicted and target images
-        """
-        abs_diff = torch.abs(target - pred)
-        l1_loss = abs_diff.mean(1, True)
-
-        ssim_loss = self.ssim(pred, target).mean(1, True)
-        reprojection_loss = 0.85 * ssim_loss + 0.15 * l1_loss
-
-        return reprojection_loss
-
     def _compute_losses(self, inputs, outputs):
-        """Compute the reprojection and smoothness losses for a minibatch
+        """
+        Compute the reprojection and smoothness losses for a minibatch
+        
+        sample: Dict
+            source_left: [B, 3, H, W] tensor
+            target_image: [B, 3, H, W] tensor
+            source_right: [B, 3, H, W] tensor
+            (K, scale=4): [B, 4, 4] tensor
+            (inv_K, scale=4): [B, 4, 4] tensor
+        
+        outputs: Dict[str, torch.Tensor]
+            (disp, scale): [B, 1, H, W] tensor
+            (depth, scale): [B, 1, H, W] tensor
+            (color, frame_id, scale): [B, 3, H, W] tensor
+            (color_identity, frame_id, scale): [B, 3, H, W] tensor
+            (sample, frame_id, scale): [B, H, W, 2]
+            (axisangle, scale, frame_id): [B, 1, 3] tensor
+            (translation, scale, frame_id): [B, 1, 3] tensor
+            (cam_T_cam, scale, frame_id): [B, 4, 4] tensor
         """
         losses = {}
         total_loss = 0
@@ -175,11 +212,16 @@ class MonodepthTrainer:
             loss = 0
             reprojection_losses = []
 
-            disp = outputs[("disp", scale)]
-            target = inputs["target_image"]
+            if self.use_multiscale:
+                source_scale = scale
+            else:
+                source_scale = 0
+
+            disp = outputs[("disp", source_scale)]
+            target = inputs[('target_image', source_scale)]
 
             for frame_id in [-1, 1]:
-                pred = outputs[("color", frame_id, scale)]
+                pred = outputs[("color", frame_id, source_scale)]
                 reprojection_losses.append(self._compute_reprojection_loss(pred, target))
 
             reprojection_losses = torch.cat(reprojection_losses, 1)
@@ -187,10 +229,7 @@ class MonodepthTrainer:
             if self.auto_mask:
                 identity_reprojection_losses = []
                 for frame_id in [-1, 1]:
-                    if frame_id == -1:
-                        pred = inputs["source_left"]
-                    else:
-                        pred = inputs["source_right"]
+                    pred = outputs[("color_identity", frame_id, source_scale)]
 
                     identity_reprojection_losses.append(
                         self._compute_reprojection_loss(pred, target))
@@ -220,12 +259,10 @@ class MonodepthTrainer:
             loss += to_optimise.mean()
 
             mean_disp = disp.mean(2, True).mean(3, True)
+            mean_disp = torch.clamp(mean_disp, min=0.001)
             norm_disp = disp / (mean_disp + 1e-7)
-            target_resized = F.interpolate(
-                target,
-                [self.image_shape[0] // (2 ** scale), self.image_shape[1] // (2 ** scale)],
-                mode="bilinear")
-            smooth_loss = get_smooth_loss(norm_disp, target_resized)
+            smooth_loss = get_smooth_loss(norm_disp, 
+                                          inputs[('target_image', source_scale)])
 
             loss += self.smoothness_ratio * smooth_loss / (2 ** scale)
             total_loss += loss

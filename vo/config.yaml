@@ -23,7 +23,7 @@ Train:
   valid_plot_interval: 20
   num_workers: 16
   use_amp: False
-  use_compile: False
+  use_compile: True
   valid_freq: 1
   save_freq: 2
   vis_batch_size: 1
@@ -36,6 +36,7 @@ Train:
   smoothness_ratio: 0.001
   ab_ratio: 0.01
   auto_mask: True
+  use_multiscale: False
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001
@@ -44,9 +45,9 @@ Train:
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001
-  use_stereo: true           # 스테레오 사용 여부
-  stereo_ratio: 0.4          # 스테레오 데이터 비율 (0.4 = 40%)
-  stereo_weight: 1.0         # 스테레오 손실 가중치
+  # use_stereo: true           # 스테레오 사용 여부
+  # stereo_ratio: 0.4          # 스테레오 데이터 비율 (0.4 = 40%)
+  # stereo_weight: 1.0         # 스테레오 손실 가중치
 
 Experiment:
   gpus: [0] # [0, 1]

@@ -22,6 +22,8 @@ from datetime import datetime
 import yaml
 from typing import Dict, Tuple
 
+# torch.autograd.set_detect_anomaly(True)
+
 def remove_prefix_from_state_dict(state_dict, prefix="_orig_mod."):
     new_state_dict = {}
     for k, v in state_dict.items():
@@ -185,10 +187,14 @@ class Trainer:
             self.optimizer.step()
         
         total_loss = total_loss.detach()
+        # detach all losses
+        for key in losses:
+            losses[key] = losses[key].detach().cpu()
+
         pred_depths = [outputs[("depth", scale)].detach() for scale in range(self.learner.num_scales)]
 
         
-        return total_loss, pred_depths
+        return total_loss, pred_depths, losses
     
     @torch.no_grad()
     def valid_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
@@ -239,7 +245,7 @@ class Trainer:
             for batch_idx in train_pbar:
                 # Mono training
                 mono_sample = next(mono_iter)
-                t_loss_m, pred_depths_m = self.train_mono_step(mono_sample)
+                t_loss_m, pred_depths_m, losses_m = self.train_mono_step(mono_sample)
                 
                 avg_total = t_loss_m.item()
 
@@ -249,13 +255,17 @@ class Trainer:
                 # Update progress bar
                 train_pbar.set_postfix({
                     'total': f"{avg_total:.4f}",
+                    'loss/0': f"{losses_m['loss/0']:.4f}",
+                    'loss/1': f"{losses_m['loss/1']:.4f}",
+                    'loss/2': f"{losses_m['loss/2']:.4f}",
+                    'loss/3': f"{losses_m['loss/3']:.4f}",
                 })
                 
                 # Log images periodically
                 if batch_idx % self.config['Train']['train_plot_interval'] == 0:
                     with torch.no_grad():  # 추가 보호
                         depth_plot = self.plot_tool.plot_images(
-                            images=mono_sample['target_image'].detach(),
+                            target_images=mono_sample,
                             pred_depths=[d.detach() for d in pred_depths_m],
                             denorm_func=self.data_loader.denormalize_image
                         )
@@ -267,9 +277,9 @@ class Trainer:
                         del depth_plot  # 명시적 삭제
                 
                 # 주기적으로 메모리 정리
-                if batch_idx % 50 == 0:
-                    torch.cuda.empty_cache()
-                    gc.collect()
+                # if batch_idx % 50 == 0:
+                    # torch.cuda.empty_cache()
+                    # gc.collect()
                 
                 del t_loss_m, pred_depths_m
                 
@@ -336,7 +346,7 @@ class Trainer:
             # Log validation images
             if batch_idx % self.config['Train']['valid_plot_interval'] == 0:
                 depth_plot = self.plot_tool.plot_images(
-                    images=mono_sample['target_image'].detach(),
+                    target_images=mono_sample,
                     pred_depths=[d.detach() for d in pred_depths_m],
                     denorm_func=self.data_loader.denormalize_image
                 )
