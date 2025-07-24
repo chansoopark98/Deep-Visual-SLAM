@@ -17,41 +17,35 @@ class PlotTool:
         self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
         self.num_source = config['Train']['num_source']  # 2
         self.num_scales = config['Train']['num_scale']  # 4
+        self.min_depth = config['Train']['min_depth']
+        self.max_depth = config['Train']['max_depth']
 
-    def plot_images(self, images: torch.Tensor, pred_depths: List[torch.Tensor], 
-                   denorm_func: Callable) -> np.ndarray:
-        """Plot images with multi-scale depth predictions
-        
-        Args:
-            images: [B, 3, H, W] tensor
-            pred_depths: List of [B, 1, H, W] tensors at different scales
-            denorm_func: Function to denormalize images
-            
-        Returns:
-            [H, W, 3] numpy array for visualization
-        """
-        # Get first image from batch and denormalize
-        image = denorm_func(images[0].cpu())  # denorm_func returns [3, H, W] tensor
+    def plot_images(self, target_images: dict, pred_depths: List[torch.Tensor], 
+                denorm_func: Callable) -> np.ndarray:
+        denormed_targets = []
+        for scale in range(self.num_scales):
+            target_image = target_images[('target_image', scale)][0]  # Get first batch
+            target_image = target_image.detach().cpu()
+            target_image = denorm_func(target_image)
+            target_image = target_image.numpy().transpose(1, 2, 0)  # [C, H, W] -> [H, W, C]
+            denormed_targets.append(target_image)
 
-        
-        # Convert to numpy and transpose to [H, W, 3] for matplotlib
-        image = image.numpy().transpose(1, 2, 0)  # [3, H, W] -> [H, W, 3]
-        
         pred_depths = [depth[0] for depth in pred_depths]  # Get first batch
-        
-        fig, axes = plt.subplots(1, 1 + self.num_scales, figsize=(10, 10))
 
-        # Plot original image - now [H, W, 3]
-        axes[0].imshow(image.astype(np.uint8))
-        axes[0].set_title('Image')
-        axes[0].axis('off')
-    
-        # Plot depth maps at different scales
-        for idx in range(self.num_scales):
-            depth = pred_depths[idx].detach().cpu().numpy()[0]  # [H, W]
-            axes[idx + 1].imshow(depth, vmin=0., vmax=10., cmap='plasma')
-            axes[idx + 1].set_title(f'Scale {idx}')
-            axes[idx + 1].axis('off')
+        # 4줄 2칸 (왼: 이미지, 오: depth)
+        fig, axes = plt.subplots(self.num_scales, 2, figsize=(8, 3 * self.num_scales))
+
+        for scale in range(self.num_scales):
+            # 왼쪽: 이미지
+            axes[scale, 0].imshow(denormed_targets[scale])
+            axes[scale, 0].set_title(f'Target Image - Scale {scale}')
+            axes[scale, 0].axis('off')
+
+            # 오른쪽: depth
+            depth = pred_depths[scale].detach().cpu().numpy()[0]  # [H, W]
+            axes[scale, 1].imshow(depth, vmin=self.min_depth, vmax=self.max_depth, cmap='plasma')
+            axes[scale, 1].set_title(f'Predicted Depth - Scale {scale}')
+            axes[scale, 1].axis('off')
 
         fig.tight_layout()
 
@@ -63,11 +57,7 @@ class PlotTool:
         
         # Load from buffer
         pil_image = Image.open(buf)
-        image_array = np.array(pil_image)  # [H, W, 4] RGBA or [H, W, 3] RGB
-        
-        # Convert RGBA to RGB if needed
+        image_array = np.array(pil_image)
         if image_array.shape[-1] == 4:
-            image_array = image_array[:, :, :3]  # Remove alpha channel
-        
-        # Return [H, W, 3] for visualization
+            image_array = image_array[:, :, :3]
         return image_array

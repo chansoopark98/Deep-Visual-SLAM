@@ -21,6 +21,7 @@ def disp_to_depth(disp, min_depth, max_depth):
     min_disp = 1 / max_depth
     max_disp = 1 / min_depth
     scaled_disp = min_disp + (max_disp - min_disp) * disp
+    # scaled_disp = torch.clamp(scaled_disp, 1e-3, 1e3)
     depth = 1 / scaled_disp
     return scaled_disp, depth
 

@@ -1,5 +1,6 @@
 import os
 import glob
+from matplotlib.pyplot import sca
 import pandas as pd
 import numpy as np
 import cv2
@@ -114,6 +115,7 @@ class MarsMonoDataset(MonoDataset):
     
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
+        size = 2
         if is_test:
             step = 1
         else:
@@ -124,10 +126,10 @@ class MarsMonoDataset(MonoDataset):
         source_right_paths = []
         intrinsics = []
 
-        for t in range(step, length - step, step):
-            source_left_paths.append(rgb_files[t - 1])
+        for t in range(step + size, length - step - size, step):
+            source_left_paths.append(rgb_files[t - size])
             target_image_paths.append(rgb_files[t])
-            source_right_paths.append(rgb_files[t + 1])
+            source_right_paths.append(rgb_files[t + size])
             intrinsics.append(resized_intrinsic)
         
         return {
@@ -156,7 +158,7 @@ class MarsMonoDataset(MonoDataset):
 
             for scene in scene_files:
                 if os.path.isdir(scene):
-                    if fold_dir == 'test':
+                    if fold_dir == 'valid' or fold_dir == 'test':
                         is_test = True
                     else:
                         is_test = False
@@ -177,12 +179,6 @@ class MarsMonoDataset(MonoDataset):
         print('Current fold:', fold_dir)
         print(f'  -- Camera types: {[os.path.basename(ct) for ct in camera_types]}')
         print(f'  -- dataset size: {len(source_left_images)}')
-
-        # 셔플링
-        # if self.shuffle and len(source_left_images) > 0:
-        #     indices = np.random.permutation(len(source_left_images))
-        #     for key in dataset_dict:
-        #         dataset_dict[key] = dataset_dict[key][indices]
                 
         return dataset_dict
     
@@ -230,35 +226,37 @@ if __name__ == '__main__':
     with open('./vo/config.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
-    train_data = MarsMonoDataset(config=config, fold='train', shuffle=True, is_train=True, augment=True)
+    train_data = MarsMonoDataset(config=config, fold='test', shuffle=False, is_train=False, augment=False)
 
     for i in range(len(train_data)):
         sample = train_data[i]
-        print(f"Sample {i}:")
-        print(f"  Source Left: {sample['source_left']}")
-        print(f"  Target Image: {sample['target_image']}")
-        print(f"  Source Right: {sample['source_right']}")
-        print(f"  Intrinsic: {sample[('K', 0)]}")
-        print(f"  Intrinsic (inv_K): {sample[('inv_K', 0)]}")
         
-        left_image = sample['source_left'].permute(1, 2, 0).numpy()
-        target_image = sample['target_image'].permute(1, 2, 0).numpy()
-        right_image = sample['source_right'].permute(1, 2, 0).numpy()
+        left_images = []
+        target_images = []
+        right_images = []
 
-        plt.figure(figsize=(12, 6))
-        plt.subplot(1, 3, 1)
-        plt.imshow(left_image)
-        plt.title("Source Left")
-        plt.axis("off")
+        num_scale = train_data.num_scale
+        plt.figure(figsize=(12, 4 * num_scale))
 
-        plt.subplot(1, 3, 2)
-        plt.imshow(target_image)
-        plt.title("Target Image")
-        plt.axis("off")
+        for scale in range(num_scale):
+            left_image = sample[('source_left', scale)].permute(1, 2, 0).numpy()
+            target_image = sample[('target_image', scale)].permute(1, 2, 0).numpy()
+            right_image = sample[('source_right', scale)].permute(1, 2, 0).numpy()
 
-        plt.subplot(1, 3, 3)
-        plt.imshow(right_image)
-        plt.title("Source Right")
-        plt.axis("off")
+            plt.subplot(num_scale, 3, scale * 3 + 1)
+            plt.imshow(left_image)
+            plt.title(f"Source Left - Scale {scale}")
+            plt.axis("off")
 
+            plt.subplot(num_scale, 3, scale * 3 + 2)
+            plt.imshow(target_image)
+            plt.title(f"Target Image - Scale {scale}")
+            plt.axis("off")
+
+            plt.subplot(num_scale, 3, scale * 3 + 3)
+            plt.imshow(right_image)
+            plt.title(f"Source Right - Scale {scale}")
+            plt.axis("off")
+
+        plt.tight_layout()
         plt.show()

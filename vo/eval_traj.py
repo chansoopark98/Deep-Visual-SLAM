@@ -47,11 +47,11 @@ class EvalTrajectory():
         outputs = {}
         
         # Left -> Target (invert=True)
-        concat_left_tgt = torch.cat([sample['source_left'], sample['target_image']], dim=1)
+        concat_left_tgt = torch.cat([sample[('source_left', 0)], sample[('target_image', 0)]], dim=1)
         axisangle_left, translation_left = self.pose_net(concat_left_tgt)
 
         # Target -> Right (invert=False)
-        concat_tgt_right = torch.cat([sample['target_image'], sample['source_right']], dim=1)
+        concat_tgt_right = torch.cat([sample[('target_image', 0)], sample[('source_right', 0)]], dim=1)
         axisangle_right, translation_right = self.pose_net(concat_tgt_right)  # [B, 1, 3]
 
         outputs[("axisangle", 0, -1)] = axisangle_left
