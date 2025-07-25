@@ -1,15 +1,10 @@
-import numpy as np
-from sympy import im
 import yaml
 import sys
 import os
-import cv2
 import torch
-import torch.nn as nn
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from model.depthnet import DepthNet
-# from model.posenet import PoseNet
 from model.posenet_single import PoseNet
 from utils.visualization import Visualizer
 from vo.dataset.vo_loader import VoDataLoader
@@ -17,11 +12,7 @@ from eval_traj import EvalTrajectory
 from utils.utils import remove_prefix_from_state_dict
 from learner_func import (
     disp_to_depth, 
-    BackprojectDepth, 
-    Project3D, 
     transformation_from_parameters,
-    get_smooth_loss,
-    SSIM
 )
 
 if __name__ == '__main__':

@@ -1,0 +1,9 @@
+source;share/vo_visualizer/hook/pythonpath.ps1
+source;share/vo_visualizer/hook/pythonpath.dsv
+source;share/vo_visualizer/hook/pythonpath.sh
+source;share/vo_visualizer/hook/ament_prefix_path.ps1
+source;share/vo_visualizer/hook/ament_prefix_path.dsv
+source;share/vo_visualizer/hook/ament_prefix_path.sh
+source;../../build/vo_visualizer/share/vo_visualizer/hook/pythonpath_develop.ps1
+source;../../build/vo_visualizer/share/vo_visualizer/hook/pythonpath_develop.dsv
+source;../../build/vo_visualizer/share/vo_visualizer/hook/pythonpath_develop.sh
