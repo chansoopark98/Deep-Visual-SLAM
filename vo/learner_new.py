@@ -140,7 +140,7 @@ class MonodepthTrainer:
         for scale in range(self.num_scales):
             disp = outputs[("disp", scale)]
             # clip
-            disp = torch.clamp(disp, 0.001, 1.0)
+            # disp = torch.clamp(disp, 0.001, 1.0)
             
             if self.use_multiscale:
                 source_scale = scale
