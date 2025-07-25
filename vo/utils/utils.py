@@ -10,6 +10,16 @@ import math
 
 _EPS = np.finfo(float).eps * 4.0
 
+def remove_prefix_from_state_dict(state_dict, prefix="_orig_mod."):
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith(prefix):
+            new_k = k[len(prefix):]
+        else:
+            new_k = k
+        new_state_dict[new_k] = v
+    return new_state_dict
+
 # matplotlib.use('TkAgg') 
 def plot_camera_poses(Rs, ts):
     """
