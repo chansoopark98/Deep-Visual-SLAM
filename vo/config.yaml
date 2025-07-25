@@ -19,10 +19,10 @@ Dataset:
 Train:
   mode: axisAngle # axisAngle, euler
   use_shuffle: True
-  train_plot_interval: 20 # 100
+  train_plot_interval: 100 # 100
   valid_plot_interval: 20
   num_workers: 16
-  use_amp: False
+  use_amp: True
   use_compile: True
   valid_freq: 1
   save_freq: 2
@@ -41,7 +41,7 @@ Train:
   img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 8 # 1
+  batch_size: 16 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001

@@ -58,6 +58,7 @@ class MonodepthTrainer:
             self.project_3d[scale] = Project3D(self.batch_size, h, w)
             self.project_3d[scale].to(self.device)
 
+    @torch.compile
     def _compute_reprojection_loss(self, pred: torch.Tensor, target: torch.Tensor):
         """Computes reprojection loss between a batch of predicted and target images
         """
@@ -136,6 +137,7 @@ class MonodepthTrainer:
 
         return outputs
 
+    @torch.compile
     def _generate_images_pred(self, sample: Dict[str, torch.Tensor], outputs: Dict[str, torch.Tensor]) -> None:
         for scale in range(self.num_scales):
             disp = outputs[("disp", scale)]
@@ -161,7 +163,16 @@ class MonodepthTrainer:
                 frame_id: -1 >> left to target,
                 frame_id: 1 >> target to right
                 """
-                T = outputs[("cam_T_cam", 0, frame_id)]
+                # T = outputs[("cam_T_cam", 0, frame_id)]
+
+                axisangle = outputs[("axisangle", 0, frame_id)]
+                translation = outputs[("translation", 0, frame_id)]
+
+                inv_depth = 1 / depth
+                mean_inv_depth = inv_depth.mean(3, True).mean(2, True)
+
+                T = transformation_from_parameters(
+                    axisangle[:, 0], translation[:, 0] * mean_inv_depth[:, 0], frame_id < 0)
 
                 cam_points = self.backproject_depth[source_scale](
                     depth, sample[("inv_K", source_scale)])
@@ -184,6 +195,7 @@ class MonodepthTrainer:
     
                 outputs[("color_identity", frame_id, scale)] = source_image
 
+    @torch.compile
     def _compute_losses(self, inputs, outputs):
         """
         Compute the reprojection and smoothness losses for a minibatch
