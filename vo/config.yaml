@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Monodepth2-multiscale
+  exp_name: Monodepth2-fullRes-dataStep1
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -21,7 +21,7 @@ Train:
   use_shuffle: True
   train_plot_interval: 100 # 100
   valid_plot_interval: 20
-  num_workers: 16
+  num_workers: 32
   use_amp: True
   use_compile: True
   valid_freq: 1
@@ -34,20 +34,16 @@ Train:
   max_depth: 10.0
   ssim_ratio: 0.85
   smoothness_ratio: 0.001
-  ab_ratio: 0.01
   auto_mask: True
-  use_multiscale: True
+  use_multiscale: False
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 16 # 1
+  batch_size: 32 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001
-  # use_stereo: true           # 스테레오 사용 여부
-  # stereo_ratio: 0.4          # 스테레오 데이터 비율 (0.4 = 40%)
-  # stereo_weight: 1.0         # 스테레오 손실 가중치
 
 Experiment:
   gpus: [0] # [0, 1]

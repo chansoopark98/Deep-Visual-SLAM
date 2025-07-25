@@ -67,23 +67,23 @@ class MonoDataset(Dataset):
             inputs[("K", scale)]     = torch.from_numpy(K).float()
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K).float()
 
-        if self.augment:
-            if random.random() < 0.5:
-                _, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
-                self.color_jitter.get_params(
-                    self.color_jitter.brightness,
-                    self.color_jitter.contrast,
-                    self.color_jitter.saturation,
-                    self.color_jitter.hue
-                )
-                jittered = []
-                for im in imgs:
-                    im = TF.adjust_brightness(im, brightness_factor)
-                    im = TF.adjust_contrast(im, contrast_factor)
-                    im = TF.adjust_saturation(im, saturation_factor)
-                    im = TF.adjust_hue(im, hue_factor)
-                    jittered.append(im)
-                imgs = jittered
+        # if self.augment:
+        #     if random.random() < 0.5:
+        #         _, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
+        #         self.color_jitter.get_params(
+        #             self.color_jitter.brightness,
+        #             self.color_jitter.contrast,
+        #             self.color_jitter.saturation,
+        #             self.color_jitter.hue
+        #         )
+        #         jittered = []
+        #         for im in imgs:
+        #             im = TF.adjust_brightness(im, brightness_factor)
+        #             im = TF.adjust_contrast(im, contrast_factor)
+        #             im = TF.adjust_saturation(im, saturation_factor)
+        #             im = TF.adjust_hue(im, hue_factor)
+        #             jittered.append(im)
+        #         imgs = jittered
         
         source_left = imgs[0]
         target_image = imgs[1]

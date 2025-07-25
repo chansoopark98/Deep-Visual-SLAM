@@ -1,3 +1,4 @@
+from turtle import left
 import matplotlib
 matplotlib.use('Agg')
 import io
@@ -20,32 +21,58 @@ class PlotTool:
         self.min_depth = config['Train']['min_depth']
         self.max_depth = config['Train']['max_depth']
 
-    def plot_images(self, target_images: dict, pred_depths: List[torch.Tensor], 
-                denorm_func: Callable) -> np.ndarray:
+    def plot_result(self, 
+                    inputs: dict, 
+                    outputs: List[torch.Tensor], 
+                    denorm_func: Callable) -> np.ndarray:
+        
         denormed_targets = []
+        pred_depths = []
+        denormed_images = []
         for scale in range(self.num_scales):
-            target_image = target_images[('target_image', scale)][0]  # Get first batch
+            target_image = inputs[('target_image', scale)][0]  # Get first batch
             target_image = target_image.detach().cpu()
             target_image = denorm_func(target_image)
             target_image = target_image.numpy().transpose(1, 2, 0)  # [C, H, W] -> [H, W, C]
             denormed_targets.append(target_image)
 
-        pred_depths = [depth[0] for depth in pred_depths]  # Get first batch
+        for scale in range(self.num_scales):
+            pred_depth_list = outputs[("depth", scale)]
+            pred_depth = pred_depth_list[0].detach().cpu()
+            pred_depths.append(pred_depth)
+
+            
+            left_warped = outputs[("color", -1, scale)][0].detach().cpu()
+            left_warped = denorm_func(left_warped).numpy().transpose(1, 2, 0)  # [C, H, W] -> [H, W, C]
+            right_warped = outputs[("color", 1, scale)][0].detach().cpu()
+            right_warped = denorm_func(right_warped).numpy().transpose(1, 2, 0)  # [C, H, W] -> [H, W, C]
+            denormed_images.append([left_warped, right_warped])
+
 
         # 4줄 2칸 (왼: 이미지, 오: depth)
-        fig, axes = plt.subplots(self.num_scales, 2, figsize=(8, 3 * self.num_scales))
+        fig, axes = plt.subplots(self.num_scales, 4, figsize=(8, 3 * self.num_scales))
 
         for scale in range(self.num_scales):
             # 왼쪽: 이미지
             axes[scale, 0].imshow(denormed_targets[scale])
-            axes[scale, 0].set_title(f'Target Image - Scale {scale}')
+            axes[scale, 0].set_title(f'Target - {scale}')
             axes[scale, 0].axis('off')
 
             # 오른쪽: depth
             depth = pred_depths[scale].detach().cpu().numpy()[0]  # [H, W]
             axes[scale, 1].imshow(depth, vmin=self.min_depth, vmax=self.max_depth, cmap='plasma')
-            axes[scale, 1].set_title(f'Predicted Depth - Scale {scale}')
+            axes[scale, 1].set_title(f'Depth - {scale}')
             axes[scale, 1].axis('off')
+
+            # left to target warped image
+            axes[scale, 2].imshow(denormed_images[scale][0])
+            axes[scale, 2].set_title(f'Left to Target - {scale}')
+            axes[scale, 2].axis('off')
+
+            # right to target warped image
+            axes[scale, 3].imshow(denormed_images[scale][1])
+            axes[scale, 3].set_title(f'Right to Target - {scale}')
+            axes[scale, 3].axis('off')
 
         fig.tight_layout()
 
