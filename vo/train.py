@@ -14,8 +14,8 @@ from vo.dataset.vo_loader import VoDataLoader
 from vo.learner_new import MonodepthTrainer
 from eval_traj import EvalTrajectory
 from model.depthnet import DepthNet
-from model.posenet import PoseNet
-# from model.posenet_single import PoseNet
+# from model.posenet import PoseNet
+from model.posenet_single import PoseNet
 from utils.plot_utils import PlotTool
 
 from tqdm import tqdm
@@ -106,8 +106,14 @@ class Trainer:
         )
         
         # 3. Optimizers
+        # self.optimizer = optim.Adam(
+        #     list(self.depth_net.parameters()) + list(self.pose_net.parameters()),
+        #     lr=self.config['Train']['init_lr'],
+        # )
+        for p in self.depth_net.parameters():
+            p.requires_grad = False
         self.optimizer = optim.Adam(
-            list(self.depth_net.parameters()) + list(self.pose_net.parameters()),
+            self.pose_net.parameters(),
             lr=self.config['Train']['init_lr'],
         )
         
