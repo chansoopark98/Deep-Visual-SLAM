@@ -198,10 +198,9 @@ class Trainer:
         for key in losses:
             losses[key] = losses[key].detach().cpu()
 
-        pred_depths = [outputs[("depth", scale)].detach() for scale in range(self.learner.num_scales)]
+        # pred_depths = [outputs[("depth", scale)].detach() for scale in range(self.learner.num_scales)]
 
-        
-        return total_loss, pred_depths, losses
+        return total_loss, outputs, losses
     
     @torch.no_grad()
     def valid_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
@@ -217,9 +216,9 @@ class Trainer:
             )
         total_loss = losses['loss']
         total_loss = total_loss.detach()
-        pred_depths = [outputs[("depth", scale)].detach() for scale in range(self.learner.num_scales)]
+        # pred_depths = [outputs[("depth", scale)].detach() for scale in range(self.learner.num_scales)]
         
-        return total_loss, pred_depths
+        return total_loss, outputs
 
     def train(self) -> None:
         """Main training loop"""
@@ -231,7 +230,7 @@ class Trainer:
         
         for epoch in range(1, self.config['Train']['epoch'] + 1):
             # Training phase
-            self.depth_net.train()
+            # self.depth_net.train()
             self.pose_net.train()
             
             # Reset metrics
@@ -252,8 +251,8 @@ class Trainer:
             for batch_idx in train_pbar:
                 # Mono training
                 mono_sample = next(mono_iter)
-                t_loss_m, pred_depths_m, losses_m = self.train_mono_step(mono_sample)
-                
+                t_loss_m, outputs_m, losses_m = self.train_mono_step(mono_sample)
+
                 avg_total = t_loss_m.item()
 
                 train_metrics['total_loss'] += avg_total
@@ -271,9 +270,9 @@ class Trainer:
                 # Log images periodically
                 if batch_idx % self.config['Train']['train_plot_interval'] == 0:
                     with torch.no_grad():  # 추가 보호
-                        depth_plot = self.plot_tool.plot_images(
-                            target_images=mono_sample,
-                            pred_depths=[d.detach() for d in pred_depths_m],
+                        depth_plot = self.plot_tool.plot_result(
+                            inputs=mono_sample,
+                            outputs=outputs_m,
                             denorm_func=self.data_loader.denormalize_image
                         )
                         self.writer.add_image(
@@ -288,7 +287,7 @@ class Trainer:
                     # torch.cuda.empty_cache()
                     # gc.collect()
                 
-                del t_loss_m, pred_depths_m
+                del t_loss_m, outputs_m
                 
                 global_step += 1
             
@@ -320,7 +319,7 @@ class Trainer:
     @torch.no_grad()
     def validate(self, epoch: int) -> None:
         """Validation loop"""
-        self.depth_net.eval()
+        # self.depth_net.eval()
         self.pose_net.eval()
         
         valid_metrics = {
@@ -336,8 +335,8 @@ class Trainer:
         for batch_idx in valid_pbar:
             # Mono validation
             mono_sample = next(mono_iter)
-            
-            t_loss_m, pred_depths_m = self.valid_mono_step(mono_sample)
+
+            t_loss_m, outputs_m = self.valid_mono_step(mono_sample)
             self.eval_tool.update_state(sample=mono_sample)
 
             avg_total = t_loss_m.item()
@@ -352,9 +351,9 @@ class Trainer:
             
             # Log validation images
             if batch_idx % self.config['Train']['valid_plot_interval'] == 0:
-                depth_plot = self.plot_tool.plot_images(
-                    target_images=mono_sample,
-                    pred_depths=[d.detach() for d in pred_depths_m],
+                depth_plot = self.plot_tool.plot_result(
+                    inputs=mono_sample,
+                    outputs=outputs_m,
                     denorm_func=self.data_loader.denormalize_image
                 )
                 self.writer.add_image(
@@ -363,9 +362,9 @@ class Trainer:
                     batch_idx
                 )
                 del depth_plot
-            
-            del t_loss_m, pred_depths_m
-        
+
+            del t_loss_m, outputs_m
+
         # Average validation metrics
         for key in ['total_loss']:
             valid_metrics[key] /= valid_metrics['count']

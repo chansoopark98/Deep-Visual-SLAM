@@ -115,11 +115,11 @@ class MarsMonoDataset(MonoDataset):
     
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
-        size = 2
+        size = 1
         if is_test:
             step = 1
         else:
-            step = 3
+            step = 1
         
         source_left_paths = []
         target_image_paths = []
