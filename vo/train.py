@@ -15,6 +15,7 @@ from vo.learner_new import MonodepthTrainer
 from eval_traj import EvalTrajectory
 from model.depthnet import DepthNet
 from model.posenet import PoseNet
+# from model.posenet_single import PoseNet
 from utils.plot_utils import PlotTool
 
 from tqdm import tqdm
