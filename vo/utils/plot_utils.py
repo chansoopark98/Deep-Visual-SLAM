@@ -30,7 +30,7 @@ class PlotTool:
         pred_depths = []
         denormed_images = []
         for scale in range(self.num_scales):
-            target_image = inputs[('target_image', scale)][0]  # Get first batch
+            target_image = inputs[('target_image', 0)][0]  # Get first batch
             target_image = target_image.detach().cpu()
             target_image = denorm_func(target_image)
             target_image = target_image.numpy().transpose(1, 2, 0)  # [C, H, W] -> [H, W, C]

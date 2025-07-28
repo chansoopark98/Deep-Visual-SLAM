@@ -89,17 +89,9 @@ class MonoDataset(Dataset):
         target_image = imgs[1]
         source_right = imgs[2]
 
-        for scale in range(4):
-            Wnew = self.image_shape[1] // (2**scale)
-            Hnew = self.image_shape[0] // (2**scale)
-
-            source_left = TF.resize(source_left, [Hnew, Wnew])
-            target_image = TF.resize(target_image, [Hnew, Wnew])
-            source_right = TF.resize(source_right, [Hnew, Wnew])
-
-            inputs[("source_left", scale)] = self.to_tensor(source_left)
-            inputs[("target_image", scale)] = self.to_tensor(target_image)
-            inputs[("source_right", scale)] = self.to_tensor(source_right)
+        inputs[("source_left", 0)] = self.to_tensor(source_left)
+        inputs[("target_image", 0)] = self.to_tensor(target_image)
+        inputs[("source_right", 0)] = self.to_tensor(source_right)
 
         return inputs
     
