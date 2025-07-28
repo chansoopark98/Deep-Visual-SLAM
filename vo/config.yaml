@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Monodepth2-fullRes-dataStep1
+  exp_name: Monodepth2-fullRes-depth_pose
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
@@ -21,9 +21,9 @@ Train:
   use_shuffle: True
   train_plot_interval: 100 # 100
   valid_plot_interval: 20
-  num_workers: 32
-  use_amp: True
-  use_compile: True
+  num_workers: 24
+  use_amp: False
+  use_compile: False
   valid_freq: 1
   save_freq: 2
   vis_batch_size: 1
@@ -36,12 +36,11 @@ Train:
   smoothness_ratio: 0.001
   auto_mask: True
   use_multiscale: False
-  use_norm_depth: True
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 32 # 1
+  batch_size: 8 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001

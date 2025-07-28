@@ -22,6 +22,7 @@ from tqdm import tqdm
 from datetime import datetime
 import yaml
 from typing import Dict, Tuple
+import matplotlib.pyplot as plt
 
 # torch.autograd.set_detect_anomaly(True)
 
@@ -92,7 +93,8 @@ class Trainer:
             num_input_images=2,
         ).to(self.device)
 
-        if self.config.get('Train', {}).get('use_compile', False):
+        if self.config['Train']['use_compile']:
+
             self.depth_net = torch.compile(self.depth_net, fullgraph=True)
             self.pose_net = torch.compile(self.pose_net, fullgraph=True)
 
@@ -106,16 +108,16 @@ class Trainer:
         )
         
         # 3. Optimizers
-        # self.optimizer = optim.Adam(
-        #     list(self.depth_net.parameters()) + list(self.pose_net.parameters()),
-        #     lr=self.config['Train']['init_lr'],
-        # )
-        for p in self.depth_net.parameters():
-            p.requires_grad = False
         self.optimizer = optim.Adam(
-            self.pose_net.parameters(),
+            list(self.depth_net.parameters()) + list(self.pose_net.parameters()),
             lr=self.config['Train']['init_lr'],
         )
+        # for p in self.depth_net.parameters():
+        #     p.requires_grad = False
+        # self.optimizer = optim.Adam(
+        #     self.pose_net.parameters(),
+        #     lr=self.config['Train']['init_lr'],
+        # )
         
         # 4. Learning rate schedulers
         self.scheduler = PolynomialLR(
@@ -251,6 +253,7 @@ class Trainer:
             for batch_idx in train_pbar:
                 # Mono training
                 mono_sample = next(mono_iter)
+        
                 t_loss_m, outputs_m, losses_m = self.train_mono_step(mono_sample)
 
                 avg_total = t_loss_m.item()
