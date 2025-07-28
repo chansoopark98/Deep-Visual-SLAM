@@ -36,6 +36,7 @@ Train:
   smoothness_ratio: 0.001
   auto_mask: True
   use_multiscale: False
+  use_norm_depth: True
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001
