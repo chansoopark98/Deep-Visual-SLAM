@@ -35,7 +35,6 @@ Train:
   ssim_ratio: 0.85
   smoothness_ratio: 0.001
   auto_mask: True
-  use_multiscale: False
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001

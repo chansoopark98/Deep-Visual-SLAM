@@ -22,7 +22,6 @@ from tqdm import tqdm
 from datetime import datetime
 import yaml
 from typing import Dict, Tuple
-import matplotlib.pyplot as plt
 
 # torch.autograd.set_detect_anomaly(True)
 
@@ -112,12 +111,6 @@ class Trainer:
             list(self.depth_net.parameters()) + list(self.pose_net.parameters()),
             lr=self.config['Train']['init_lr'],
         )
-        # for p in self.depth_net.parameters():
-        #     p.requires_grad = False
-        # self.optimizer = optim.Adam(
-        #     self.pose_net.parameters(),
-        #     lr=self.config['Train']['init_lr'],
-        # )
         
         # 4. Learning rate schedulers
         self.scheduler = PolynomialLR(
