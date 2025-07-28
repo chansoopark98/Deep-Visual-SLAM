@@ -39,6 +39,7 @@ class MonodepthTrainer:
         self.min_depth = config['Train']['min_depth']  # 0.1
         self.max_depth = config['Train']['max_depth']  # 10.0
         self.use_multiscale = config['Train']['use_multiscale']  # True
+        self.use_norm_depth = config['Train']['use_norm_depth']  # True
         
         # Initialize SSIM
         self.ssim = SSIM()
@@ -120,10 +121,6 @@ class MonodepthTrainer:
         concat_tgt_right = torch.cat([sample[('target_image', 0)], sample[('source_right', 0)]], dim=1)
         axisangle_right, translation_right = self.pose_net(concat_tgt_right)  # [B, 1, 3]
 
-        # test
-        # print(f'left axisAgngle: {axisangle_left[0]}, translation: {translation_left[0]}')
-        # print(f'right axisAgngle: {axisangle_right[0]}, translation: {translation_right[0]}')
-
         outputs[("axisangle", 0, -1)] = axisangle_left
         outputs[("translation", 0, -1)] = translation_left
         outputs[("axisangle", 0, 1)] = axisangle_right
@@ -141,8 +138,6 @@ class MonodepthTrainer:
     def _generate_images_pred(self, sample: Dict[str, torch.Tensor], outputs: Dict[str, torch.Tensor]) -> None:
         for scale in range(self.num_scales):
             disp = outputs[("disp", scale)]
-            # clip
-            # disp = torch.clamp(disp, 0.001, 1.0)
             
             if self.use_multiscale:
                 source_scale = scale
@@ -163,16 +158,17 @@ class MonodepthTrainer:
                 frame_id: -1 >> left to target,
                 frame_id: 1 >> target to right
                 """
-                # T = outputs[("cam_T_cam", 0, frame_id)]
+                if self.use_norm_depth:
+                    axisangle = outputs[("axisangle", 0, frame_id)]
+                    translation = outputs[("translation", 0, frame_id)]
 
-                axisangle = outputs[("axisangle", 0, frame_id)]
-                translation = outputs[("translation", 0, frame_id)]
+                    inv_depth = 1 / depth
+                    mean_inv_depth = inv_depth.mean(3, True).mean(2, True)
 
-                inv_depth = 1 / depth
-                mean_inv_depth = inv_depth.mean(3, True).mean(2, True)
-
-                T = transformation_from_parameters(
-                    axisangle[:, 0], translation[:, 0] * mean_inv_depth[:, 0], frame_id < 0)
+                    T = transformation_from_parameters(
+                        axisangle[:, 0], translation[:, 0] * mean_inv_depth[:, 0], frame_id < 0)
+                else:
+                    T = outputs[("cam_T_cam", 0, frame_id)]
 
                 cam_points = self.backproject_depth[source_scale](
                     depth, sample[("inv_K", source_scale)])
