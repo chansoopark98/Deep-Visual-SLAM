@@ -1,326 +1,298 @@
 import numpy as np
-import tensorflow as tf
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from PIL import Image
+import cv2
+from typing import Dict, List, Tuple
+import random
+
 try:
     from .mars_logger import MarsLoggerHandler
     from .redwood import RedwoodHandler
     from .custom_data import CustomDataHandler
     from .irs import IrsDataHandler
-    from .augmentation_tool import Augmentations
 except:
     from mars_logger import MarsLoggerHandler
     from redwood import RedwoodHandler
     from custom_data import CustomDataHandler
     from irs import IrsDataHandler
-    from augmentation_tool import Augmentations
 
-class MonoLoader(object):
-    def __init__(self, config) -> None:
+
+class MonoDataset(Dataset):
+    """PyTorch Dataset for mono visual odometry"""
+    
+    def __init__(self, samples: Dict[str, np.ndarray], image_size: Tuple[int, int], 
+                 is_train: bool = True, augment: bool = True):
+        self.samples = samples
+        self.image_size = image_size
+        self.is_train = is_train
+        self.augment = augment and is_train
+        
+        # ImageNet 정규화 값
+        self.mean = torch.tensor([0.485, 0.456, 0.406])
+        self.std = torch.tensor([0.229, 0.224, 0.225])
+        
+        # 데이터 증강을 위한 transform 설정
+        self._setup_transforms()
+        
+    def _setup_transforms(self):
+        """데이터 증강 및 전처리 transform 설정"""
+        if self.augment:
+            self.color_jitter = transforms.ColorJitter(
+                brightness=0.2,
+                contrast=0.2,
+                saturation=0.2,
+                hue=0.2
+            )
+        
+        self.to_tensor = transforms.ToTensor()
+        # self.normalize = transforms.Normalize(mean=self.mean, std=self.std)
+        
+    def __len__(self):
+        return len(self.samples['source_left'])
+
+    def _read_image(self, path: str) -> np.ndarray:
+        """이미지 읽기 및 리사이즈 - 최적화 버전"""
+        # OpenCV로 읽기 (더 빠름)
+        image = cv2.imread(path, cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError(f"Failed to read image: {path}")
+        
+        # 리사이즈 먼저, 그 다음 색상 변환 (메모리 효율적)
+        image = cv2.resize(image, (self.image_size[1], self.image_size[0]), 
+                          interpolation=cv2.INTER_LINEAR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        return image
+    
+    def _apply_augmentation(self, images: List[np.ndarray]) -> List[torch.Tensor]:
+        """이미지 증강 적용"""
+        # numpy to PIL
+        pil_images = [Image.fromarray(img) for img in images]
+        
+        # 동일한 증강 적용을 위한 seed 설정
+        if self.augment:
+            # 랜덤 좌우 반전
+            if random.random() > 0.5:
+                pil_images = [img.transpose(Image.FLIP_LEFT_RIGHT) for img in pil_images]
+            
+            # Color jitter 적용
+            # seed = random.randint(0, 2**32)
+            augmented_images = []
+            for img in pil_images:
+                
+                augmented_images.append(self.color_jitter(img))
+            pil_images = augmented_images
+        
+        # PIL to tensor
+        tensor_images = [self.to_tensor(img) for img in pil_images]
+        
+        return tensor_images
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """데이터 샘플 반환"""
+        # 경로 읽기
+        source_left_path = self.samples['source_left'][idx]
+        target_path = self.samples['target_image'][idx]
+        source_right_path = self.samples['source_right'][idx]
+        
+        # 이미지 읽기
+        source_left = self._read_image(source_left_path)
+        target = self._read_image(target_path)
+        source_right = self._read_image(source_right_path)
+        
+        # 증강 적용
+        images = self._apply_augmentation([source_left, target, source_right])
+        source_left, target, source_right = images
+        
+        # intrinsic 변환
+        intrinsic = torch.from_numpy(self.samples['intrinsic'][idx]).float()
+        
+        return {
+            'source_left': source_left,
+            'target_image': target,
+            'source_right': source_right,
+            'intrinsic': intrinsic
+        }
+
+
+class MonoLoader:
+    """PyTorch DataLoader wrapper for mono visual odometry"""
+    
+    def __init__(self, config):
         self.config = config
         self.batch_size = config['Train']['batch_size']
         self.use_shuffle = config['Train']['use_shuffle']
         self.image_size = (config['Train']['img_h'], config['Train']['img_w'])
         self.num_source = config['Train']['num_source']
-        self.auto_opt = tf.data.AUTOTUNE
-        self.mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
-        self.std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
-
-        self._load_dataset()
-        self.num_mono_train = self.num_mono_train // self.batch_size
-        self.num_mono_valid = self.num_mono_valid // self.batch_size
-        self.num_mono_test = self.num_mono_test // self.batch_size
-
-        self.augmentor = Augmentations(image_size=self.image_size)
-
-        if self.num_mono_train > 0:
-            self.train_mono_datasets = self._compile_dataset(self.train_mono_datasets, batch_size=self.batch_size, use_shuffle=True, is_train=True)
-        if self.num_mono_valid > 0:
-            self.valid_mono_datasets = self._compile_dataset(self.valid_mono_datasets, batch_size=self.batch_size, use_shuffle=False, is_train=False)
-        if self.num_mono_test > 0:
-            self.test_mono_datasets = self._compile_dataset(self.test_mono_datasets, batch_size=self.batch_size, use_shuffle=False, is_train=False)
+        self.num_workers = config.get('Train', {}).get('num_workers', 16)
         
+        # 데이터셋 로드
+        self._load_dataset()
+        
+        # DataLoader 생성
+        if self.num_mono_train > 0:
+            self.train_mono_loader = self._create_dataloader(
+                self.train_mono_data, 
+                batch_size=self.batch_size,
+                shuffle=True,
+                is_train=True
+            )
+            self.num_mono_train = len(self.train_mono_loader)
+            
+        if self.num_mono_valid > 0:
+            self.valid_mono_loader = self._create_dataloader(
+                self.valid_mono_data,
+                batch_size=self.batch_size,
+                shuffle=False,
+                is_train=False
+            )
+            self.num_mono_valid = len(self.valid_mono_loader)
+            
+        if self.num_mono_test > 0:
+            self.test_mono_loader = self._create_dataloader(
+                self.test_mono_data,
+                batch_size=self.batch_size,
+                shuffle=False,
+                is_train=False
+            )
+            self.num_mono_test = len(self.test_mono_loader)
+    
     def _load_dataset(self):
-        train_datasets = []
-        valid_datasets = []
-        test_datasets = []
-
+        """데이터셋 로드"""
+        train_data_list = []
+        valid_data_list = []
+        test_data_list = []
+        
         self.num_mono_train = 0
         self.num_mono_valid = 0
         self.num_mono_test = 0
         
+        # Mars Logger 데이터
         if self.config['Dataset']['mars_logger']:
             dataset = MarsLoggerHandler(config=self.config)
-            train_dataset = self._build_generator(samples=dataset.train_data)
-            valid_dataset = self._build_generator(samples=dataset.valid_data)
-            test_dataset = self._build_generator(samples=dataset.test_data)
-
-            train_datasets.append(train_dataset)
-            valid_datasets.append(valid_dataset)
-            test_datasets.append(test_dataset)
-
-            self.num_mono_train += dataset.train_data['source_left'].shape[0]
-            self.num_mono_valid += dataset.valid_data['source_left'].shape[0]
-            self.num_mono_test += dataset.test_data['source_left'].shape[0]
+            train_data_list.append(dataset.train_data)
+            valid_data_list.append(dataset.valid_data)
+            test_data_list.append(dataset.test_data)
+            
+            self.num_mono_train += len(dataset.train_data['source_left'])
+            self.num_mono_valid += len(dataset.valid_data['source_left'])
+            self.num_mono_test += len(dataset.test_data['source_left'])
         
+        # Custom 데이터
         if self.config['Dataset']['custom_data']:
             dataset = CustomDataHandler(config=self.config, mode='mono')
-            train_dataset = self._build_generator(samples=dataset.train_data)
-            valid_dataset = self._build_generator(samples=dataset.valid_data)
+            train_data_list.append(dataset.train_data)
+            valid_data_list.append(dataset.valid_data)
             
-            train_datasets.append(train_dataset)
-            valid_datasets.append(valid_dataset)
-
-            self.num_mono_train += dataset.train_data['source_left'].shape[0]
-            self.num_mono_valid += dataset.valid_data['source_left'].shape[0]
+            self.num_mono_train += len(dataset.train_data['source_left'])
+            self.num_mono_valid += len(dataset.valid_data['source_left'])
         
+        # IRS 데이터
         if self.config['Dataset']['irs']:
             dataset = IrsDataHandler(config=self.config, mode='mono')
-            train_dataset = self._build_generator(samples=dataset.train_data)
-            valid_dataset = self._build_generator(samples=dataset.valid_data)
-
-            train_datasets.append(train_dataset)
-            valid_datasets.append(valid_dataset)
-
-            self.num_mono_train += dataset.train_data['source_left'].shape[0]
-            self.num_mono_valid += dataset.valid_data['source_left'].shape[0]
+            train_data_list.append(dataset.train_data)
+            valid_data_list.append(dataset.valid_data)
+            
+            self.num_mono_train += len(dataset.train_data['source_left'])
+            self.num_mono_valid += len(dataset.valid_data['source_left'])
         
-        self.train_mono_datasets = train_datasets
-        self.valid_mono_datasets = valid_datasets
-        self.test_mono_datasets = test_datasets
-        
-
-    # def _build_generator(self, np_samples: np.ndarray) -> tf.data.Dataset:
-    #     dataset: tf.data.Dataset = tf.data.Dataset.from_generator(
-    #         lambda: np_samples,
-    #         output_signature = {
-    #         'source_left': tf.TensorSpec(shape=(), dtype=tf.string),
-    #         'target_image': tf.TensorSpec(shape=(), dtype=tf.string),
-    #         'source_right': tf.TensorSpec(shape=(), dtype=tf.string),
-    #         'intrinsic': tf.TensorSpec(shape=(3, 3), dtype=tf.float32),  # 3x3 행렬
-    #         }
-    #     )
-    #     return dataset
-
-    def _build_generator(self, samples: dict) -> tf.data.Dataset:
-        # from_tensor_slices 사용
-        dataset = tf.data.Dataset.from_tensor_slices({
-            'source_left': samples['source_left'],
-            'target_image': samples['target_image'],
-            'source_right': samples['source_right'],
-            'intrinsic': samples['intrinsic']
-        })
-        
-        return dataset
-
-    @tf.function()
-    def _read_image(self, rgb_path):
-        rgb_image = tf.io.read_file(rgb_path)
-        
-        is_png = tf.strings.regex_full_match(rgb_path, ".*\\.png$")
-        
-        rgb_image = tf.cond(
-            is_png,
-            lambda: tf.io.decode_png(rgb_image, channels=3),
-            lambda: tf.io.decode_jpeg(rgb_image, channels=3, dct_method='INTEGER_FAST')
-        )
-        
-        rgb_image = tf.image.resize(rgb_image, self.image_size, method='bilinear')
-        rgb_image = tf.cast(rgb_image, tf.uint8)
-        return rgb_image
-
-    @tf.function(jit_compile=True)
-    def normalize_image(self, image: tf.Tensor) -> tf.Tensor:
-        image = tf.cast(image, tf.float32)
-        image /= 255.0
-        # image = (image - self.mean) / self.std
-        return image
+        # 데이터 결합
+        self.train_mono_data = self._combine_datasets(train_data_list)
+        self.valid_mono_data = self._combine_datasets(valid_data_list)
+        self.test_mono_data = self._combine_datasets(test_data_list)
     
-    @tf.function(jit_compile=True)
-    def denormalize_image(self, image):
-        # image = (image * self.std) + self.mean
-        image *= 255.0
-        image = tf.cast(image, tf.uint8)
-        return image
-    
-    @tf.function()
-    def train_preprocess(self, sample: dict) -> tuple:
-        # read images
-        left_image = self._read_image(sample['source_left'])
-        target_image = self._read_image(sample['target_image'])
-        right_image = self._read_image(sample['source_right'])
-
-        # read intrinsic
-        intrinsic = tf.cast(sample['intrinsic'], tf.float32)
-
-        # augmentation
-        left_image, right_image, target_image = self.augmentation(left_image, target_image, right_image)
-
-        # normalize images
-        left_image = self.normalize_image(left_image)
-        target_image = self.normalize_image(target_image)
-        right_image = self.normalize_image(right_image)
+    def _combine_datasets(self, data_list: List[Dict]) -> Dict[str, np.ndarray]:
+        """여러 데이터셋을 하나로 결합"""
+        if not data_list:
+            return {
+                'source_left': np.array([]),
+                'target_image': np.array([]),
+                'source_right': np.array([]),
+                'intrinsic': np.array([])
+            }
         
-        processed_sample = {
-            'source_left': left_image,
-            'target_image': target_image,
-            'source_right': right_image,
-            'intrinsic': intrinsic,
+        combined = {
+            'source_left': [],
+            'target_image': [],
+            'source_right': [],
+            'intrinsic': []
         }
-        return processed_sample
+        
+        for data in data_list:
+            if len(data['source_left']) > 0:
+                combined['source_left'].extend(data['source_left'])
+                combined['target_image'].extend(data['target_image'])
+                combined['source_right'].extend(data['source_right'])
+                combined['intrinsic'].extend(data['intrinsic'])
+        
+        # numpy 배열로 변환
+        for key in combined:
+            combined[key] = np.array(combined[key])
+        
+        return combined
     
-    @tf.function()
-    def valid_process(self, sample: dict) -> tuple:
-        # read images
-        left_image = self._read_image(sample['source_left'])
-        target_image = self._read_image(sample['target_image'])
-        right_image = self._read_image(sample['source_right'])
-
-        # read intrinsic
-        intrinsic = tf.cast(sample['intrinsic'], tf.float32)
-
-        # normalize images
-        left_image = self.normalize_image(left_image)
-        target_image = self.normalize_image(target_image)
-        right_image = self.normalize_image(right_image)
-        
-        processed_sample = {
-            'source_left': left_image,
-            'target_image': target_image,
-            'source_right': right_image,
-            'intrinsic': intrinsic,
-        }
-        return processed_sample
-
-
-    @tf.function(jit_compile=True)
-    def augmentation(self, left_image, target_image, right_image):
-        # uint8 -> float32 (0-1 범위)로 변환
-        left_image = tf.image.convert_image_dtype(left_image, tf.float32)
-        target_image = tf.image.convert_image_dtype(target_image, tf.float32)
-        right_image = tf.image.convert_image_dtype(right_image, tf.float32)
-        
-        # 스택하여 한번에 처리
-        images = tf.stack([left_image, right_image, target_image], axis=0)
-        
-        # 랜덤 값들을 미리 생성
-        do_flip = tf.random.uniform([]) > 0.5
-        do_brightness = tf.random.uniform([]) > 0.5
-        do_contrast = tf.random.uniform([]) > 0.5
-        do_saturation = tf.random.uniform([]) > 0.5
-        do_hue = tf.random.uniform([]) > 0.5
-        
-        if do_flip:
-            images = tf.image.flip_left_right(images)
-        
-        if do_brightness:
-            delta_brightness = tf.random.uniform([], -0.2, 0.2)
-            images = tf.image.adjust_brightness(images, delta_brightness)
-        
-        if do_contrast:
-            contrast_factor = tf.random.uniform([], 0.8, 1.2)
-            images = tf.image.adjust_contrast(images, contrast_factor)
-        
-        if do_saturation:
-            saturation_factor = tf.random.uniform([], 0.8, 1.2)
-            images = tf.image.adjust_saturation(images, saturation_factor)
-        
-        if do_hue:
-            hue_factor = tf.random.uniform([], -0.2, 0.2)
-            images = tf.image.adjust_hue(images, hue_factor)
-        
-        # 클리핑 (0-1 범위 유지)
-        images = tf.clip_by_value(images, 0.0, 1.0)
-        
-        # float32 -> uint8로 변환
-        images = tf.image.convert_image_dtype(images, tf.uint8)
-        
-        # 언스택
-        left_image, right_image, target_image = tf.unstack(images, axis=0)
-        
-        return left_image, right_image, target_image
-    
-    def _compile_dataset(self, datasets: list, batch_size: int, use_shuffle: bool, is_train: bool = True) -> tf.data.Dataset:
-        if len(datasets) == 0:
-            raise ValueError("No datasets provided")
-        
-        # 단일 데이터셋인 경우
-        if len(datasets) == 1:
-            combined_dataset = datasets[0]
-        else:
-            # 여러 데이터셋을 interleave로 결합
-            weights = [1.0] * len(datasets)
-            combined_dataset = tf.data.Dataset.sample_from_datasets(
-                datasets, 
-                weights=weights,
-                stop_on_empty_dataset=True
-            )
-        
-        # 셔플링
-        if use_shuffle:
-            combined_dataset = combined_dataset.shuffle(
-                buffer_size=min(10000, batch_size * 512),
-                reshuffle_each_iteration=True,
-                seed=None  # 매번 다른 시드
-            )
-        
-        # 전처리 맵핑
-        map_func = self.train_preprocess if is_train else self.valid_process
-        combined_dataset = combined_dataset.map(
-            map_func,
-            num_parallel_calls=self.auto_opt,
-            deterministic=not is_train  # 훈련 시에는 비결정적으로
+    def _create_dataloader(self, data: Dict, batch_size: int, shuffle: bool, 
+                          is_train: bool) -> DataLoader:
+        """DataLoader 생성"""
+        dataset = MonoDataset(
+            samples=data,
+            image_size=self.image_size,
+            is_train=is_train,
+            augment=is_train
         )
         
-        # 배치 처리
-        combined_dataset = combined_dataset.batch(
-            batch_size,
-            drop_remainder=True,
-            num_parallel_calls=self.auto_opt
+        dataloader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            drop_last=True,
+            persistent_workers=True if self.num_workers > 0 else False
+            # persistent_workers=False
         )
         
-        # 프리페칭
-        combined_dataset = combined_dataset.prefetch(buffer_size=self.auto_opt)
-        
-        return combined_dataset
+        return dataloader
+    
+    @staticmethod
+    def denormalize_image(image: torch.Tensor) -> torch.Tensor:
+        """이미지 역정규화 (시각화용)"""
+        # image = image * std + mean  # ImageNet 역정규화
+        image = image * 255.0
+        image = image.clamp(0, 255).byte()
+        return image
 
+
+# 사용 예시
 if __name__ == '__main__':
-    import yaml   
+    import yaml
     import matplotlib.pyplot as plt
+    import time
     
     with open('./vo/config.yaml', 'r') as file:
         config = yaml.safe_load(file)
-
+    
+    # PyTorch DataLoader 생성
     data_loader = MonoLoader(config)
     
-    import time
+    # 데이터 로드 테스트
     avg_time = 0.0
-    for i, sample in enumerate(data_loader.train_mono_datasets.take(1000)):
+    for i, batch in enumerate(data_loader.train_mono_loader):
+        # if i >= 10:  # 10 배치만 테스트
+        #     break
+        # print(i)
         start_time = time.time()
-        left_image = sample['source_left'][0]
-        right_image = sample['source_right'][0]
-        target_image = sample['target_image'][0]
-        intrinsic = sample['intrinsic'][0]
         
-        left_image = data_loader.denormalize_image(left_image)
-        right_image = data_loader.denormalize_image(right_image)
-        target_image = data_loader.denormalize_image(target_image)
-
+        left_images = batch['source_left']
+        target_images = batch['target_image']
+        right_images = batch['source_right']
+        intrinsics = batch['intrinsic']
+        
         avg_time += time.time() - start_time
 
-        if i % 100 == 0:
-            print(f"Processed {i} samples, average time: {avg_time / (i + 1):.4f} seconds per sample")
+        if i > 100:
+            break
 
-
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        axes[0].imshow(left_image)
-        axes[0].set_title('Source Left')
-        axes[1].imshow(target_image)
-        axes[1].set_title('Target')
-        axes[2].imshow(right_image)
-        axes[2].set_title('Source Right')
-
-        print(f"Intrinsic: {intrinsic.numpy()}")
-        print(f'image shape: {left_image.shape}, {target_image.shape}, {right_image.shape}')
-        
-        plt.suptitle(f'Sample {i}')
-        plt.tight_layout()
-        plt.show()
+    print(f"\nAverage loading time per batch: {avg_time / 10:.4f} seconds")
