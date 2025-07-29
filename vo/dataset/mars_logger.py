@@ -1,15 +1,12 @@
 import os
 import glob
-from matplotlib.pyplot import sca
-import pandas as pd
 import numpy as np
 import cv2
 import json
 try:
-    from .common import MonoDataset, StereoDataset
+    from .common import MonoDataset
 except:
-    from common import MonoDataset, StereoDataset
-from typing import Dict, Tuple
+    from common import MonoDataset
 
 
 class MarsMonoDataset(MonoDataset):
@@ -114,39 +111,17 @@ class MarsMonoDataset(MonoDataset):
         length, resized_intrinsic = self._extract_video(scene_dir, camera_name)
     
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
-        
-        size = 1
-        if is_test:
-            step = 1
-        else:
-            step = 1
-        
-        source_left_paths = []
-        target_image_paths = []
-        source_right_paths = []
+
         intrinsics = []
-
-        for t in range(step + size, length - step - size, step):
-            source_left_paths.append(rgb_files[t - size])
-            target_image_paths.append(rgb_files[t])
-            source_right_paths.append(rgb_files[t + size])
+        for i in range(len(rgb_files)):
             intrinsics.append(resized_intrinsic)
-        
-        return {
-            'source_left': source_left_paths,
-            'target_image': target_image_paths,
-            'source_right': source_right_paths,
-            'intrinsic': intrinsics
-        }
-    
+
+        return rgb_files, intrinsics
+
     def _process_mono_scene(self, fold_dir: str):
-        source_left_images = [] # paths
-        target_images = [] # paths
-        source_right_images = [] # paths
-        intrinsics = [] # np.ndarray
-
         camera_types = glob.glob(os.path.join(self.root_dir, '*'))
-
+        rgb_samples = []
+        intrinsics = []
         for camera_type in camera_types:
             current_fold = os.path.join(camera_type, fold_dir)
             camera_name = os.path.basename(camera_type)
@@ -162,24 +137,20 @@ class MarsMonoDataset(MonoDataset):
                         is_test = True
                     else:
                         is_test = False
-                    samples = self._process(scene, camera_name, is_test=is_test)
-                    source_left_images.extend(samples['source_left'])
-                    target_images.extend(samples['target_image'])
-                    source_right_images.extend(samples['source_right'])
-                    intrinsics.extend(samples['intrinsic'])
+                    rgb_sample, intrinsic = self._process(scene, camera_name, is_test=is_test)
+                    rgb_samples.extend(rgb_sample)
+                    intrinsics.extend(intrinsic)
 
         # numpy 배열로 변환
         dataset_dict = {
-            'source_left': np.array(source_left_images, dtype=str),
-            'target_image': np.array(target_images, dtype=str),
-            'source_right': np.array(source_right_images, dtype=str),
+            'rgb_samples': np.array(rgb_samples, dtype=str),
             'intrinsic': np.array(intrinsics, dtype=np.float32)
         }
 
         print('Current fold:', fold_dir)
         print(f'  -- Camera types: {[os.path.basename(ct) for ct in camera_types]}')
-        print(f'  -- dataset size: {len(source_left_images)}')
-                
+        print(f'  -- dataset size: {len(rgb_samples)}')
+
         return dataset_dict
     
 class MarsDataHandler:
@@ -226,7 +197,7 @@ if __name__ == '__main__':
     with open('./vo/config.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
-    train_data = MarsMonoDataset(config=config, fold='test', shuffle=False, is_train=False, augment=False)
+    train_data = MarsMonoDataset(config=config, fold='train', shuffle=True, is_train=True, augment=True)
 
     for i in range(len(train_data)):
         sample = train_data[i]
@@ -236,27 +207,27 @@ if __name__ == '__main__':
         right_images = []
 
         num_scale = train_data.num_scale
-        plt.figure(figsize=(12, 4 * num_scale))
+        plt.figure(figsize=(12, 4))
 
-        for scale in range(num_scale):
-            left_image = sample[('source_left', scale)].permute(1, 2, 0).numpy()
-            target_image = sample[('target_image', scale)].permute(1, 2, 0).numpy()
-            right_image = sample[('source_right', scale)].permute(1, 2, 0).numpy()
+        # for scale in range(num_scale):
+        left_image = sample[('source_left', 0)].permute(1, 2, 0).numpy()
+        target_image = sample[('target_image', 0)].permute(1, 2, 0).numpy()
+        right_image = sample[('source_right', 0)].permute(1, 2, 0).numpy()
 
-            plt.subplot(num_scale, 3, scale * 3 + 1)
-            plt.imshow(left_image)
-            plt.title(f"Source Left - Scale {scale}")
-            plt.axis("off")
+        plt.subplot(num_scale, 3, 1)
+        plt.imshow(left_image)
+        plt.title(f"Source Left")
+        plt.axis("off")
 
-            plt.subplot(num_scale, 3, scale * 3 + 2)
-            plt.imshow(target_image)
-            plt.title(f"Target Image - Scale {scale}")
-            plt.axis("off")
+        plt.subplot(num_scale, 3, 2)
+        plt.imshow(target_image)
+        plt.title(f"Target Image")
+        plt.axis("off")
 
-            plt.subplot(num_scale, 3, scale * 3 + 3)
-            plt.imshow(right_image)
-            plt.title(f"Source Right - Scale {scale}")
-            plt.axis("off")
+        plt.subplot(num_scale, 3, 3)
+        plt.imshow(right_image)
+        plt.title(f"Source Right")
+        plt.axis("off")
 
         plt.tight_layout()
         plt.show()

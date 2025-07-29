@@ -1,4 +1,3 @@
-from curses import raw
 import numpy as np
 import torch
 import random
@@ -6,8 +5,6 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
 from typing import Dict, Tuple
-from torchvision.transforms import functional as TF
-import os
 
 class MonoDataset(Dataset):
     """Monodepth2용 모노 데이터셋"""
@@ -20,12 +17,14 @@ class MonoDataset(Dataset):
         self.config = config
         self.image_shape = (config['Train']['img_h'], config['Train']['img_w'])
         self.num_scale = config['Train']['num_scale']
-        self.source_left = dataset_dict['source_left']
-        self.target_image = dataset_dict['target_image']
-        self.source_right = dataset_dict['source_right']
+        self.rgb_samples = dataset_dict['rgb_samples']
         self.intrinsic = dataset_dict['intrinsic']
         self.image_size = image_size
         self.is_train = is_train
+        if self.is_train:
+            self.max_size = 3 # t-max_size, t, t+max_size 
+        else:
+            self.max_size = 1
         self.augment = augment and is_train
         self._setup_transforms()
 
@@ -44,16 +43,24 @@ class MonoDataset(Dataset):
         return img
 
     def __len__(self):
-        return len(self.target_image)
+        return len(self.rgb_samples) - (self.max_size * 2)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         inputs = {}
 
         imgs = []
-        for path in (self.source_left[idx],
-                     self.target_image[idx],
-                     self.source_right[idx]):
-            imgs.append(self._read_image(path))
+
+        # get random size
+        size_1 = random.randint(1, self.max_size)
+        size_2 = random.randint(1, self.max_size)
+
+        source_left = self.rgb_samples[idx]
+        target_image = self.rgb_samples[idx + size_1]
+        source_right = self.rgb_samples[idx + size_1 + size_2]
+
+        imgs.append(self._read_image(source_left))
+        imgs.append(self._read_image(target_image))
+        imgs.append(self._read_image(source_right))
 
         for scale in range(4):
             Wnew = self.image_shape[1] // (2**scale)
@@ -66,24 +73,6 @@ class MonoDataset(Dataset):
             inv_K = np.linalg.pinv(K)
             inputs[("K", scale)]     = torch.from_numpy(K).float()
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K).float()
-
-        # if self.augment:
-        #     if random.random() < 0.5:
-        #         _, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
-        #         self.color_jitter.get_params(
-        #             self.color_jitter.brightness,
-        #             self.color_jitter.contrast,
-        #             self.color_jitter.saturation,
-        #             self.color_jitter.hue
-        #         )
-        #         jittered = []
-        #         for im in imgs:
-        #             im = TF.adjust_brightness(im, brightness_factor)
-        #             im = TF.adjust_contrast(im, contrast_factor)
-        #             im = TF.adjust_saturation(im, saturation_factor)
-        #             im = TF.adjust_hue(im, hue_factor)
-        #             jittered.append(im)
-        #         imgs = jittered
         
         source_left = imgs[0]
         target_image = imgs[1]
