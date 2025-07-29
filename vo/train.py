@@ -93,7 +93,6 @@ class Trainer:
         ).to(self.device)
 
         if self.config['Train']['use_compile']:
-
             self.depth_net = torch.compile(self.depth_net, fullgraph=True)
             self.pose_net = torch.compile(self.pose_net, fullgraph=True)
 
@@ -128,7 +127,7 @@ class Trainer:
             depth_net=self.depth_net,
             pose_net=self.pose_net,
             config=self.config,
-            device=str(self.device)
+            device=self.device
         )
 
         # 7. Plot tool
@@ -171,7 +170,6 @@ class Trainer:
         self.optimizer.zero_grad(set_to_none=True)
         
         if self.use_amp:
-            # with autocast('cuda', dtype=torch.float16):
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 outputs, losses = self.learner.process_batch(
                     sample
@@ -193,15 +191,13 @@ class Trainer:
         for key in losses:
             losses[key] = losses[key].detach().cpu()
 
-        # pred_depths = [outputs[("depth", scale)].detach() for scale in range(self.learner.num_scales)]
-
         return total_loss, outputs, losses
     
     @torch.no_grad()
     def valid_mono_step(self, sample: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
         """Single validation step for mono with AMP support"""
         if self.use_amp:
-            with autocast('cuda', dtype=torch.float16):
+            with autocast(device_type=self.device.type, enabled=self.use_amp):
                 outputs, losses = self.learner.process_batch(
                     sample
                 )
@@ -225,7 +221,7 @@ class Trainer:
         
         for epoch in range(1, self.config['Train']['epoch'] + 1):
             # Training phase
-            # self.depth_net.train()
+            self.depth_net.train()
             self.pose_net.train()
             
             # Reset metrics
@@ -277,11 +273,6 @@ class Trainer:
                             global_step
                         )
                         del depth_plot  # 명시적 삭제
-                
-                # 주기적으로 메모리 정리
-                # if batch_idx % 50 == 0:
-                    # torch.cuda.empty_cache()
-                    # gc.collect()
                 
                 del t_loss_m, outputs_m
                 

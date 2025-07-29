@@ -17,17 +17,17 @@ class MonodepthTrainer:
                  depth_net: nn.Module,
                  pose_net: nn.Module,
                  config: dict,
-                 device: str = 'cuda'):
+                 device: torch.device):
         self.depth_net = depth_net
         self.pose_net = pose_net
         self.config = config
-        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
-        
-        # Move models to device
-        self.depth_net.to(self.device)
-        self.pose_net.to(self.device)
+        self.device = device
 
-                # Hyperparameters
+        # Move models to device
+        self.depth_net #.to(self.device)
+        self.pose_net #.to(self.device)
+
+        # Hyperparameters
         self.num_scales = 4
         self.num_source = config['Train']['num_source']  # 2
         self.batch_size = config['Train']['batch_size']  # 8
@@ -38,18 +38,25 @@ class MonodepthTrainer:
         self.ssim_ratio = config['Train']['ssim_ratio']  # 0.85
         self.min_depth = config['Train']['min_depth']  # 0.1
         self.max_depth = config['Train']['max_depth']  # 10.0
+        self.use_compile = config['Train']['use_compile']  # True
         
         # Initialize SSIM
         self.ssim = SSIM()
+        if self.use_compile:
+            self.ssim = torch.compile(self.ssim, fullgraph=True)
         self.ssim.to(self.device)
 
         # Initialize backprojection and projection layers
         self.backproject_depth = BackprojectDepth(self.batch_size, self.image_shape[0], self.image_shape[1])
+        if self.use_compile:
+            self.backproject_depth = torch.compile(self.backproject_depth, fullgraph=True)
         self.backproject_depth.to(self.device)
         self.project_3d = Project3D(self.batch_size, self.image_shape[0], self.image_shape[1])
+        if self.use_compile:
+            self.project_3d = torch.compile(self.project_3d, fullgraph=True)
         self.project_3d.to(self.device)
 
-    @torch.compile
+    # @torch.compile
     def _compute_reprojection_loss(self, pred: torch.Tensor, target: torch.Tensor):
         """
         Computes reprojection loss between a batch of predicted and target images
@@ -121,7 +128,7 @@ class MonodepthTrainer:
 
         return outputs
 
-    @torch.compile
+    # @torch.compile
     def _generate_images_pred(self, sample: Dict[str, torch.Tensor], outputs: Dict[str, torch.Tensor]) -> None:
         for scale in range(self.num_scales):
             disp_raw = outputs[("disp", scale)]
@@ -164,7 +171,7 @@ class MonodepthTrainer:
     
                 outputs[("color_identity", frame_id, scale)] = source_image
 
-    @torch.compile
+    # @torch.compile
     def _compute_losses(self, inputs, outputs):
         """
         Compute the reprojection and smoothness losses for a minibatch
