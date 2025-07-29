@@ -23,7 +23,7 @@ Train:
   valid_plot_interval: 20
   num_workers: 24
   use_amp: False
-  use_compile: False
+  use_compile: True
   valid_freq: 1
   save_freq: 2
   vis_batch_size: 1
