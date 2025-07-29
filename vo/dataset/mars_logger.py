@@ -1,23 +1,66 @@
 import os
 import glob
+from matplotlib.pyplot import sca
 import pandas as pd
 import numpy as np
 import cv2
 import json
+try:
+    from .common import MonoDataset, StereoDataset
+except:
+    from common import MonoDataset, StereoDataset
+from typing import Dict, Tuple
 
-class MarsLoggerHandler(object):
-    def __init__(self, config):
+
+class MarsMonoDataset(MonoDataset):
+    def __init__(self,
+                 config,
+                 fold: str = 'train',
+                 shuffle: bool = True,
+                 is_train: bool = True,
+                 augment: bool = True):
         self.config = config
+        self.fold = fold
+        self.shuffle = shuffle
         self.root_dir = '/media/park-ubuntu/park_cs/slam_data/mars_logger'
         self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
-        self.num_source = self.config['Train']['num_source'] # 1
-        self.imu_seq_len = self.config['Train']['imu_seq_len'] # 10
-        
-        self.train_data = self.generate_datasets(fold_dir='train', shuffle=True)
-        self.valid_data = self.generate_datasets(fold_dir='valid', shuffle=False)
-        self.test_dir = os.path.join(self.root_dir, 'S22', 'test')
-        self.test_data = self.generate_test(test_dir=self.test_dir)
+        self.num_source = self.config['Train']['num_source']
 
+        self.dataset_dict = self._process_mono_scene(fold_dir=fold)
+
+        super().__init__(config=self.config,
+                         dataset_dict=self.dataset_dict,
+                         image_size=self.image_size,
+                         is_train=is_train,
+                         augment=augment)
+
+    def _rescale_intrinsic(self,
+                        intrinsic: np.ndarray,
+                        target_size: tuple,
+                        current_size: tuple) -> np.ndarray:
+        """내부 파라미터를 타겟 이미지 크기에 맞게 스케일링하고, 4×4 homogeneous 형태로 반환"""
+        # 1) 3×3 intrinsics 스케일링
+        fx = intrinsic[0, 0] * target_size[1] / current_size[1]
+        fy = intrinsic[1, 1] * target_size[0] / current_size[0]
+        cx = intrinsic[0, 2] * target_size[1] / current_size[1]
+        cy = intrinsic[1, 2] * target_size[0] / current_size[0]
+        K3 = np.array([[fx, 0,  cx],
+                    [0,  fy, cy],
+                    [0,   0,  1 ]], dtype=np.float32)
+
+        # 2) 4×4 homogeneous intrinsics로 확장
+        K4 = np.eye(4, dtype=np.float32)
+        K4[:3, :3] = K3
+        # (원하면 K4[:3, 3] = [0,0,0] 으로 translation 항목도 조정 가능)
+
+        return K4
+    
+    def _load_calibration(self, sensor_dir: str):
+        """캘리브레이션 정보 로드"""
+        # 카메라 내부 파라미터
+        left_intrinsic = np.load(os.path.join(sensor_dir, 'left_intrinsics.npy'))
+        return left_intrinsic
+    
     def _extract_video(self, scene_dir: str, camera_name) -> int:
         video_file = os.path.join(scene_dir, 'movie.mp4')
         rgb_save_path = os.path.join(scene_dir, 'rgb')
@@ -64,15 +107,7 @@ class MarsLoggerHandler(object):
 
         return data_len, rescaled_intrinsic
 
-    def _rescale_intrinsic(self, intrinsic: np.ndarray, target_size: tuple, current_size: tuple) -> np.ndarray:
-        # New shape = self.image_size (H, W)
-        fx = intrinsic[0, 0] * target_size[1] / current_size[1]
-        fy = intrinsic[1, 1] * target_size[0] / current_size[0]
-        cx = intrinsic[0, 2] * target_size[1] / current_size[1]
-        cy = intrinsic[1, 2] * target_size[0] / current_size[0]
-        intrinsic_rescaled = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-        return intrinsic_rescaled
-
+    
     def _process(self, scene_dir: str, camera_name: str, is_test: bool=False) -> dict:
         """단일 scene 처리 - dict 반환"""
         # load video .mp4
@@ -80,20 +115,21 @@ class MarsLoggerHandler(object):
     
         rgb_files = sorted(glob.glob(os.path.join(scene_dir, 'rgb', '*.jpg')))
         
+        size = 1
         if is_test:
             step = 1
         else:
-            step = 3
+            step = 1
         
         source_left_paths = []
         target_image_paths = []
         source_right_paths = []
         intrinsics = []
-        
-        for t in range(self.num_source, length - self.num_source, step):
-            source_left_paths.append(rgb_files[t - 1])
+
+        for t in range(step + size, length - step - size, step):
+            source_left_paths.append(rgb_files[t - size])
             target_image_paths.append(rgb_files[t])
-            source_right_paths.append(rgb_files[t + 1])
+            source_right_paths.append(rgb_files[t + size])
             intrinsics.append(resized_intrinsic)
         
         return {
@@ -102,105 +138,125 @@ class MarsLoggerHandler(object):
             'source_right': source_right_paths,
             'intrinsic': intrinsics
         }
-            
-    def generate_datasets(self, fold_dir, shuffle=False, is_test=False) -> dict:
-        """데이터셋 생성 - dict 형태로 반환"""
-        camera_types = glob.glob(os.path.join(self.root_dir, '*'))
-        
+    
+    def _process_mono_scene(self, fold_dir: str):
+        source_left_images = [] # paths
+        target_images = [] # paths
+        source_right_images = [] # paths
+        intrinsics = [] # np.ndarray
 
-        # 전체 데이터를 저장할 리스트
-        all_source_left = []
-        all_target_image = []
-        all_source_right = []
-        all_intrinsic = []
+        camera_types = glob.glob(os.path.join(self.root_dir, '*'))
 
         for camera_type in camera_types:
             current_fold = os.path.join(camera_type, fold_dir)
             camera_name = os.path.basename(camera_type)
-
+            
             if not os.path.exists(current_fold):
                 continue
 
             scene_files = sorted(glob.glob(os.path.join(current_fold, '*')))
-            
+
             for scene in scene_files:
                 if os.path.isdir(scene):
-                    samples = self._process(scene, camera_name, is_test)
-                    if samples and len(samples['source_left']) > 0:
-                        all_source_left.extend(samples['source_left'])
-                        all_target_image.extend(samples['target_image'])
-                        all_source_right.extend(samples['source_right'])
-                        all_intrinsic.extend(samples['intrinsic'])
-        
+                    if fold_dir == 'valid' or fold_dir == 'test':
+                        is_test = True
+                    else:
+                        is_test = False
+                    samples = self._process(scene, camera_name, is_test=is_test)
+                    source_left_images.extend(samples['source_left'])
+                    target_images.extend(samples['target_image'])
+                    source_right_images.extend(samples['source_right'])
+                    intrinsics.extend(samples['intrinsic'])
+
         # numpy 배열로 변환
         dataset_dict = {
-            'source_left': np.array(all_source_left, dtype=str),
-            'target_image': np.array(all_target_image, dtype=str),
-            'source_right': np.array(all_source_right, dtype=str),
-            'intrinsic': np.array(all_intrinsic, dtype=np.float32)
+            'source_left': np.array(source_left_images, dtype=str),
+            'target_image': np.array(target_images, dtype=str),
+            'source_right': np.array(source_right_images, dtype=str),
+            'intrinsic': np.array(intrinsics, dtype=np.float32)
         }
 
         print('Current fold:', fold_dir)
         print(f'  -- Camera types: {[os.path.basename(ct) for ct in camera_types]}')
-        print(f'  -- dataset size: {len(all_source_left)}')
-
-        # 셔플링
-        if shuffle and len(all_source_left) > 0:
-            indices = np.random.permutation(len(all_source_left))
-            for key in dataset_dict:
-                dataset_dict[key] = dataset_dict[key][indices]
+        print(f'  -- dataset size: {len(source_left_images)}')
                 
         return dataset_dict
     
-    def generate_test(self, test_dir):
-        """테스트 데이터셋 생성 - dict 형태로 반환"""
-        if not os.path.exists(test_dir):
-            print(f"Test directory {test_dir} does not exist")
-            return {
-                'source_left': np.array([]),
-                'target_image': np.array([]),
-                'source_right': np.array([]),
-                'intrinsic': np.array([])
-            }
-
-        # 전체 데이터를 저장할 리스트
-        all_source_left = []
-        all_target_image = []
-        all_source_right = []
-        all_intrinsic = []
-
-        scene_files = sorted(glob.glob(os.path.join(test_dir, '*')))
+class MarsDataHandler:
+    def __init__(self, config):
+        self.config = config
+        self.root_dir = '/media/park-ubuntu/park_cs/slam_data/mars_logger'
+        self.image_size = (self.config['Train']['img_h'], self.config['Train']['img_w'])
         
-        for scene in scene_files:
-            if os.path.isdir(scene):
-                samples = self._process(scene, 'S22', is_test=True)
-                if samples and len(samples['source_left']) > 0:
-                    all_source_left.extend(samples['source_left'])
-                    all_target_image.extend(samples['target_image'])
-                    all_source_right.extend(samples['source_right'])
-                    all_intrinsic.extend(samples['intrinsic'])
+        # 데이터셋 생성
+        self.train_mono_dataset = None
+        self.valid_mono_dataset = None
+        self.test_mono_dataset = None
+        
+        if config['Dataset']['mars_logger']['mono']:
+            self.train_mono_dataset = MarsMonoDataset(
+                config=self.config,
+                fold='train',
+                shuffle=True,
+                is_train=True,
+                augment=True
+            )
 
-        # numpy 배열로 변환
-        dataset_dict = {
-            'source_left': np.array(all_source_left, dtype=str),
-            'target_image': np.array(all_target_image, dtype=str),
-            'source_right': np.array(all_source_right, dtype=str),
-            'intrinsic': np.array(all_intrinsic, dtype=np.float32)
-        }
-        
-        print(f'Test dataset size: {len(all_source_left)}')
-        
-        return dataset_dict
+            self.valid_mono_dataset = MarsMonoDataset(
+                config=self.config,
+                fold='valid',
+                shuffle=False,
+                is_train=False,
+                augment=False
+            )
+            self.test_mono_dataset = MarsMonoDataset(
+                config=self.config,
+                fold='test',
+                shuffle=False,
+                is_train=False,
+                augment=False
+            )
+
     
 if __name__ == '__main__':
     import yaml
-    
+    import matplotlib.pyplot as plt
+
     # load config
     with open('./vo/config.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
-    dataset = MarsLoggerHandler(config)
+    train_data = MarsMonoDataset(config=config, fold='test', shuffle=False, is_train=False, augment=False)
 
-    print(f"Train samples: {dataset.train_data['source_left'].shape}")
-    print(f"Valid samples: {dataset.valid_data['source_left'].shape}")
-    print(f"Test samples: {dataset.test_data['source_left'].shape}")
+    for i in range(len(train_data)):
+        sample = train_data[i]
+        
+        left_images = []
+        target_images = []
+        right_images = []
+
+        num_scale = train_data.num_scale
+        plt.figure(figsize=(12, 4 * num_scale))
+
+        for scale in range(num_scale):
+            left_image = sample[('source_left', scale)].permute(1, 2, 0).numpy()
+            target_image = sample[('target_image', scale)].permute(1, 2, 0).numpy()
+            right_image = sample[('source_right', scale)].permute(1, 2, 0).numpy()
+
+            plt.subplot(num_scale, 3, scale * 3 + 1)
+            plt.imshow(left_image)
+            plt.title(f"Source Left - Scale {scale}")
+            plt.axis("off")
+
+            plt.subplot(num_scale, 3, scale * 3 + 2)
+            plt.imshow(target_image)
+            plt.title(f"Target Image - Scale {scale}")
+            plt.axis("off")
+
+            plt.subplot(num_scale, 3, scale * 3 + 3)
+            plt.imshow(right_image)
+            plt.title(f"Source Right - Scale {scale}")
+            plt.axis("off")
+
+        plt.tight_layout()
+        plt.show()

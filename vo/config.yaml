@@ -1,22 +1,30 @@
 Directory:
-  exp_name: Monodepth2-resnet18-irs-withoutCustom_newPosenet
+  exp_name: Monodepth2-fullRes-depth_pose
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
   results: ./results
 
 Dataset:
-  custom_data: True
-  mars_logger: True
-  irs: True
-  redwood: False
-  tspxr_capture: False        # 새로운 플래그 추가
+  custom_data:
+    mono: False
+    stereo: False
+  mars_logger:
+    mono: True
+    stereo: False
+  irs:
+    mono: False
+    stereo: False
 
 Train:
   mode: axisAngle # axisAngle, euler
   use_shuffle: True
   train_plot_interval: 100 # 100
   valid_plot_interval: 20
+  num_workers: 24
+  use_amp: False
+  use_compile: True
+  valid_freq: 1
   save_freq: 2
   vis_batch_size: 1
   num_source: 1 # num_source = 1 >> image pair (t-1, t, t+1) / 2 >> image pair (t-2, t-1, t, t+1, t+2) default: 1
@@ -26,19 +34,15 @@ Train:
   max_depth: 10.0
   ssim_ratio: 0.85
   smoothness_ratio: 0.001
-  ab_ratio: 0.01
   auto_mask: True
   img_w: 640 #640
   img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 16 # 1
+  batch_size: 8 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001
-  use_stereo: true           # 스테레오 사용 여부
-  stereo_ratio: 0.4          # 스테레오 데이터 비율 (0.4 = 40%)
-  stereo_weight: 1.0         # 스테레오 손실 가중치
 
 Experiment:
   gpus: [0] # [0, 1]

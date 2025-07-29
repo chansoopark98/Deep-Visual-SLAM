@@ -18,6 +18,13 @@ class Visualizer:
         self.draw_plane = draw_plane
         self.is_record = is_record
 
+        self.slam_to_pyvista = np.array([
+            [1, 0, 0, 0],
+            [0, -1, 0, 0],  # Y축 반전
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+
         if draw_plane:
             self._draw_plane(world_center=np.array([0, 0, 0]), grid_size=10, tile_size=1)
         if is_record:
@@ -93,12 +100,13 @@ class Visualizer:
         - None
         """
         # Camera center (translation) in world coordinates
-        cam_center = world_pose[:3, 3]
+        pyvista_pose = self.slam_to_pyvista @ world_pose
+        cam_center = pyvista_pose[:3, 3]
 
         # Camera axes in world coordinates
-        x_axis = world_pose[:3, 0] * scale  # Red: X-axis (right)
-        y_axis = world_pose[:3, 1] * scale  # Green: Y-axis (up)
-        z_axis = world_pose[:3, 2] * scale  # Blue: Z-axis (forward)
+        x_axis = pyvista_pose[:3, 0] * scale  # Red: X-axis (right)
+        y_axis = pyvista_pose[:3, 1] * scale  # Green: Y-axis (up)
+        z_axis = pyvista_pose[:3, 2] * scale  # Blue: Z-axis (forward)
 
         # Convert to numpy arrays with correct shape
         cam_center = np.array([cam_center])  # Shape: (1, 3)
@@ -176,12 +184,12 @@ class Visualizer:
         rgb_flattened = rgb_image.reshape(-1, 3)
         
         # 세계 좌표계로 변환 후 PyVista 좌표계로 변환
-        points_world = (world_pose @ points_cam.T).T[:, :3]  # SLAM 세계 좌표계
-        # points_pyvista = (slam_to_pyvista @ points_world.T).T[:, :3]  # PyVista 좌표계
+        points_world = (world_pose @ points_cam.T).T # [:, :3]  # SLAM 세계 좌표계
+        points_pyvista = (slam_to_pyvista @ points_world.T).T[:, :3]  # PyVista 좌표계
         
         
         # 포인트 클라우드 생성
-        point_cloud = pv.PolyData(points_world)
+        point_cloud = pv.PolyData(points_pyvista)
         point_cloud["rgb"] = rgb_flattened
         
         self.camera_cloud.mapper.SetInputData(point_cloud)
@@ -198,8 +206,8 @@ class Visualizer:
         Returns:
         - None
         """
-
-        update_point = world_pose[:3, 3]  # Extract the camera center from the world pose
+        pyvista_pose = self.slam_to_pyvista @ world_pose
+        update_point = pyvista_pose[:3, 3]  # Extract the camera center from the world pose
         # Append the new point to the trajectory
         self.trajectory.append(update_point)
 
@@ -231,6 +239,7 @@ class Visualizer:
 
     def set_camera_poisition(self, world_pose):
         # 카메라 중심 위치
+        
         cam_center = world_pose[:3, 3]
         
         # 카메라 방향 벡터 (Monodepth2 좌표계에서)
