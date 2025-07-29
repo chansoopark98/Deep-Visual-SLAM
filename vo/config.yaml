@@ -1,5 +1,5 @@
 Directory:
-  exp_name: Monodepth2-fullRes-depth_pose
+  exp_name: Monodepth2-fullRes-depth_pose_randomData
   data_dir: ./vo/data/
   log_dir: ./tensorboard
   weights: ./weights
