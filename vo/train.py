@@ -15,7 +15,7 @@ from vo.learner_new import MonodepthTrainer
 from eval_traj import EvalTrajectory
 from model.depthnet import DepthNet
 # from model.posenet import PoseNet
-from model.posenet_single import PoseNet
+from model.posenet_single import PoseNet, FlowPoseNet
 from utils.plot_utils import PlotTool
 
 from tqdm import tqdm
@@ -86,11 +86,13 @@ class Trainer:
         self.depth_net.load_state_dict(state_dict)
 
         # Pose network
-        self.pose_net = PoseNet(
-            num_layers=18,
-            pretrained=True,
-            num_input_images=2,
-        ).to(self.device)
+        # self.pose_net = PoseNet(
+        #     num_layers=18,
+        #     pretrained=True,
+        #     num_input_images=2,
+        # ).to(self.device)
+
+        self.pose_net = FlowPoseNet().to(self.device)
 
         if self.config['Train']['use_compile']:
             self.depth_net = torch.compile(self.depth_net, fullgraph=True)
