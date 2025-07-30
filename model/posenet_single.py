@@ -92,59 +92,58 @@ class FlowPoseNet(nn.Module):
     def __init__(self):
         super(FlowPoseNet, self).__init__()
         
+        # RAFT 세팅
         parser = argparse.ArgumentParser()
-        args = parser.parse_args()
+        args = parser.parse_args([])
         args.small = True
         args.alternate_corr = False
         args.mixed_precision = False
-        corr_planes=4*(2*3+1)**2
+        corr_planes = 4*(2*3+1)**2
         
-        # Initialize RAFT for flow estimation
         self.flow_net = SmallRAFT(args)
-        path = './raft-small.pth'
-        state_dict = torch.load(path)
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            if k.startswith('module.'):
-                new_state_dict[k[7:]] = v
-            else:
-                new_state_dict[k] = v
-        self.flow_net.load_state_dict(new_state_dict)
-        self.flow_net.eval()
+        ckpt = torch.load('./raft-small.pth')
+        new_sd = {k.replace('module.', ''):v for k,v in ckpt.items()}
+        self.flow_net.load_state_dict(new_sd)
+        
+        # —— 여기가 추가된 pose 회귀 파트 —— #
+        # 1) flow_map → feature 추출 CNN
+        self.pose_cnn = nn.Sequential(
+            nn.Conv2d(2, 32, kernel_size=7, stride=2, padding=3),  # B×32×H/2×W/2
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2), # B×64×H/4×W/4
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),# B×128×H/8×W/8
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d(1)  # B×128×1×1
+        )
+        # 2) 글로벌 feature → pose (6D) 회귀 FC
+        self.fc = nn.Linear(128, 6)
+        # 작은 스케일 조정(선택)
+        self.pose_scale = 0.01  
 
-        self.update_module = FlowUpdateModule(corr_planes)
-
-    @torch.no_grad()
     def extract_flow(self, x1, x2):
-        """
-        RAFT Estimation
-        Args:
-            x1: tensor of shape [B, 3, H, W] (left image)
-            x2: tensor of shape [B, 3, H, W] (right image)
-        Returns:
-            flow: list of tensors, each of shape [B, 2, H, W]
-        """
-        flow_list = self.flow_net(x1, x2)
-        flow_map = flow_list[-1]  # Use the last flow map
-        return flow_map
+        flow_preds = self.flow_net(x1, x2)  # list of flow maps
+        return flow_preds[-1]               # 마지막 것 사용
 
     def forward(self, input_images):
-        """
-        Args:
-            input_images: tensor of shape [B, 6, H, W] (concatenated left and right images)
-        Returns:
-            axis_angle: tensor of shape [B, 1, 1, 3]
-            translation: tensor of shape [B, 1, 1, 3]
-        """
-        left_tensor = input_images[:, :3, :, :]
-        left_tensor = 2 * left_tensor - 1.0  # Normalize to [-1, 1]
-        right_tensor = input_images[:, 3:, :, :]
-        right_tensor = 2 * right_tensor - 1.0
+        # 1) 이미지 분리 및 [-1,1] 정규화
+        left  = input_images[:, :3, :, :]
+        right = input_images[:, 3:, :, :]
 
-        with torch.no_grad():
-            flow = self.extract_flow(left_tensor, right_tensor)   # (B,2,H,W)
-
-        # TODO
+        # 2) RAFT로 optical flow 추정
+        flow_map = self.extract_flow(left, right)  # (B,2,H,W)
+        
+        # 3) flow → CNN → feature vector
+        feat = self.pose_cnn(flow_map)             # B×128×1×1
+        feat = feat.view(feat.size(0), -1)         # B×128
+        
+        # 4) feature → 6D pose
+        pose6 = self.fc(feat)                      # B×6
+        pose6 = pose6.view(-1, 1, 1, 6) * self.pose_scale
+        
+        axis_angle  = pose6[..., :3]               # B×1×1×3
+        translation = pose6[..., 3:]               # B×1×1×3
+        
         return axis_angle, translation
 
 class PoseNet(nn.Module):
