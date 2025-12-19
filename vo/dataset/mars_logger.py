@@ -206,7 +206,7 @@ if __name__ == '__main__':
         target_images = []
         right_images = []
 
-        num_scale = train_data.num_scale
+        num_scale = 1
         plt.figure(figsize=(12, 4))
 
         # for scale in range(num_scale):
