@@ -10,10 +10,13 @@ Dataset:
     mono: False
     stereo: False
   mars_logger:
-    mono: True
+    mono: False
     stereo: False
   irs:
     mono: False
+    stereo: False
+  redwood:
+    mono: True
     stereo: False
 
 Train:
@@ -23,7 +26,7 @@ Train:
   valid_plot_interval: 20
   num_workers: 24
   use_amp: False
-  use_compile: True
+  use_compile: False
   valid_freq: 1
   save_freq: 2
   vis_batch_size: 1
@@ -39,7 +42,7 @@ Train:
   img_h: 480 #480
   weight_decay: 0.00001
   beta1: 0.9
-  batch_size: 8 # 1
+  batch_size: 16 # 1
   epoch: 31
   init_lr: 0.0001
   final_lr: 0.00001

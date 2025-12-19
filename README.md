@@ -50,3 +50,16 @@ Future work
 http://redwood-data.org/indoor_lidar_rgbd/download.html
 
 The focal length is 525 for both axes and the principal point is (319.5, 239.5)
+
+
+
+
+## env
+``` 
+conda create -n vslam python=3.12
+conda activate vslam
+```
+
+# CUDA 12.8 / Pytorch 2.9.1
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+

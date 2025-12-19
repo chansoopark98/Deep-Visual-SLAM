@@ -7,11 +7,13 @@ try:
     from .custom_data import CustomDataHandler
     from .mars_logger import MarsDataHandler
     from .irs import IrsDataHandler
-    
+    from .redwood import RedwoodDataHandler
+
 except:
     from custom_data import CustomDataHandler
     from mars_logger import MarsDataHandler
     from irs import IrsDataHandler
+    from redwood import RedwoodDataHandler
     
 
 class VoDataLoader:
@@ -150,18 +152,30 @@ class VoDataLoader:
             if irs_handler.train_mono_dataset:
                 self.train_mono_datasets.append(irs_handler.train_mono_dataset)
                 print(f"Added IRS train dataset: {len(irs_handler.train_mono_dataset)} samples")
-            
+
             if irs_handler.valid_mono_dataset:
                 self.valid_mono_datasets.append(irs_handler.valid_mono_dataset)
                 print(f"Added IRS valid dataset: {len(irs_handler.valid_mono_dataset)} samples")
-            
+
             if irs_handler.train_stereo_dataset:
                 self.train_stereo_datasets.append(irs_handler.train_stereo_dataset)
                 print(f"Added IRS Stereo train dataset: {len(irs_handler.train_stereo_dataset)} samples")
-            
+
             if irs_handler.valid_stereo_dataset:
                 self.valid_stereo_datasets.append(irs_handler.valid_stereo_dataset)
                 print(f"Added IRS Stereo valid dataset: {len(irs_handler.valid_stereo_dataset)} samples")
+
+        # Redwood 데이터셋 로드
+        if self.config['Dataset']['redwood']:
+            redwood_handler = RedwoodDataHandler(config=self.config)
+
+            if redwood_handler.train_mono_dataset:
+                self.train_mono_datasets.append(redwood_handler.train_mono_dataset)
+                print(f"Added Redwood train dataset: {len(redwood_handler.train_mono_dataset)} samples")
+
+            if redwood_handler.valid_mono_dataset:
+                self.valid_mono_datasets.append(redwood_handler.valid_mono_dataset)
+                print(f"Added Redwood valid dataset: {len(redwood_handler.valid_mono_dataset)} samples")
         
 
         # 전체 샘플 수 출력

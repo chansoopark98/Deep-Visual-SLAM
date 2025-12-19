@@ -1,6 +1,7 @@
 import sys
 import os
 import gc
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 import torch
@@ -80,7 +81,7 @@ class Trainer:
             os.path.join(self.save_path, f'depth_net_epoch_{epoch}.pth')
         )
         """
-        path = 'weights/depth/depth_net_epoch_26.pth'
+        path = 'weights/vo/depth_net_epoch_30.pth'
         state_dict = torch.load(path, map_location=self.device)
         state_dict = remove_prefix_from_state_dict(state_dict, prefix="_orig_mod.")
         self.depth_net.load_state_dict(state_dict)
@@ -91,6 +92,11 @@ class Trainer:
             pretrained=True,
             num_input_images=2,
         ).to(self.device)
+
+        path = 'weights/vo/pose_net_epoch_30.pth'
+        state_dict = torch.load(path, map_location=self.device)
+        state_dict = remove_prefix_from_state_dict(state_dict, prefix="_orig_mod.")
+        self.pose_net.load_state_dict(state_dict)
 
         if self.config['Train']['use_compile']:
             self.depth_net = torch.compile(self.depth_net, fullgraph=True)

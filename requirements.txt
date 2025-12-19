@@ -1,3 +1,7 @@
+# Install Pytorch
+# pip3 install torch torchvision
+
+
 #tensorflow==2.19.0
 tqdm
 pyyaml
@@ -6,3 +10,7 @@ opencv-python
 matplotlib
 scipy
 pytransform3d
+tensorboard
+pyvista
+imageio
+imageio[ffmpeg]

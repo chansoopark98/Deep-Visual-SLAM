@@ -32,7 +32,7 @@ class MonoDataset(Dataset):
         self.to_tensor = transforms.ToTensor()
         if self.augment:
             self.color_jitter = transforms.ColorJitter(
-                brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
+                brightness=0.3, contrast=0.3, saturation=0.3, hue=0.2
             )
 
     def _read_image(self, path: str) -> Image.Image:
@@ -74,13 +74,20 @@ class MonoDataset(Dataset):
             inputs[("K", scale)]     = torch.from_numpy(K).float()
             inputs[("inv_K", scale)] = torch.from_numpy(inv_K).float()
         
-        source_left = imgs[0]
-        target_image = imgs[1]
-        source_right = imgs[2]
+        batch = torch.stack([self.to_tensor(im) for im in imgs], dim=0)
 
-        inputs[("source_left", 0)] = self.to_tensor(source_left)
-        inputs[("target_image", 0)] = self.to_tensor(target_image)
-        inputs[("source_right", 0)] = self.to_tensor(source_right)
+        if self.augment:
+            if random.random() < 0.5:
+                batch = self.color_jitter(batch)
+
+        # batch to images
+        source_left = batch[0]
+        target_image = batch[1]
+        source_right = batch[2]
+
+        inputs[("source_left", 0)] = source_left
+        inputs[("target_image", 0)] = target_image
+        inputs[("source_right", 0)] = source_right
 
         return inputs
     
