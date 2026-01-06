@@ -43,7 +43,11 @@ class RedwoodSceneDataset(MonoDataset):
         )
 
     def _load_poses_from_json(self, json_path: str) -> List[np.ndarray]:
-        """JSON 파일에서 포즈 행렬들을 로드"""
+        """JSON 파일에서 포즈 행렬들을 로드
+
+        Open3D PoseGraph JSON은 column-major (Fortran order)로 저장됨
+        즉, 16개 값이 [col0, col1, col2, col3] 순서로 저장
+        """
         with open(json_path, 'r') as f:
             data = json.load(f)
 
@@ -52,8 +56,9 @@ class RedwoodSceneDataset(MonoDataset):
 
         for node in nodes:
             pose_flat = node['pose']  # 16개 값 (column-major)
-            # Column-major to row-major 4x4 행렬 변환
-            pose_matrix = np.array(pose_flat, dtype=np.float32).reshape(4, 4).T
+            # Column-major (Fortran order)로 4x4 행렬로 변환
+            # order='F'를 사용하여 올바른 SE(3) 행렬 복원 (마지막 열이 translation)
+            pose_matrix = np.array(pose_flat, dtype=np.float32).reshape(4, 4, order='F')
             poses.append(pose_matrix)
 
         return poses
@@ -86,9 +91,16 @@ class RedwoodSceneDataset(MonoDataset):
         }
 
     def _get_relative_pose(self, pose1: np.ndarray, pose2: np.ndarray) -> np.ndarray:
-        """두 절대 포즈에서 상대 포즈 계산: T_1->2 = T_2 * T_1^-1"""
-        T1_inv = np.linalg.inv(pose1)
-        T_rel = pose2 @ T1_inv
+        """두 절대 포즈에서 상대 포즈 계산
+
+        Redwood poses는 T_wc (camera-to-world)
+        상대 포즈 T_rel은 camera1 frame에서 camera2 frame으로의 변환
+        T_rel = T_c2w @ T_wc1 = inv(T_wc2) @ T_wc1
+
+        하지만 PoseNet은 source->target 방향을 예측하므로:
+        T_rel = inv(T_wc1) @ T_wc2
+        """
+        T_rel = np.linalg.inv(pose1) @ pose2
         return T_rel
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
@@ -242,14 +254,17 @@ class RedwoodDataHandler:
         if config['Dataset']['redwood'].get('mono', False):
             print("\nLoading Redwood dataset...")
 
-            self.train_mono_dataset = RedwoodMonoDataset(
-                config=config,
-                fold='train',
-                is_train=True,
-                augment=True
-            )
+            # Train 데이터셋
+            train_dir = os.path.join(self.root_dir, 'train')
+            if os.path.exists(train_dir) and os.listdir(train_dir):
+                self.train_mono_dataset = RedwoodMonoDataset(
+                    config=config,
+                    fold='train',
+                    is_train=True,
+                    augment=True
+                )
 
-            # validation 폴더가 비어있을 수 있음 - train 사용
+            # Validation 데이터셋
             valid_dir = os.path.join(self.root_dir, 'validation')
             if os.path.exists(valid_dir) and os.listdir(valid_dir):
                 self.valid_mono_dataset = RedwoodMonoDataset(
@@ -258,11 +273,13 @@ class RedwoodDataHandler:
                     is_train=False,
                     augment=False
                 )
-            else:
-                print("  Validation folder is empty, using train data for validation")
-                self.valid_mono_dataset = RedwoodMonoDataset(
+
+            # Test 데이터셋
+            test_dir = os.path.join(self.root_dir, 'test')
+            if os.path.exists(test_dir) and os.listdir(test_dir):
+                self.test_mono_dataset = RedwoodMonoDataset(
                     config=config,
-                    fold='train',
+                    fold='test',
                     is_train=False,
                     augment=False
                 )

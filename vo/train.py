@@ -1,7 +1,6 @@
 import sys
 import os
 import gc
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 import torch
@@ -312,7 +311,7 @@ class Trainer:
     @torch.no_grad()
     def validate(self, epoch: int) -> None:
         """Validation loop"""
-        # self.depth_net.eval()
+        self.depth_net.eval()
         self.pose_net.eval()
         
         valid_metrics = {

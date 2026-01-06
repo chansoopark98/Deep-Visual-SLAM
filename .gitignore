@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 assets/
+results/
 .vscode/
 
 # C extensions

@@ -92,7 +92,7 @@ class MonodepthTrainer:
         """
         for key in sample:
             if isinstance(sample[key], torch.Tensor):
-                sample[key] = sample[key].to(self.device)
+                sample[key] = sample[key].to(self.device, non_blocking=True)
 
 
         outputs: dict = self.depth_net(sample[('target_image', 0)])

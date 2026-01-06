@@ -22,13 +22,13 @@ Dataset:
 Train:
   mode: axisAngle # axisAngle, euler
   use_shuffle: True
-  train_plot_interval: 100 # 100
-  valid_plot_interval: 20
+  train_plot_interval: 1000 # 100
+  valid_plot_interval: 100
   num_workers: 24
   use_amp: False
   use_compile: False
-  valid_freq: 1
-  save_freq: 2
+  valid_freq: 2
+  save_freq: 1
   vis_batch_size: 1
   num_source: 1 # num_source = 1 >> image pair (t-1, t, t+1) / 2 >> image pair (t-2, t-1, t, t+1, t+2) default: 1
   num_scale: 4
