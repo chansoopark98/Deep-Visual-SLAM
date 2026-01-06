@@ -176,6 +176,10 @@ class VoDataLoader:
             if redwood_handler.valid_mono_dataset:
                 self.valid_mono_datasets.append(redwood_handler.valid_mono_dataset)
                 print(f"Added Redwood valid dataset: {len(redwood_handler.valid_mono_dataset)} samples")
+
+            if redwood_handler.test_mono_dataset:
+                self.test_mono_datasets.append(redwood_handler.test_mono_dataset)
+                print(f"Added Redwood test dataset: {len(redwood_handler.test_mono_dataset)} samples")
         
 
         # 전체 샘플 수 출력
