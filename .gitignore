@@ -210,3 +210,4 @@ third_party/*/build/
 third_party/**/*.o
 third_party/**/*.egg-info/
 third_party/*/models/
+cpp/build/
