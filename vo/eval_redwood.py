@@ -21,12 +21,13 @@ from model.posenet_single import PoseNet
 from PIL import Image
 import torchvision.transforms as transforms
 from vo.learner_func import transformation_from_parameters
+from dvslam.geometry.se3 import relative_pose as compute_relative_pose
+# target-metric targets (평가 신청서 항목 03, 04): 03 MAPE ≤ 2.96 %, 04 RPY mean abs error ≤ 3.4 °
+from dvslam.eval.metrics import (POS_MAPE_TARGET_PCT, ROT_ABS_TARGET_DEG, pair_metrics,
+                                 scene_summary, target-metric_items)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# target-metric targets (평가 신청서 항목 03, 04)
-POS_MAPE_TARGET_PCT = 2.96   # 03 AR 위치 오차: MAPE ≤ 2.96 %
-ROT_ABS_TARGET_DEG = 3.4     # 04 AR 회전 오차: Roll·Pitch·Yaw 평균 절대 오차 ≤ 3.4 °
 RPY_ERR_COLS = ['rot_abs_err_roll_deg', 'rot_abs_err_pitch_deg', 'rot_abs_err_yaw_deg']
 
 
@@ -65,23 +66,6 @@ def load_redwood_poses(json_path: str, use_training_convention: bool = False) ->
         poses.append(pose)
 
     return np.array(poses)
-
-
-def compute_relative_pose(T_0: np.ndarray, T_1: np.ndarray) -> np.ndarray:
-    """Compute relative pose from T_0 to T_1
-
-    Args:
-        T_0: 4x4 transformation matrix at time t
-        T_1: 4x4 transformation matrix at time t+1
-
-    Returns:
-        T_rel: 4x4 relative transformation from T_0 to T_1
-               T_rel transforms points from T_0 frame to T_1 frame
-    """
-    # T_rel = inv(T_0) @ T_1
-    # This gives the transformation from camera frame at t=0 to camera frame at t=1
-    T_rel = np.linalg.inv(T_0) @ T_1
-    return T_rel
 
 
 def align_trajectories_umeyama(poses_pred: np.ndarray, poses_gt: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray, np.ndarray]:
@@ -158,70 +142,6 @@ def align_trajectories_umeyama(poses_pred: np.ndarray, poses_gt: np.ndarray) -> 
         poses_aligned.append(pose_aligned)
 
     return np.array(poses_aligned), scale, R, t
-
-
-def rotation_matrix_to_euler(R: np.ndarray) -> np.ndarray:
-    """Convert rotation matrix to Euler angles (ZYX convention)
-
-    Args:
-        R: 3x3 rotation matrix
-
-    Returns:
-        euler: (roll, pitch, yaw) in radians
-    """
-    # ZYX Euler angles (roll-pitch-yaw)
-    sy = np.sqrt(R[0, 0]**2 + R[1, 0]**2)
-    singular = sy < 1e-6
-
-    if not singular:
-        roll = np.arctan2(R[2, 1], R[2, 2])
-        pitch = np.arctan2(-R[2, 0], sy)
-        yaw = np.arctan2(R[1, 0], R[0, 0])
-    else:
-        roll = np.arctan2(-R[1, 2], R[1, 1])
-        pitch = np.arctan2(-R[2, 0], sy)
-        yaw = 0
-
-    return np.array([roll, pitch, yaw])
-
-
-def compute_pose_error(T_gt: np.ndarray, T_pred: np.ndarray) -> Tuple[float, float, np.ndarray, np.ndarray]:
-    """Compute position and rotation error between GT and predicted poses
-
-    Args:
-        T_gt: 4x4 ground truth transformation matrix
-        T_pred: 4x4 predicted transformation matrix
-
-    Returns:
-        pos_error: Position error (L2 norm)
-        rot_error: Rotation error in degrees
-        pos_diff: Position difference vector (3,)
-        rot_diff: Rotation difference in Euler angles (radians) (3,)
-    """
-    # Position error
-    pos_gt = T_gt[:3, 3]
-    pos_pred = T_pred[:3, 3]
-    pos_diff = pos_gt - pos_pred
-    pos_error = np.linalg.norm(pos_diff)
-
-    # Rotation error
-    R_gt = T_gt[:3, :3]
-    R_pred = T_pred[:3, :3]
-
-    # Compute relative rotation
-    R_diff = R_gt @ R_pred.T
-
-    # Convert to angle
-    trace = np.trace(R_diff)
-    rot_error_rad = np.arccos(np.clip((trace - 1) / 2, -1.0, 1.0))
-    rot_error_deg = np.degrees(rot_error_rad)
-
-    # Also compute Euler angle differences for analysis
-    euler_gt = rotation_matrix_to_euler(R_gt)
-    euler_pred = rotation_matrix_to_euler(R_pred)
-    rot_diff = euler_gt - euler_pred
-
-    return pos_error, rot_error_deg, pos_diff, rot_diff
 
 
 def axisangle_to_matrix(axisangle: torch.Tensor) -> torch.Tensor:
@@ -582,43 +502,19 @@ class RedwoodEvaluator:
             T_abs_pred_new = abs_poses_pred[-1] @ T_pred_rel
             abs_poses_pred.append(T_abs_pred_new)
 
-            # Compute errors using relative poses
-            pos_error, rot_error_deg, pos_diff, rot_diff = compute_pose_error(T_gt_rel, T_pred_rel)
-
-            # Extract components from relative poses
-            gt_pos = T_gt_rel[:3, 3]
-            gt_euler = rotation_matrix_to_euler(T_gt_rel[:3, :3])
-
-            pred_pos = T_pred_rel[:3, 3]
-            pred_euler = rotation_matrix_to_euler(T_pred_rel[:3, :3])
-
-            # Compute error percentages (magnitude error only)
-            gt_pos_norm = np.linalg.norm(gt_pos)
-            pred_pos_norm = np.linalg.norm(pred_pos)
-            gt_rot_norm = np.linalg.norm(gt_euler)
-            pred_rot_norm = np.linalg.norm(pred_euler)
-
-            # Percentage error in magnitude (not vector difference)
-            pos_error_percent = abs(pred_pos_norm - gt_pos_norm) / gt_pos_norm * 100 if gt_pos_norm > 1e-6 else 0
-            rot_error_percent = abs(pred_rot_norm - gt_rot_norm) / gt_rot_norm * 100 if gt_rot_norm > 1e-6 else 0
-
-            # target-metric 04: |GT angle - predicted angle| per Roll/Pitch/Yaw axis (deg), wrapped to [-180, 180)
-            rpy_abs_err_deg = np.abs(np.degrees((gt_euler - pred_euler + np.pi) % (2 * np.pi) - np.pi))
+            # Per-pair errors (target-metric 03: magnitude only; 04: wrapped |Δ| roll/pitch/yaw), dvslam.eval.metrics
+            m = pair_metrics(T_gt_rel, T_pred_rel)
 
             # Add to CSV data with relative paths
             row = [
                 i, i+1,
                 self.get_relative_path(img_t),
                 self.get_relative_path(img_t1),
-                gt_pos[0], gt_pos[1], gt_pos[2],
-                gt_euler[0], gt_euler[1], gt_euler[2],
-                pred_pos[0], pred_pos[1], pred_pos[2],
-                pred_euler[0], pred_euler[1], pred_euler[2],
-                pos_diff[0], pos_diff[1], pos_diff[2],
-                rot_diff[0], rot_diff[1], rot_diff[2],
-                pos_error, rot_error_deg,
-                pos_error_percent, rot_error_percent,
-                *rpy_abs_err_deg
+                *m['gt_t'], *m['gt_euler'], *m['pred_t'], *m['pred_euler'],
+                *m['pos_diff'], *m['rot_diff'],
+                m['pos_error'], m['rot_error_deg'],
+                m['pos_error_percent'], m['rot_error_percent'],
+                *m['rpy_abs_err_deg']
             ]
             csv_data.append(row)
 
@@ -635,11 +531,10 @@ class RedwoodEvaluator:
         pos_error_percents = [row[col['pos_error_percent']] for row in csv_data]
         rot_error_percents = [row[col['rot_error_percent']] for row in csv_data]
         rpy_errs = np.array([[row[col[c]] for c in RPY_ERR_COLS] for row in csv_data])  # (n, 3)
+        gt_t = np.array([[row[col[c]] for c in ('gt_tx', 'gt_ty', 'gt_tz')] for row in csv_data])
+        summary = scene_summary(scene_name, pos_error_percents, rpy_errs, gt_t)
         rpy_axis_mean = rpy_errs.mean(axis=0)
-        zero_motion_pairs = sum(
-            1 for row in csv_data
-            if np.linalg.norm([row[col['gt_tx']], row[col['gt_ty']], row[col['gt_tz']]]) <= 1e-6
-        )
+        zero_motion_pairs = summary['zero_motion_pairs']
 
         print(f"\n=== Results for {scene_name} ===")
         print(f"Number of evaluated pairs: {len(csv_data)}")
@@ -665,16 +560,7 @@ class RedwoodEvaluator:
         output_plot = output_csv.replace('.csv', '_trajectory.png')
         self.plot_trajectory(abs_poses_gt, abs_poses_pred, scene_name, output_plot)
 
-        return {
-            'scene': scene_name,
-            'pairs': len(csv_data),
-            'pos_mape_pct': float(np.mean(pos_error_percents)),
-            'rot_roll_deg': float(rpy_axis_mean[0]),
-            'rot_pitch_deg': float(rpy_axis_mean[1]),
-            'rot_yaw_deg': float(rpy_axis_mean[2]),
-            'rot_rpy_mean_deg': float(rpy_errs.mean()),
-            'zero_motion_pairs': zero_motion_pairs,
-        }
+        return summary
 
 
 def sha256_of(path: str) -> str:
@@ -759,14 +645,14 @@ def main():
 
     complete = not failed and len(summaries) == 5
     if summaries:
-        pos_mean = float(np.mean([s['pos_mape_pct'] for s in summaries]))
-        rot_mean = float(np.mean([s['rot_rpy_mean_deg'] for s in summaries]))
+        k = target-metric_items(summaries)
         lines += [
             '',
-            f'[03] AR 위치 오차 (MAPE, {len(summaries)}개 시퀀스 평균): {pos_mean:.4f} %  '
-            f'(목표 ≤ {POS_MAPE_TARGET_PCT} %) -> {"PASS" if pos_mean <= POS_MAPE_TARGET_PCT else "FAIL"}',
-            f'[04] AR 회전 오차 (Roll·Pitch·Yaw 평균 절대 오차, {len(summaries)}개 시퀀스 평균): {rot_mean:.6f} °  '
-            f'(목표 ≤ {ROT_ABS_TARGET_DEG} °) -> {"PASS" if rot_mean <= ROT_ABS_TARGET_DEG else "FAIL"}',
+            f'[03] AR 위치 오차 (MAPE, {len(summaries)}개 시퀀스 평균): {k["item03_mape_pct"]:.4f} %  '
+            f'(목표 ≤ {POS_MAPE_TARGET_PCT} %) -> {"PASS" if k["item03_pass"] else "FAIL"}',
+            f'[04] AR 회전 오차 (Roll·Pitch·Yaw 평균 절대 오차, {len(summaries)}개 시퀀스 평균): '
+            f'{k["item04_rpy_mean_deg"]:.6f} °  '
+            f'(목표 ≤ {ROT_ABS_TARGET_DEG} °) -> {"PASS" if k["item04_pass"] else "FAIL"}',
         ]
     if not complete:
         lines.append(f'INCOMPLETE: failed scenes = {failed}, evaluated {len(summaries)}/5 -> 공식 판정 불가')
