@@ -1,3 +1,4 @@
+#include <ATen/cuda/CUDAContext.h>  // dvslam: launch on the current stream (CUDA graphs)
 
 #include "lietorch_gpu.h"
 #include <Eigen/Dense>
@@ -301,7 +302,7 @@ torch::Tensor exp_forward_gpu(int group_id, torch::Tensor a) {
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, a.scalar_type(), "exp_forward_kernel", ([&] {
         X = torch::zeros({batch_size, group_t::N}, a.options());
-        exp_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        exp_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             a.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             batch_size);
@@ -315,7 +316,7 @@ std::vector<torch::Tensor> exp_backward_gpu(int group_id, torch::Tensor grad, to
     torch::Tensor da = torch::zeros(a.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, a.scalar_type(), "exp_backward_kernel", ([&] {
-        exp_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        exp_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             a.data_ptr<scalar_t>(), 
             da.data_ptr<scalar_t>(), 
@@ -331,7 +332,7 @@ torch::Tensor log_forward_gpu(int group_id, torch::Tensor X) {
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "log_forward_kernel", ([&] {
         a = torch::zeros({batch_size, group_t::K}, X.options());
-        log_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        log_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             a.data_ptr<scalar_t>(), 
             batch_size);
@@ -345,7 +346,7 @@ std::vector<torch::Tensor> log_backward_gpu(int group_id, torch::Tensor grad, to
     torch::Tensor dX = torch::zeros(X.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "log_backward_kernel", ([&] {
-        log_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        log_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             dX.data_ptr<scalar_t>(), 
@@ -360,7 +361,7 @@ torch::Tensor inv_forward_gpu(int group_id, torch::Tensor X) {
     torch::Tensor Y = torch::zeros_like(X);
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "inv_forward_kernel", ([&] {
-        inv_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        inv_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             Y.data_ptr<scalar_t>(), 
             batch_size);
@@ -374,7 +375,7 @@ std::vector<torch::Tensor> inv_backward_gpu(int group_id, torch::Tensor grad, to
     torch::Tensor dX = torch::zeros(X.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "inv_backward_kernel", ([&] {
-        inv_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        inv_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             dX.data_ptr<scalar_t>(), 
@@ -390,7 +391,7 @@ torch::Tensor mul_forward_gpu(int group_id, torch::Tensor X, torch::Tensor Y) {
     torch::Tensor Z = torch::zeros_like(X);
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "mul_forward_kernel", ([&] {
-        mul_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        mul_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             Y.data_ptr<scalar_t>(), 
             Z.data_ptr<scalar_t>(), 
@@ -406,7 +407,7 @@ std::vector<torch::Tensor> mul_backward_gpu(int group_id, torch::Tensor grad, to
     torch::Tensor dY = torch::zeros(Y.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "mul_backward_kernel", ([&] {
-        mul_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        mul_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             Y.data_ptr<scalar_t>(), 
@@ -423,7 +424,7 @@ torch::Tensor adj_forward_gpu(int group_id, torch::Tensor X, torch::Tensor a) {
     torch::Tensor b = torch::zeros(a.sizes(), a.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "adj_forward_kernel", ([&] {
-        adj_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        adj_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             a.data_ptr<scalar_t>(), 
             b.data_ptr<scalar_t>(), 
@@ -439,7 +440,7 @@ std::vector<torch::Tensor> adj_backward_gpu(int group_id, torch::Tensor grad, to
     torch::Tensor da = torch::zeros(a.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "adj_backward_kernel", ([&] {
-        adj_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        adj_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             a.data_ptr<scalar_t>(), 
@@ -457,7 +458,7 @@ torch::Tensor adjT_forward_gpu(int group_id, torch::Tensor X, torch::Tensor a) {
     torch::Tensor b = torch::zeros(a.sizes(), a.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "adjT_forward_kernel", ([&] {
-        adjT_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        adjT_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             a.data_ptr<scalar_t>(), 
             b.data_ptr<scalar_t>(), 
@@ -473,7 +474,7 @@ std::vector<torch::Tensor> adjT_backward_gpu(int group_id, torch::Tensor grad, t
     torch::Tensor da = torch::zeros(a.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "adjT_backward_kernel", ([&] {
-        adjT_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        adjT_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             a.data_ptr<scalar_t>(), 
@@ -492,7 +493,7 @@ torch::Tensor act_forward_gpu(int group_id, torch::Tensor X, torch::Tensor p) {
     torch::Tensor q = torch::zeros(p.sizes(), p.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "act_forward_kernel", ([&] {
-        act_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        act_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             p.data_ptr<scalar_t>(), 
             q.data_ptr<scalar_t>(),
@@ -508,7 +509,7 @@ std::vector<torch::Tensor> act_backward_gpu(int group_id, torch::Tensor grad, to
     torch::Tensor dp = torch::zeros(p.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "act_backward_kernel", ([&] {
-        act_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        act_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             p.data_ptr<scalar_t>(), 
@@ -525,7 +526,7 @@ torch::Tensor act4_forward_gpu(int group_id, torch::Tensor X, torch::Tensor p) {
     torch::Tensor q = torch::zeros(p.sizes(), p.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "act4_forward_kernel", ([&] {
-        act4_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        act4_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             p.data_ptr<scalar_t>(), 
             q.data_ptr<scalar_t>(),
@@ -541,7 +542,7 @@ std::vector<torch::Tensor> act4_backward_gpu(int group_id, torch::Tensor grad, t
     torch::Tensor dp = torch::zeros(p.sizes(), grad.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "act4_backward_kernel", ([&] {
-        act4_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        act4_backward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             grad.data_ptr<scalar_t>(), 
             X.data_ptr<scalar_t>(), 
             p.data_ptr<scalar_t>(), 
@@ -559,7 +560,7 @@ torch::Tensor as_matrix_forward_gpu(int group_id, torch::Tensor X) {
     torch::Tensor T4x4 = torch::zeros({X.size(0), 4, 4}, X.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "as_matrix_forward_kernel", ([&] {
-        as_matrix_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        as_matrix_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             T4x4.data_ptr<scalar_t>(), 
             batch_size);
@@ -575,7 +576,7 @@ torch::Tensor orthogonal_projector_gpu(int group_id, torch::Tensor X) {
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "orthogonal_projector_kernel", ([&] {
         P = torch::zeros({X.size(0), group_t::N, group_t::N}, X.options());
-        orthogonal_projector_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        orthogonal_projector_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             P.data_ptr<scalar_t>(), 
             batch_size);
@@ -590,7 +591,7 @@ torch::Tensor jleft_forward_gpu(int group_id, torch::Tensor X, torch::Tensor a) 
     torch::Tensor b = torch::zeros(a.sizes(), a.options());
 
     DISPATCH_GROUP_AND_FLOATING_TYPES(group_id, X.scalar_type(), "jleft_forward_kernel", ([&] {
-        jleft_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS>>>(
+        jleft_forward_kernel<group_t, scalar_t><<<NUM_BLOCKS(batch_size), NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>  /* dvslam: current stream */(
             X.data_ptr<scalar_t>(), 
             a.data_ptr<scalar_t>(), 
             b.data_ptr<scalar_t>(), 

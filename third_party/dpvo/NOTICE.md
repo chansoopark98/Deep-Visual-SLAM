@@ -38,3 +38,25 @@ git submodules, `DPViewer/` and `DPRetrieval/` (both vendor pybind11), `logs/`, 
 6. `dpvo/config.py` + `dpvo/dpvo.py:__call__`: new `LATEST_UPDATES` option (default 1 = upstream behaviour): number of `update()` calls on each new frame after initialisation. Used by the plan's A-N3 ρ trigger.
 
 Build steps: `BUILD_sm120.md`.
+7. **Plan v3 items 1.1 / 1.2 (2026-11-18), used by `dvslam/odometry/dpvo_metric.py` only:**
+   - `dpvo/fastba/ba_cuda.cu`: `cuda_ba` takes four extra arguments (`prior_disp`, `prior_w`, `prior_lambda`,
+     `prior_huber`) and, when `prior_lambda > 0`, adds a per-patch log-depth unary
+     (`depth_prior_unary_kernel`: r = log z_prior − log z, w = λ · prior_w · Huber(r; δ), Gauss-Newton terms into
+     the patch blocks C, u before the Schur complement). **The idea follows ViPE MetricTrail**
+     (`assets/references/vipe/vipe/metrictrail/csrc/dpvo/fastba/ba_cuda.cu:402-437`, NVIDIA, **Apache-2.0**);
+     the kernel was re-implemented here, no ViPE code was copied.
+   - `dpvo/fastba/ba.cpp`: the existing `forward` binding is unchanged in signature (passes an empty prior);
+     new binding `forward_prior`. `dpvo/fastba/ba.py`, `dpvo/fastba/__init__.py`: new wrapper `BA_prior`.
+   - `setup_metric.py` (new): builds the same BA sources as module **`cuda_ba_metric`** so the frozen
+     `cuda_ba` build used by `dpvo_mono` is never rebuilt or overwritten.
+   - `dpvo/static_graph.py` (new): fixed-shape (E_max-padded) update operator — static group ids, GPU
+     neighbour table (no CPU sort), static-size `scatter_softmax` / `scatter_sum` (no `torch.unique`, no
+     `index.max()` host syncs). Equal to `Update.forward` on the real edges up to summation order (tested).
+   - `dpvo/altcorr/correlation_kernel.cu`, `dpvo/lietorch/src/lietorch_gpu.cu`: every kernel launch passes
+     `at::cuda::getCurrentCUDAStream()` (upstream launched on the legacy default stream, which breaks CUDA-graph
+     capture and side-stream use). Behaviour on the default stream is unchanged. `setup_stream.py` (new)
+     builds these two modules into `build/stream_ext/` (used only with `cuda_graph=1`); the in-place
+     `cuda_corr` / `lietorch_backends` builds were **not** rebuilt.
+   - `dpvo/dpvo.py` itself is unchanged: `dvslam/odometry/dpvo_metric.py` subclasses `DPVO` (prior init at
+     patch creation, prior/weight buffers shifted with the patch slots on culling, BA failure recorded instead
+     of swallowed, ring-buffer edges).

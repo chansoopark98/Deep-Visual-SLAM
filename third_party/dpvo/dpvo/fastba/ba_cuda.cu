@@ -376,6 +376,38 @@ __global__ void reprojection_residuals_and_hessian(
 }
 
 
+
+// dvslam: log-depth prior unary on each patch inverse depth (plan v3 §4.5, item 1.1).
+// Idea from ViPE MetricTrail fastba (Apache-2.0, see NOTICE.md); reimplemented, not copied.
+// Residual r = log(prior_disp) - log(z) (z = patch inverse depth, prior_disp = 1 / (d_prior * e^g) in BA units),
+// equal to log(d_prior e^g) - log(d) in depth. Gauss-Newton in DPVO's convention (u += w r J, C += w J^2, J = dlog z/dz).
+// Weight w = lambda * prior_w[p] * Huber(r; huber), prior_w <= 0 means "no prior".
+__global__ void depth_prior_unary_kernel(
+    const torch::PackedTensorAccessor32<float,4,torch::RestrictPtrTraits> patches,
+    const torch::PackedTensorAccessor32<float,1,torch::RestrictPtrTraits> prior_disp,
+    const torch::PackedTensorAccessor32<float,1,torch::RestrictPtrTraits> prior_w,
+    const torch::PackedTensorAccessor32<long,1,torch::RestrictPtrTraits> kx,
+    torch::PackedTensorAccessor32<mtype,1,torch::RestrictPtrTraits> C,
+    torch::PackedTensorAccessor32<mtype,1,torch::RestrictPtrTraits> u,
+    const float lam, const float huber)
+{
+  GPU_1D_KERNEL_LOOP(n, kx.size(0)) {
+    const long p = kx[n];
+    if (p < 0 || p >= prior_disp.size(0)) continue;
+    const float w0 = prior_w[p];
+    const float zp = prior_disp[p];
+    const float z = patches[p][2][1][1];
+    if (!(w0 > 0.0f) || !(zp > 0.0f) || !(z > 0.0f) || !isfinite(zp) || !isfinite(z)) continue;
+    const float r = logf(zp) - logf(z);
+    const float a = fabsf(r);
+    const float rob = (a <= huber) ? 1.0f : huber / a;
+    const float w = lam * w0 * rob;
+    const float J = 1.0f / fmaxf(z, 1e-4f);
+    C[n] += w * J * J;   // one thread per unique patch: no atomics needed
+    u[n] += w * r * J;
+  }
+}
+
 __global__ void reproject(
     const torch::PackedTensorAccessor32<float,2,torch::RestrictPtrTraits> poses,
     const torch::PackedTensorAccessor32<float,4,torch::RestrictPtrTraits> patches,
@@ -441,7 +473,8 @@ std::vector<torch::Tensor> cuda_ba(
     torch::Tensor jj,
     torch::Tensor kk,
     const int PPF,
-    const int t0, const int t1, const int iterations, bool eff_impl)
+    const int t0, const int t1, const int iterations, bool eff_impl,
+    torch::Tensor prior_disp, torch::Tensor prior_w, double prior_lambda, double prior_huber)  // dvslam: prior args
 {
 
   auto ktuple = torch::_unique(kk, true, true);
@@ -511,6 +544,18 @@ std::vector<torch::Tensor> cuda_ba(
       C.packed_accessor32<mtype,1,torch::RestrictPtrTraits>(),
       v.packed_accessor32<mtype,1,torch::RestrictPtrTraits>(),
       u.packed_accessor32<mtype,1,torch::RestrictPtrTraits>(), t0, blockE->ppf);
+
+    // dvslam: depth-prior unary (no-op when prior_lambda == 0 or no priors are given)
+    if (prior_lambda > 0.0 && prior_disp.numel() > 0 && M > 0) {
+      depth_prior_unary_kernel<<<NUM_BLOCKS(M), NUM_THREADS>>>(
+        patches.packed_accessor32<float,4,torch::RestrictPtrTraits>(),
+        prior_disp.packed_accessor32<float,1,torch::RestrictPtrTraits>(),
+        prior_w.packed_accessor32<float,1,torch::RestrictPtrTraits>(),
+        kx.packed_accessor32<long,1,torch::RestrictPtrTraits>(),
+        C.packed_accessor32<mtype,1,torch::RestrictPtrTraits>(),
+        u.packed_accessor32<mtype,1,torch::RestrictPtrTraits>(),
+        (float) prior_lambda, (float) prior_huber);
+    }
 
     // std::cout << "Total residuals: " << r_total.item<double>() << std::endl;
     v = v.view({6*N, 1});

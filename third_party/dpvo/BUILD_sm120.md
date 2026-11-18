@@ -46,3 +46,13 @@ Remaining warnings: `torch.cuda.amp.autocast` FutureWarning (harmless).
 ```bash
 python -m pytest tests/test_dpvo_mono.py -m gpu -q    # smoke: 60 frames of validation/bedroom
 ```
+
+## Plan 1.1 / 1.2 extensions (dpvo_metric)
+
+```bash
+export CUDA_HOME=/usr/local/cuda-12.8 PATH=/usr/local/cuda-12.8/bin:$PATH
+MAX_JOBS=8 python setup_metric.py build_ext --inplace --build-temp build/metric          # -> cuda_ba_metric.*.so
+MAX_JOBS=8 python setup_stream.py build_ext --build-lib build/stream_ext --build-temp build/stream_tmp
+#   -> build/stream_ext/{cuda_corr,lietorch_backends}.*.so (current-stream launches; only for cuda_graph=1)
+```
+Neither command touches the frozen in-place `cuda_ba` / `cuda_corr` / `lietorch_backends` builds.

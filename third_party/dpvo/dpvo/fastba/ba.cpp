@@ -18,7 +18,8 @@ std::vector<torch::Tensor> cuda_ba(
     torch::Tensor jj, 
     torch::Tensor kk,
     const int PPF,
-    int t0, int t1, int iterations, bool eff_impl);
+    int t0, int t1, int iterations, bool eff_impl,
+    torch::Tensor prior_disp, torch::Tensor prior_w, double prior_lambda, double prior_huber);
 
 
 torch::Tensor cuda_reproject(
@@ -41,7 +42,20 @@ std::vector<torch::Tensor> ba(
     torch::Tensor kk,
     int PPF,
     int t0, int t1, int iterations, bool eff_impl) {
-  return cuda_ba(poses, patches, intrinsics, target, weight, lmbda, ii, jj, kk, PPF, t0, t1, iterations, eff_impl);
+  auto empty = torch::empty({0}, patches.options());
+  return cuda_ba(poses, patches, intrinsics, target, weight, lmbda, ii, jj, kk, PPF, t0, t1, iterations, eff_impl,
+                 empty, empty, 0.0, 1.0);
+}
+
+// dvslam: BA with a per-patch log-depth prior unary (plan v3 item 1.1). prior_disp / prior_w are flat (N*M,)
+// float32 tensors aligned with the patch buffer; prior_w <= 0 disables a patch's prior.
+std::vector<torch::Tensor> ba_prior(
+    torch::Tensor poses, torch::Tensor patches, torch::Tensor intrinsics, torch::Tensor target, torch::Tensor weight,
+    torch::Tensor lmbda, torch::Tensor ii, torch::Tensor jj, torch::Tensor kk, int PPF,
+    int t0, int t1, int iterations, bool eff_impl,
+    torch::Tensor prior_disp, torch::Tensor prior_w, double prior_lambda, double prior_huber) {
+  return cuda_ba(poses, patches, intrinsics, target, weight, lmbda, ii, jj, kk, PPF, t0, t1, iterations, eff_impl,
+                 prior_disp, prior_w, prior_lambda, prior_huber);
 }
 
 
@@ -182,6 +196,7 @@ std::vector<torch::Tensor> solve_system(torch::Tensor J_Ginv_i, torch::Tensor J_
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("forward", &ba, "BA forward operator");
+  m.def("forward_prior", &ba_prior, "BA forward operator with a log-depth prior unary (dvslam)");
   m.def("neighbors", &neighbors, "temporal neighboor indicies");
   m.def("reproject", &reproject, "temporal neighboor indicies");
   m.def("solve_system", &solve_system, "temporal neighboor indicies");
