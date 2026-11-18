@@ -3,7 +3,6 @@
   python scripts/error_budget.py            # writes reports/phase0/error_budget.md
 """
 import csv
-import itertools
 import sys
 from datetime import date
 from pathlib import Path

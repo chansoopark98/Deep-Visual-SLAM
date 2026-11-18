@@ -23,7 +23,7 @@ from scripts.verify_baseline import DEFAULT_BASELINE, sha256_of  # noqa: E402
 BASELINE_MANIFEST = DEFAULT_BASELINE / 'MANIFEST.json'
 
 
-def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.ndarray]:
+def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.ndarray, dict]:
     inc = load_increments(inc_path)
     meta = inc['meta']
     seq = redwood.load_sequence(meta['scene'], meta['split'], data_root or meta['data_root'])
@@ -53,15 +53,14 @@ def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.nda
         'ate_sim3_m': D.ate_rmse(seq.T_wc, T_est, sim3=True)[0],
         'rpe30_trans_m': D.rpe(seq.T_wc, T_est, 30)['trans_rmse_m'],
     })
-    return s, pos
+    return s, pos, meta
 
 
-def check_test_gt(files: list[Path], data_root: Path | None) -> str:
+def check_test_gt(metas: list[dict], data_root: Path | None) -> str:
     """Compare each scored test scene's GT json against the sha256 frozen in the baseline MANIFEST."""
     manifest = json.loads(BASELINE_MANIFEST.read_text())['data']
     status = 'OK'
-    for f in files:
-        meta = load_increments(f)['meta']
+    for meta in metas:
         if meta['split'] != 'test' or meta['scene'] not in manifest:
             return 'n/a'
         gt = Path(data_root or meta['data_root']) / manifest[meta['scene']]['gt_json']
@@ -79,13 +78,14 @@ def main():
     files = sorted(args.runs.glob('*.inc.npz'))
     if not files:
         sys.exit(f'no *.inc.npz in {args.runs}')
-    summaries, per_scene_pos = [], []
+    summaries, per_scene_pos, metas = [], [], []
     for f in files:
-        s, pos = evaluate_scene(f, args.data_root)
+        s, pos, meta = evaluate_scene(f, args.data_root)
         summaries.append(s)
         per_scene_pos.append(pos)
+        metas.append(meta)
     k = target-metric_items(summaries)
-    gt_check = check_test_gt(files, args.data_root)
+    gt_check = check_test_gt(metas, args.data_root)
     _, lo, hi = D.block_bootstrap_ci(per_scene_pos)
 
     lines = [f'=== eval_pairs: {args.runs} ===', '',
@@ -95,7 +95,7 @@ def main():
         lines.append(f'{s["scene"]:<10} {s["pairs"]:>6} {s["pos_mape_pct"]:>9.4f} {s["rot_rpy_mean_deg"]:>9.6f} '
                      f'{s["median_ratio"]:>6.3f} {s["rescaled_mape_pct"]:>9.2f} {s["sigma_par_mm"]:>7.3f} '
                      f'{s["lt2mm_error_share"]*100:>9.1f}% {s["ate_se3_m"]:>9.4f} {s["ate_sim3_m"]:>10.4f}')
-    splits = {load_increments(f)['meta']['split'] for f in files}
+    splits = {m['split'] for m in metas}
     complete = sorted(s['scene'] for s in summaries) == sorted(redwood.SCENES) and splits == {'test'}
     lines.insert(1, f'split: {", ".join(sorted(splits))}   GT sha256 vs baseline MANIFEST: {gt_check}')
     lines += ['',
