@@ -47,6 +47,8 @@ def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.nda
         'pos_mape_tracked_pct': float(pos[tracked].mean()) if tracked.any() else float('nan'),
         'median_ratio': D.median_step_ratio(gt_t, pred_t),
         'rescaled_mape_pct': D.best_rescale(gt_t, pred_t)[1],
+        'win1s_rescaled_mape_pct': D.windowed_rescale_mape(gt_t, pred_t, 30),
+        'win2s_rescaled_mape_pct': D.windowed_rescale_mape(gt_t, pred_t, 60),
         **D.sigma_parallel(gt_t, pred_t),
         'lt2mm_error_share': D.bin_contribution(gt_t, pred_t, edges_mm=(0, 2, np.inf))[0]['error_share'],
         'ate_se3_m': D.ate_rmse(seq.T_wc, T_est, sim3=False)[0],
@@ -85,6 +87,7 @@ def main():
         per_scene_pos.append(pos)
         metas.append(meta)
     k = target-metric_items(summaries)
+    win = {w: float(np.mean([s[f'win{w}s_rescaled_mape_pct'] for s in summaries])) for w in (1, 2)}
     gt_check = check_test_gt(metas, args.data_root)
     _, lo, hi = D.block_bootstrap_ci(per_scene_pos)
 
@@ -102,6 +105,7 @@ def main():
               f'[03] {k["item03_mape_pct"]:.4f} %  95 % block CI [{lo:.2f}, {hi:.2f}]  (≤ {POS_MAPE_TARGET_PCT} %) -> '
               f'{"PASS" if k["item03_pass"] else "FAIL"}',
               f'[04] {k["item04_rpy_mean_deg"]:.6f} °  (≤ {ROT_ABS_TARGET_DEG} °) -> {"PASS" if k["item04_pass"] else "FAIL"}',
+              f'G0 oracle (scale fitted per window, uses GT): 1 s {win[1]:.3f} %, 2 s {win[2]:.3f} %',
               f'tracked-only pairs: {sum(s["tracked_pairs"] for s in summaries)} / {sum(s["pairs"] for s in summaries)}']
     if not complete:
         lines.append(f'INCOMPLETE: scenes {sorted(s["scene"] for s in summaries)}, split {sorted(splits)} '

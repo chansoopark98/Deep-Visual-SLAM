@@ -38,6 +38,22 @@ def best_rescale(gt_t: np.ndarray, pred_t: np.ndarray) -> tuple[float, float]:
     return s, float(_pct_errors(gt_t, s * pred_t).mean())
 
 
+def windowed_rescale_mape(gt_t: np.ndarray, pred_t: np.ndarray, window: int) -> float:
+    """Oracle G0 diagnostic: item-03 MAPE after fitting one best scale per window of `window` consecutive pairs.
+
+    Uses GT, so it isolates the per-pair noise term from scale drift; never a submittable number.
+    """
+    pct = np.empty(len(gt_t))
+    for s in range(0, len(gt_t), window):
+        g, p = gt_t[s:s + window], pred_t[s:s + window]
+        if (np.linalg.norm(p, axis=1) > 0).any() and (np.linalg.norm(g, axis=1) > ZERO_MOTION_M).any():
+            scale, _ = best_rescale(g, p)
+        else:
+            scale = 1.0
+        pct[s:s + window] = _pct_errors(g, scale * p)
+    return float(pct.mean())
+
+
 def sigma_parallel(gt_t: np.ndarray, pred_t: np.ndarray) -> dict:
     """Error along the GT motion direction (σ∥) and orthogonal to it, in mm. Robust σ = 1.4826·MAD."""
     g = np.linalg.norm(gt_t, axis=1)

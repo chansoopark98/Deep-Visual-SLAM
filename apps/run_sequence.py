@@ -5,6 +5,8 @@
 """
 import argparse
 import csv
+import importlib
+import json
 import subprocess
 import sys
 from datetime import datetime
@@ -19,16 +21,36 @@ from dvslam.data import redwood  # noqa: E402
 from dvslam.odometry.base import Frame, PinholeCamera, causal_trajectory, save_increments, write_tum  # noqa: E402
 
 
-def make_odometry(name: str):
-    if name == 'legacy_posenet':
-        from dvslam.odometry.legacy_posenet import LegacyPoseNetOdometry
-        return LegacyPoseNetOdometry()
-    raise ValueError(name)
+# name -> (module, class). Modules are imported lazily so one tracker's heavy deps never block another.
+ODOMETRY = {
+    'legacy_posenet': ('dvslam.odometry.legacy_posenet', 'LegacyPoseNetOdometry'),
+    'klt_pnp': ('dvslam.odometry.klt_pnp', 'KLTPnPOdometry'),           # plan 0.7 (C)
+    'dpvo_mono': ('dvslam.odometry.dpvo_mono', 'DPVOMonoOdometry'),     # plan 0.6 (B, depth-free)
+    'rgbd_icp': ('dvslam.odometry.rgbd_icp', 'RGBDICPOdometry'),        # plan 0.8 (E0, sensor depth)
+}
+
+
+def parse_opts(items: list[str]) -> dict:
+    """--opt k=v pairs -> kwargs; values are parsed as JSON when possible (numbers, bools), else kept as str."""
+    out = {}
+    for it in items:
+        k, v = it.split('=', 1)
+        try:
+            out[k] = json.loads(v)
+        except json.JSONDecodeError:
+            out[k] = v
+    return out
+
+
+def make_odometry(name: str, opts: dict):
+    module, cls = ODOMETRY[name]
+    return getattr(importlib.import_module(module), cls)(**opts)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--odometry', choices=['legacy_posenet'], required=True)
+    ap.add_argument('--odometry', choices=sorted(ODOMETRY), required=True)
+    ap.add_argument('--opt', action='append', default=[], help='tracker option k=v (repeatable)')
     ap.add_argument('--split', choices=['validation', 'test'], default='test')
     ap.add_argument('--scenes', nargs='+', default=list(redwood.SCENES))
     ap.add_argument('--data-root', type=Path, default=redwood.DEFAULT_ROOT)
@@ -41,7 +63,8 @@ def main():
     out = args.out or REPO_ROOT / 'runs' / f'{args.odometry}-{args.split}-{datetime.now():%Y%m%d-%H%M%S}'
     out.mkdir(parents=True, exist_ok=False)
     commit = subprocess.run(['git', '-C', str(REPO_ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
-    odo = make_odometry(args.odometry)
+    opts = parse_opts(args.opt)
+    odo = make_odometry(args.odometry, opts)
 
     with open(out / 'timings.csv', 'w', newline='') as tf:
         tw = csv.writer(tf)
@@ -57,12 +80,14 @@ def main():
                     tw.writerow([scene, est.index, f'{est.timings_ms.get("total", float("nan")):.3f}'])
             if [e.index for e in estimates] != list(range(1, len(seq))):
                 raise RuntimeError(f'{scene}: odometry must emit one increment per frame t >= 1')
-            meta = {'scene': scene, 'split': args.split, 'odometry': args.odometry, 'seed': args.seed,
+            meta = {'scene': scene, 'split': args.split, 'odometry': args.odometry, 'opts': opts, 'seed': args.seed,
                     'data_root': str(args.data_root), 'n_frames': len(seq), 'git_commit': commit,
                     'frame_rate_hz': redwood.FRAME_RATE_HZ, 'frame_rate_verified': redwood.FRAME_RATE_VERIFIED}
             save_increments(out / f'{scene}.inc.npz', estimates, meta)
             T_out = causal_trajectory(np.stack([e.rel_increment for e in estimates]))
             write_tum(out / f'{scene}.causal.tum', seq.timestamps, T_out)
+            if hasattr(odo, 'finalize'):   # optional per-scene diagnostics (dict of arrays)
+                np.savez(out / f'{scene}.extra.npz', **odo.finalize())
             print(f'{scene}: {len(estimates)} increments -> {out / f"{scene}.inc.npz"}')
     print(out)
 
