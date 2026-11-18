@@ -4,6 +4,7 @@
 """
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -17,6 +18,9 @@ from dvslam.eval.metrics import (POS_MAPE_TARGET_PCT, ROT_ABS_TARGET_DEG, target
                                  pair_metrics, scene_summary)
 from dvslam.geometry.se3 import relative_pose  # noqa: E402
 from dvslam.odometry.base import causal_trajectory, load_increments  # noqa: E402
+from scripts.verify_baseline import DEFAULT_BASELINE, sha256_of  # noqa: E402
+
+BASELINE_MANIFEST = DEFAULT_BASELINE / 'MANIFEST.json'
 
 
 def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.ndarray]:
@@ -52,6 +56,20 @@ def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.nda
     return s, pos
 
 
+def check_test_gt(files: list[Path], data_root: Path | None) -> str:
+    """Compare each scored test scene's GT json against the sha256 frozen in the baseline MANIFEST."""
+    manifest = json.loads(BASELINE_MANIFEST.read_text())['data']
+    status = 'OK'
+    for f in files:
+        meta = load_increments(f)['meta']
+        if meta['split'] != 'test' or meta['scene'] not in manifest:
+            return 'n/a'
+        gt = Path(data_root or meta['data_root']) / manifest[meta['scene']]['gt_json']
+        if sha256_of(gt) != manifest[meta['scene']]['gt_json_sha256']:
+            status = 'MISMATCH'
+    return status
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--runs', type=Path, required=True)
@@ -67,6 +85,7 @@ def main():
         summaries.append(s)
         per_scene_pos.append(pos)
     k = target-metric_items(summaries)
+    gt_check = check_test_gt(files, args.data_root)
     _, lo, hi = D.block_bootstrap_ci(per_scene_pos)
 
     lines = [f'=== eval_pairs: {args.runs} ===', '',
@@ -76,14 +95,19 @@ def main():
         lines.append(f'{s["scene"]:<10} {s["pairs"]:>6} {s["pos_mape_pct"]:>9.4f} {s["rot_rpy_mean_deg"]:>9.6f} '
                      f'{s["median_ratio"]:>6.3f} {s["rescaled_mape_pct"]:>9.2f} {s["sigma_par_mm"]:>7.3f} '
                      f'{s["lt2mm_error_share"]*100:>9.1f}% {s["ate_se3_m"]:>9.4f} {s["ate_sim3_m"]:>10.4f}')
-    complete = len(summaries) == len(redwood.SCENES)
+    splits = {load_increments(f)['meta']['split'] for f in files}
+    complete = sorted(s['scene'] for s in summaries) == sorted(redwood.SCENES) and splits == {'test'}
+    lines.insert(1, f'split: {", ".join(sorted(splits))}   GT sha256 vs baseline MANIFEST: {gt_check}')
     lines += ['',
               f'[03] {k["item03_mape_pct"]:.4f} %  95 % block CI [{lo:.2f}, {hi:.2f}]  (≤ {POS_MAPE_TARGET_PCT} %) -> '
               f'{"PASS" if k["item03_pass"] else "FAIL"}',
               f'[04] {k["item04_rpy_mean_deg"]:.6f} °  (≤ {ROT_ABS_TARGET_DEG} °) -> {"PASS" if k["item04_pass"] else "FAIL"}',
               f'tracked-only pairs: {sum(s["tracked_pairs"] for s in summaries)} / {sum(s["pairs"] for s in summaries)}']
     if not complete:
-        lines.append(f'INCOMPLETE: {len(summaries)}/{len(redwood.SCENES)} scenes -> not an official result')
+        lines.append(f'INCOMPLETE: scenes {sorted(s["scene"] for s in summaries)}, split {sorted(splits)} '
+                     f'-> not an official result (needs the 5 test scenes once each)')
+    if gt_check == 'MISMATCH':
+        lines.append('GT MISMATCH: test GT differs from the frozen baseline manifest -> not comparable to 40.0591 %')
     report = '\n'.join(lines)
     print(report)
     (args.runs / 'eval_pairs.txt').write_text(report + '\n', encoding='utf-8')

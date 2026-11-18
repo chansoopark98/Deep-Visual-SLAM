@@ -94,9 +94,10 @@ def block_bootstrap_ci(per_scene_values: list[np.ndarray], block: int = 30, reps
         means = []
         for v in per_scene_values:
             n = len(v)
-            nb = -(-n // block)
-            starts = rng.integers(0, n - block + 1, size=nb)
-            idx = (starts[:, None] + np.arange(block)).ravel()[:n]
+            b = min(block, n)          # short scenes (smoke runs) fall back to one block of the whole scene
+            nb = -(-n // b)
+            starts = rng.integers(0, n - b + 1, size=nb)
+            idx = (starts[:, None] + np.arange(b)).ravel()[:n]
             means.append(v[idx].mean())
         stats[k] = np.mean(means)
     lo, hi = np.quantile(stats, [alpha / 2, 1 - alpha / 2])

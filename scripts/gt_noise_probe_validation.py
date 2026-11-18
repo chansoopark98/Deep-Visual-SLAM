@@ -109,7 +109,9 @@ def main():
           'them low at σ_g = 0.1 mm. Larger shared errors than assumed here can push them out of tolerance.',
           '- **Real-data run: deferred.** It needs the per-pair residuals of two depth-free trackers (0.6 DPVO, 0.7a KLT), '
           'which are out of this run\'s scope. When they exist, re-run this validation with their actual residual '
-          'patterns (plan 0.9) before reading σ̂ on real GT. Until then G0-GT is not usable for the gate.', '']
+          'patterns (plan 0.9) before reading σ̂ on real GT. Until then G0-GT is not usable for the gate.',
+          '- The probe assumes GT position noise that is white in time. GT from a pose-graph reconstruction may be '
+          'time-correlated, which would bias the stride intercept; check this before trusting σ̂ on real data.', '']
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text('\n'.join(L))
     print('\n'.join(L))
