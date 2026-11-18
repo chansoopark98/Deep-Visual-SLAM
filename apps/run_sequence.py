@@ -27,6 +27,7 @@ ODOMETRY = {
     'klt_pnp': ('dvslam.odometry.klt_pnp', 'KLTPnPOdometry'),           # plan 0.7 (C)
     'dpvo_mono': ('dvslam.odometry.dpvo_mono', 'DPVOMonoOdometry'),     # plan 0.6 (B, depth-free)
     'rgbd_icp': ('dvslam.odometry.rgbd_icp', 'RGBDICPOdometry'),        # plan 0.8 (E0, sensor depth)
+    'cuvslam_rgbd': ('dvslam.odometry.cuvslam_rgbd', 'CuVSLAMRGBDOdometry'),  # plan 0.8/1.4 (A); needs py3.10 env
 }
 
 
