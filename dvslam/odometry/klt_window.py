@@ -38,7 +38,8 @@ from dvslam.odometry.base import Frame, PinholeCamera, PoseEstimate
 from dvslam.odometry.klt_pnp import _STATE_CODE, KLTPnPOdometry
 
 
-def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitter: float = 0.03):
+def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitter: float = 0.03,
+               ckpt: str | None = None):
     if name == 'perturbed':
         from dvslam.depth.perturbed import PerturbedGTDepth
         return PerturbedGTDepth(bias=bias, jitter_logsd=jitter, seed=seed)
@@ -50,7 +51,7 @@ def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitt
         return build('da3m', K)
     if name == 'dav2_ft':
         from dvslam.depth.dav2_ft import DAv2FT
-        return DAv2FT(K=K)
+        return DAv2FT(ckpt=ckpt, K=K)
     raise ValueError(f'prior must be perturbed|oracle|da3|dav2_ft, got {name!r}')
 
 
@@ -98,9 +99,10 @@ class KLTWindowOdometry(KLTPnPOdometry):
                  g_tau: float = 20.0, g_min_m: int = 5, g_gate_deg: float = 1.0, g_in_prior: bool = False,
                  tri_deg: float = 1.0, kf_refine: float = 2.0, kf_align: bool = True, max_jump_m: float = 0.10,
                  max_jump_deg: float = 20.0, ba_max_move_m: float = 0.05,
-                 ba_max_turn_deg: float = 3.0, **klt_kw):
+                 ba_max_turn_deg: float = 3.0, prior_ckpt: str | None = None, **klt_kw):
         super().__init__(mode='sensor_depth', tri_deg=tri_deg, kf_ratio=kf_ratio, **klt_kw)
         self.prior_name, self.prior_seed, self.prior_bias, self.prior_jitter = prior, prior_seed, prior_bias, prior_jitter
+        self.prior_ckpt = prior_ckpt                    # dav2_ft checkpoint; None = the model's default weights
         self.window, self.kf_px, self.kf_max, self.ba = max(2, int(window)), kf_px, kf_max, ba
         self.prior_sigma, self.px_sigma, self.huber, self.ba_nfev = prior_sigma, px_sigma, huber, ba_nfev
         self.g_tau, self.g_min_m, self.g_gate_cos = g_tau, g_min_m, np.cos(np.radians(g_gate_deg))
@@ -115,8 +117,10 @@ class KLTWindowOdometry(KLTPnPOdometry):
     def reset(self, camera: PinholeCamera) -> None:
         super().reset(camera)
         if self.prior is None:
-            self.prior = make_prior(self.prior_name, self.K, self.prior_seed, self.prior_bias, self.prior_jitter)
+            self.prior = make_prior(self.prior_name, self.K, self.prior_seed, self.prior_bias, self.prior_jitter,
+                                    self.prior_ckpt)
         self.g, self.n_m, self.n_jump, self.n_ba_reject = 0.0, 0, 0, 0
+        self.fail_run = 0                               # consecutive untracked frames, for the reported state only
         self.last_prior = None                         # (frame index, depth map) of the last prior evaluation
         self.head_inputs = None
         self._clear_window()
@@ -497,9 +501,12 @@ class KLTWindowOdometry(KLTPnPOdometry):
             self.n_fail += 1
             self.state = 'DEGRADED' if self.n_fail < 3 else 'LOST'
             T_cur = self.T_prev @ inc
-        state = self.state
-        if state == 'OK' and self.n_m <= self.g_min_m:
-            state = 'BOOTSTRAP'                         # g not yet valid (§4.3 item 4)
+        # Reported state (labels only; re-init decisions above are unchanged). _start_window resets n_fail on every
+        # re-init, so LOST is derived from the run of untracked frames instead (F11).
+        self.fail_run = 0 if source == 'tracked' else self.fail_run + 1
+        state = 'OK' if source == 'tracked' else ('DEGRADED' if self.fail_run < 3 else 'LOST')
+        if state == 'OK' and self.ba and self.n_m <= self.g_min_m:
+            state = 'BOOTSTRAP'                         # g not yet valid (§4.3 item 4); no g is estimated without BA
         out = inc.copy()
         out[:3, 3] *= np.exp(-g_out)
         self.head_inputs = {'T_raw': inc.copy(), 'g': g_out, 'tracked': source == 'tracked',
