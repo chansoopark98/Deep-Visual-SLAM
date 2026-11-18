@@ -72,8 +72,9 @@ if __name__ == '__main__':
             concat_tgt_right = torch.cat([target_image, source_right], dim=1)
             axisangle_right, translation_right = pose_net(concat_tgt_right)  # [B, 1, 3]
 
+            # invert=True gives T_{t<-t+1} (camera t+1 in camera t), which chains onto camera-to-world
             pred_transform = transformation_from_parameters(
-                axisangle_right[:, 0], translation_right[:, 0], invert=False)
+                axisangle_right[:, 0], translation_right[:, 0], invert=True)
             pred_transform = pred_transform.detach().cpu().numpy()[0]
 
             fx, fy, cx, cy = intrinsic[0, 0], intrinsic[1, 1], intrinsic[0, 2], intrinsic[1, 2]

@@ -203,3 +203,4 @@ cython_debug/
 # frozen baselines are tracked (plan v3 item 0.1)
 !baselines/**/*.csv
 baselines/**/*.png
+runs/

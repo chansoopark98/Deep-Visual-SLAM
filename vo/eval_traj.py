@@ -144,7 +144,8 @@ class EvalTrajectory():
         for i in range(num_frames):
             T_local = self.pred_pose_list[i]  # shape: (4,4)
 
-            T_global = T_global @ T_local
+            # T_local is cam_T_cam(0, 1) = T_{t+1<-t}; camera-to-world needs T_{t<-t+1} = inv(T_local)
+            T_global = T_global @ np.linalg.inv(T_local)
             
             intrinsic = self.intrinsic_list[i]
             

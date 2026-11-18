@@ -14,4 +14,5 @@ include = ["dvslam*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-m 'not gpu'"
 markers = ["gpu: needs the RTX 5090, the Redwood data and the baseline weights (slow)"]
