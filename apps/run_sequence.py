@@ -13,7 +13,11 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import torch
+
+try:  # torch-free envs (e.g. the py3.10 cuVSLAM env) can still run non-torch trackers
+    import torch
+except ImportError:
+    torch = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -59,7 +63,8 @@ def main():
     ap.add_argument('--out', type=Path, default=None, help='default: runs/<odometry>-<split>-<YYYYmmdd-HHMMSS>')
     args = ap.parse_args()
 
-    torch.manual_seed(args.seed)
+    if torch is not None:
+        torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     out = args.out or REPO_ROOT / 'runs' / f'{args.odometry}-{args.split}-{datetime.now():%Y%m%d-%H%M%S}'
     out.mkdir(parents=True, exist_ok=False)
