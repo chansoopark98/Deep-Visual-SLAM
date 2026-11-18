@@ -38,6 +38,24 @@ def best_rescale(gt_t: np.ndarray, pred_t: np.ndarray) -> tuple[float, float]:
     return s, float(_pct_errors(gt_t, s * pred_t).mean())
 
 
+def stride_mape(T_gt: np.ndarray, increments: np.ndarray, k: int) -> float:
+    """G1' variant of item 03 on pairs (t-k, t): increments composed over k frames vs GT (plan NO-GO branch, Q4)."""
+    gt, pred = [], []
+    for t in range(k, len(T_gt)):
+        gt.append(relative_pose(T_gt[t - k], T_gt[t])[:3, 3])
+        P = np.eye(4)
+        for dT in increments[t - k:t]:
+            P = P @ dT
+        pred.append(P[:3, 3])
+    return float(_pct_errors(np.array(gt), np.array(pred)).mean())
+
+
+def min_motion_mape(gt_t: np.ndarray, pred_t: np.ndarray, min_m: float = 2e-3) -> float:
+    """G1' variant of item 03 that scores only pairs whose GT step is at least min_m (plan Q4)."""
+    m = np.linalg.norm(gt_t, axis=1) >= min_m
+    return float(_pct_errors(gt_t[m], pred_t[m]).mean())
+
+
 def windowed_rescale_mape(gt_t: np.ndarray, pred_t: np.ndarray, window: int) -> float:
     """Oracle G0 diagnostic: item-03 MAPE after fitting one best scale per window of `window` consecutive pairs.
 

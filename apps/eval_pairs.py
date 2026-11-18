@@ -54,6 +54,8 @@ def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.nda
         'ate_se3_m': D.ate_rmse(seq.T_wc, T_est, sim3=False)[0],
         'ate_sim3_m': D.ate_rmse(seq.T_wc, T_est, sim3=True)[0],
         'rpe30_trans_m': D.rpe(seq.T_wc, T_est, 30)['trans_rmse_m'],
+        'g1p_stride3_mape_pct': D.stride_mape(seq.T_wc, inc['rel_increment'], 3),
+        'g1p_min2mm_mape_pct': D.min_motion_mape(gt_t, pred_t),
     })
     return s, pos, meta
 
@@ -106,6 +108,8 @@ def main():
               f'{"PASS" if k["item03_pass"] else "FAIL"}',
               f'[04] {k["item04_rpy_mean_deg"]:.6f} °  (≤ {ROT_ABS_TARGET_DEG} °) -> {"PASS" if k["item04_pass"] else "FAIL"}',
               f'G0 oracle (scale fitted per window, uses GT): 1 s {win[1]:.3f} %, 2 s {win[2]:.3f} %',
+              'G1\' (NO-GO branch ranking): stride-3 item 03 {:.3f} %, min-2mm item 03 {:.3f} %, RPE 1 s {:.4f} m, ATE SE3 {:.4f} m'.format(
+                  *(float(np.mean([s[c] for s in summaries])) for c in ('g1p_stride3_mape_pct', 'g1p_min2mm_mape_pct', 'rpe30_trans_m', 'ate_se3_m'))),
               f'tracked-only pairs: {sum(s["tracked_pairs"] for s in summaries)} / {sum(s["pairs"] for s in summaries)}']
     if not complete:
         lines.append(f'INCOMPLETE: scenes {sorted(s["scene"] for s in summaries)}, split {sorted(splits)} '
