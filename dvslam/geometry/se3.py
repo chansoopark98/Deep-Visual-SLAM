@@ -1,5 +1,6 @@
 """SE(3) helpers shared by the evaluators and trackers. All poses are 4x4 float64, camera-to-world (T_wc)."""
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 
 def relative_pose(T_0: np.ndarray, T_1: np.ndarray) -> np.ndarray:
@@ -13,6 +14,32 @@ def chain_increments(T_start: np.ndarray, increments: np.ndarray) -> np.ndarray:
     for dT in increments:
         out.append(out[-1] @ dT)
     return np.stack(out)
+
+
+def _hat(w: np.ndarray) -> np.ndarray:
+    return np.array([[0, -w[2], w[1]], [w[2], 0, -w[0]], [-w[1], w[0], 0]])
+
+
+def _left_jacobian(w: np.ndarray) -> np.ndarray:
+    th = np.linalg.norm(w)
+    W = _hat(w)
+    if th < 1e-8:
+        return np.eye(3) + 0.5 * W
+    return np.eye(3) + (1 - np.cos(th)) / th**2 * W + (th - np.sin(th)) / th**3 * W @ W
+
+
+def se3_log(T: np.ndarray) -> np.ndarray:
+    """Twist (v, w) with T = se3_exp((v, w))."""
+    w = Rotation.from_matrix(T[:3, :3]).as_rotvec()
+    v = np.linalg.solve(_left_jacobian(w), T[:3, 3])
+    return np.concatenate([v, w])
+
+
+def se3_exp(xi: np.ndarray) -> np.ndarray:
+    T = np.eye(4)
+    T[:3, :3] = Rotation.from_rotvec(xi[3:]).as_matrix()
+    T[:3, 3] = _left_jacobian(xi[3:]) @ xi[:3]
+    return T
 
 
 def euler_zyx(R: np.ndarray) -> np.ndarray:
