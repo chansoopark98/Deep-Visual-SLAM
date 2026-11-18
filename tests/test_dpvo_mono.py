@@ -1,6 +1,5 @@
 """Plan v3 item 0.6: DPVO mono adapter. CPU tests cover the causal-hook indexing; the GPU smoke test runs DPVO."""
 import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
