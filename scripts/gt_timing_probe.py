@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -87,9 +88,21 @@ def main():
         G = rotvec(g)
         tk, ck0, ckm = best_tau(G, rotvec(k['rel_increment']), ok)
         td, cd0, cdm = best_tau(G, rotvec(d['rel_increment']), ok)
-        floor = float(_pct_errors(g[:, :3, 3], shift(g[:, :3, 3], td)).mean())
+        gt_t = g[:, :3, 3]
+        floor = float(_pct_errors(gt_t, shift(gt_t, td)).mean())
+        # Controls (final review D1): the floor measures offset x GT step roughness, not the offset alone.
+        floor_neg = float(_pct_errors(gt_t, shift(gt_t, -td)).mean())
+        floor_01 = float(_pct_errors(gt_t, shift(gt_t, 0.1)).mean())
+        pos_s = savgol_filter(seq.T_wc[:, :3, 3], 15, 3, axis=0)
+        st_s = np.einsum('nji,nj->ni', seq.T_wc[:-1, :3, :3], np.diff(pos_s, axis=0))   # smoothed steps, camera frame
+        floor_smooth = float(_pct_errors(st_s, shift(st_s, td)).mean())
+        gl = np.linalg.norm(gt_t, axis=1)
+        rough = float(np.median(np.abs(np.diff(gl)) / gl[1:]))
+        blocks = [best_tau(G, rotvec(d['rel_increment']), ok & (np.arange(len(G)) // 300 == b))[0]
+                  for b in range(len(G) // 300)]
         row = {'scene': sc, 'tau_klt': tk, 'corr_klt': (ck0, ckm), 'tau_dpvo': td, 'corr_dpvo': (cd0, cdm),
-               'floor': floor}
+               'floor': floor, 'floor_neg': floor_neg, 'floor_01': floor_01, 'floor_smooth': floor_smooth,
+               'rough': rough, 'tau_blocks': (min(blocks), max(blocks)) if blocks else (td, td)}
         if args.icp:
             n = min(args.icp, len(seq))
             ti, ci0, cim = best_tau(G[:n - 1], rotvec(icp_increments(seq, n)), np.ones(n - 1, bool))
@@ -108,14 +121,26 @@ def main():
          '(positive: the estimator at pair i matches GT at i + τ). r = mean per-axis Pearson r of rotation vectors '
          'at τ = 0 → at τ*. Floor = item-03 MAPE of GT steps vs GT steps shifted by τ*(DPVO): what a perfect '
          'estimator on the image time base would score against this GT.', '',
-         '| scene | τ* KLT | r KLT | τ* DPVO | r DPVO |' + (' τ* depth ICP | r ICP |' if args.icp else '')
-         + ' floor % |', '|---|---|---|---|---|' + ('---|---|' if args.icp else '') + '---|']
+         'Controls: floor at −τ*, floor at τ = 0.1, and floor at τ* on Savitzky-Golay (15, 3) smoothed GT; roughness = '
+         'median |Δ‖step‖| / ‖step‖ between consecutive GT pairs; τ blocks = min..max of τ*(DPVO) over 300-pair blocks.'
+         + (f' Depth ICP uses only the first {args.icp} frames of each scene, the trackers the whole scene.' if args.icp else ''), '',
+         '| scene | τ* KLT | r KLT | τ* DPVO | r DPVO | τ blocks |' + (' τ* depth ICP | r ICP |' if args.icp else '')
+         + ' floor % | floor −τ* | floor τ=0.1 | floor smoothed GT | GT roughness |',
+         '|---|---|---|---|---|---|' + ('---|---|' if args.icp else '') + '---|---|---|---|---|']
     for r in rows:
         L.append(f'| {r["scene"]} | {r["tau_klt"]:+.2f} | {r["corr_klt"][0]:.3f}→{r["corr_klt"][1]:.3f} | '
-                 f'{r["tau_dpvo"]:+.2f} | {r["corr_dpvo"][0]:.3f}→{r["corr_dpvo"][1]:.3f} |'
+                 f'{r["tau_dpvo"]:+.2f} | {r["corr_dpvo"][0]:.3f}→{r["corr_dpvo"][1]:.3f} | '
+                 f'{r["tau_blocks"][0]:+.2f}..{r["tau_blocks"][1]:+.2f} |'
                  + (f' {r["tau_icp"]:+.2f} | {r["corr_icp"][0]:.3f}→{r["corr_icp"][1]:.3f} |' if args.icp else '')
-                 + f' {r["floor"]:.1f} |')
-    L += ['', f'Mean timing floor (mean of scene means): **{np.mean([r["floor"] for r in rows]):.1f} %**.', '',
+                 + f' {r["floor"]:.1f} | {r["floor_neg"]:.1f} | {r["floor_01"]:.1f} | {r["floor_smooth"]:.1f} |'
+                 + f' {r["rough"]*100:.0f} % |')
+    mean = lambda k: np.mean([r[k] for r in rows])  # noqa: E731
+    L += ['', f'Mean of scene means: floor **{mean("floor"):.1f} %**, at −τ* {mean("floor_neg"):.1f} %, at τ = 0.1 '
+          f'{mean("floor_01"):.1f} %, on smoothed GT {mean("floor_smooth"):.1f} %.', '',
+          'Reading: the floor is nearly symmetric in τ and collapses on smoothed GT, so it is the product of the offset '
+          'and the frame-to-frame roughness of the GT step lengths, not the offset alone. Whether that roughness is real '
+          'camera motion (re-timing the GT would remove most of the floor) or GT noise (re-timing would not) is not '
+          'determined by this probe.', '',
           '## GT-noise probe on the two depth-free trackers (window-rescaled to GT, world frame)', '',
           f'σ_g estimates (mm/axis): intercept {est["intercept"]*1e3:.3f}, lag-1 {est["lag1"]*1e3:.3f}, '
           f'k=1 {est["k1"]*1e3:.3f}; C by stride (mm²) {[round(c*1e6, 4) for c in est["C_by_stride"]]}.', '',
