@@ -32,6 +32,9 @@ ODOMETRY = {
     'dpvo_mono': ('dvslam.odometry.dpvo_mono', 'DPVOMonoOdometry'),     # plan 0.6 (B, depth-free)
     'rgbd_icp': ('dvslam.odometry.rgbd_icp', 'RGBDICPOdometry'),        # plan 0.8 (E0, sensor depth)
     'cuvslam_rgbd': ('dvslam.odometry.cuvslam_rgbd', 'CuVSLAMRGBDOdometry'),  # plan 0.8/1.4 (A); needs py3.10 env
+    'dpvo_metric': ('dvslam.odometry.dpvo_metric', 'DPVOMetricOdometry'),  # plan 1.1/1.2 (B + depth prior)
+    'klt_window': ('dvslam.odometry.klt_window', 'KLTWindowOdometry'),    # plan 1.3 (C + window BA + prior)
+    'klt_head': ('dvslam.odometry.klt_head', 'KLTHeadOdometry'),          # plan 1.5 (precision head over any base)
 }
 
 
