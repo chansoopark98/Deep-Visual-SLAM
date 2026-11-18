@@ -6,6 +6,10 @@ import torch
 import numpy as np
 import json
 import csv
+import argparse
+import hashlib
+import platform
+from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
 from typing import Dict, Tuple, List
@@ -17,6 +21,13 @@ from model.posenet_single import PoseNet
 from PIL import Image
 import torchvision.transforms as transforms
 from vo.learner_func import transformation_from_parameters
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# target-metric targets (평가 신청서 항목 03, 04)
+POS_MAPE_TARGET_PCT = 2.96   # 03 AR 위치 오차: MAPE ≤ 2.96 %
+ROT_ABS_TARGET_DEG = 3.4     # 04 AR 회전 오차: Roll·Pitch·Yaw 평균 절대 오차 ≤ 3.4 °
+RPY_ERR_COLS = ['rot_abs_err_roll_deg', 'rot_abs_err_pitch_deg', 'rot_abs_err_yaw_deg']
 
 
 def load_redwood_poses(json_path: str, use_training_convention: bool = False) -> np.ndarray:
@@ -286,10 +297,10 @@ def pose_vec_to_matrix(pose_output: tuple) -> np.ndarray:
 
 
 class RedwoodEvaluator:
-    def __init__(self, config: Dict, pose_model_path: str):
+    def __init__(self, config: Dict, pose_model_path: str, data_root: str):
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.data_root = Path('/home/park-ubuntu/park/Deep-Visual-SLAM/depth/data/redwood')
+        self.data_root = Path(data_root)
 
         # Load pose model
         self.pose_net = PoseNet(
@@ -343,9 +354,11 @@ class RedwoodEvaluator:
 
         # IMPORTANT: Use invert=True to match GT direction
         # Testing showed this gives 73.6% better accuracy
+        # float64: in float32, (trace-1)/2 rounds to 1 for sub-0.01° rotations,
+        # which made rot_error_deg exactly 0 in the 2025 run.
         T_pred = transformation_from_parameters(
             axisangle[:, 0], translation[:, 0], invert=True
-        ).cpu().numpy()[0]
+        ).cpu().numpy()[0].astype(np.float64)
 
         return T_pred
 
@@ -513,8 +526,7 @@ class RedwoodEvaluator:
         image_files = sorted(image_dir.glob('*.jpg'))
 
         if len(image_files) != num_frames:
-            print(f"Warning: Number of images ({len(image_files)}) != number of poses ({num_frames})")
-            return
+            raise RuntimeError(f"{scene_name}: number of images ({len(image_files)}) != number of poses ({num_frames})")
 
         print(f"\nEvaluating scene: {scene_name}")
         print(f"Total frames: {num_frames}")
@@ -538,7 +550,8 @@ class RedwoodEvaluator:
             'pos_diff_x', 'pos_diff_y', 'pos_diff_z',
             'rot_diff_roll', 'rot_diff_pitch', 'rot_diff_yaw',
             'pos_error', 'rot_error_deg',
-            'pos_error_percent', 'rot_error_percent'
+            'pos_error_percent', 'rot_error_percent',
+            *RPY_ERR_COLS
         ]
 
         # Lists to accumulate absolute poses for trajectory plotting
@@ -589,6 +602,9 @@ class RedwoodEvaluator:
             pos_error_percent = abs(pred_pos_norm - gt_pos_norm) / gt_pos_norm * 100 if gt_pos_norm > 1e-6 else 0
             rot_error_percent = abs(pred_rot_norm - gt_rot_norm) / gt_rot_norm * 100 if gt_rot_norm > 1e-6 else 0
 
+            # target-metric 04: |GT angle - predicted angle| per Roll/Pitch/Yaw axis (deg), wrapped to [-180, 180)
+            rpy_abs_err_deg = np.abs(np.degrees((gt_euler - pred_euler + np.pi) % (2 * np.pi) - np.pi))
+
             # Add to CSV data with relative paths
             row = [
                 i, i+1,
@@ -601,7 +617,8 @@ class RedwoodEvaluator:
                 pos_diff[0], pos_diff[1], pos_diff[2],
                 rot_diff[0], rot_diff[1], rot_diff[2],
                 pos_error, rot_error_deg,
-                pos_error_percent, rot_error_percent
+                pos_error_percent, rot_error_percent,
+                *rpy_abs_err_deg
             ]
             csv_data.append(row)
 
@@ -612,10 +629,17 @@ class RedwoodEvaluator:
             writer.writerows(csv_data)
 
         # Compute statistics for relative pose errors
-        pos_errors = [row[-4] for row in csv_data]
-        rot_errors = [row[-3] for row in csv_data]
-        pos_error_percents = [row[-2] for row in csv_data]
-        rot_error_percents = [row[-1] for row in csv_data]
+        col = {name: i for i, name in enumerate(csv_header)}
+        pos_errors = [row[col['pos_error']] for row in csv_data]
+        rot_errors = [row[col['rot_error_deg']] for row in csv_data]
+        pos_error_percents = [row[col['pos_error_percent']] for row in csv_data]
+        rot_error_percents = [row[col['rot_error_percent']] for row in csv_data]
+        rpy_errs = np.array([[row[col[c]] for c in RPY_ERR_COLS] for row in csv_data])  # (n, 3)
+        rpy_axis_mean = rpy_errs.mean(axis=0)
+        zero_motion_pairs = sum(
+            1 for row in csv_data
+            if np.linalg.norm([row[col['gt_tx']], row[col['gt_ty']], row[col['gt_tz']]]) <= 1e-6
+        )
 
         print(f"\n=== Results for {scene_name} ===")
         print(f"Number of evaluated pairs: {len(csv_data)}")
@@ -628,6 +652,12 @@ class RedwoodEvaluator:
         print(f"  Rotation Error (median): {np.median(rot_errors):.4f} deg")
         print(f"  Rotation Error (std):    {np.std(rot_errors):.4f} deg")
         print(f"  Rotation Error % (mean): {np.mean(rot_error_percents):.2f}%")
+        print(f"\ntarget-metric:")
+        print(f"  [03] AR position MAPE:            {np.mean(pos_error_percents):.4f} %")
+        print(f"  [04] AR rotation abs error (deg): roll {rpy_axis_mean[0]:.6f} | pitch {rpy_axis_mean[1]:.6f} "
+              f"| yaw {rpy_axis_mean[2]:.6f} | RPY mean {rpy_errs.mean():.6f}")
+        if zero_motion_pairs:
+            print(f"  NOTE: {zero_motion_pairs} pairs with GT motion <= 1e-6 m (counted as 0 % in MAPE, 2025 rule)")
 
         print(f"\nResults saved to: {output_csv}")
 
@@ -635,42 +665,120 @@ class RedwoodEvaluator:
         output_plot = output_csv.replace('.csv', '_trajectory.png')
         self.plot_trajectory(abs_poses_gt, abs_poses_pred, scene_name, output_plot)
 
+        return {
+            'scene': scene_name,
+            'pairs': len(csv_data),
+            'pos_mape_pct': float(np.mean(pos_error_percents)),
+            'rot_roll_deg': float(rpy_axis_mean[0]),
+            'rot_pitch_deg': float(rpy_axis_mean[1]),
+            'rot_yaw_deg': float(rpy_axis_mean[2]),
+            'rot_rpy_mean_deg': float(rpy_errs.mean()),
+            'zero_motion_pairs': zero_motion_pairs,
+        }
+
+
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Redwood VO evaluation (target-metric items 03/04)')
+    parser.add_argument('--data-root', default='/mnt/backup/SLAM/redwood',
+                        help='Redwood root containing test/<scene>/{<scene>.json,image/}')
+    parser.add_argument('--weights', default=str(
+        REPO_ROOT / 'weights/vo/mode=axisAngle_res=(480, 640)_ep=31_bs=16_initLR=0.0001_endLR=1e-05'
+                    '_prefix=Pose-MobileNetV4HybridLarge/pose_net_epoch_31.pth'))
+    parser.add_argument('--config', default=str(REPO_ROOT / 'vo/config.yaml'))
+    parser.add_argument('--output-dir', default=None,
+                        help='Default: results/pairs_eval/<YYYYmmdd-HHMMSS>')
+    parser.add_argument('--scenes', nargs='+', default=['apartment', 'bedroom', 'boardroom', 'lobby', 'loft'])
+    return parser.parse_args()
+
 
 def main():
+    args = parse_args()
+
     # Load config
-    with open('./vo/config.yaml', 'r') as f:
+    with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
     # Model path
-    # pose_model_path = 'weights/vo/pose_net_epoch_30.pth'
-    pose_model_path = "weights/vo/mode=axisAngle_res=(480, 640)_ep=31_bs=16_initLR=0.0001_endLR=1e-05_prefix=Pose-MobileNetV4HybridLarge/pose_net_epoch_31.pth"
-
+    pose_model_path = args.weights
     if not os.path.exists(pose_model_path):
         print(f"Error: Model weights not found at {pose_model_path}")
-        return
+        sys.exit(2)
 
     # Create evaluator
-    evaluator = RedwoodEvaluator(config, pose_model_path)
+    evaluator = RedwoodEvaluator(config, pose_model_path, args.data_root)
 
     # Scenes to evaluate
-    scenes = ['apartment', 'bedroom', 'boardroom', 'lobby', 'loft']
+    scenes = args.scenes
 
-    # Output directory
-    output_dir = Path('./results/redwood_eval')
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Output directory (never overwrite an earlier run)
+    started = datetime.now()
+    output_dir = Path(args.output_dir) if args.output_dir else \
+        REPO_ROOT / 'results' / 'pairs_eval' / started.strftime('%Y%m%d-%H%M%S')
+    output_dir.mkdir(parents=True, exist_ok=False)
 
     # Evaluate each scene
+    summaries, failed = [], []
     for scene in scenes:
         output_csv = output_dir / f'{scene}_pose_errors.csv'
         try:
-            evaluator.evaluate_scene(scene, str(output_csv))
+            summaries.append(evaluator.evaluate_scene(scene, str(output_csv)))
         except Exception as e:
             print(f"Error evaluating {scene}: {e}")
             import traceback
             traceback.print_exc()
+            failed.append(scene)
+
+    # Summary: per-sequence mean, then mean over sequences (신청서 시험 방법 3)
+    with open(output_dir / 'summary.csv', 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(summaries[0].keys()) if summaries else ['scene'])
+        writer.writeheader()
+        writer.writerows(summaries)
+
+    lines = [
+        '=== target-metric AR pose evaluation (Redwood test split) ===',
+        f'date        : {started.isoformat(timespec="seconds")}',
+        f'host        : {platform.node()} | python {platform.python_version()} | torch {torch.__version__} | '
+        f'device {torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"}',
+        f'weights     : {pose_model_path}',
+        f'weights sha256: {sha256_of(pose_model_path)}',
+        f'data root   : {args.data_root}',
+        '',
+        f'{"scene":<10} {"pairs":>6} {"03 MAPE(%)":>11} {"roll(°)":>9} {"pitch(°)":>9} {"yaw(°)":>9} {"04 RPY(°)":>10}',
+    ]
+    for s in summaries:
+        lines.append(f'{s["scene"]:<10} {s["pairs"]:>6} {s["pos_mape_pct"]:>11.4f} {s["rot_roll_deg"]:>9.5f} '
+                     f'{s["rot_pitch_deg"]:>9.5f} {s["rot_yaw_deg"]:>9.5f} {s["rot_rpy_mean_deg"]:>10.5f}')
+
+    complete = not failed and len(summaries) == 5
+    if summaries:
+        pos_mean = float(np.mean([s['pos_mape_pct'] for s in summaries]))
+        rot_mean = float(np.mean([s['rot_rpy_mean_deg'] for s in summaries]))
+        lines += [
+            '',
+            f'[03] AR 위치 오차 (MAPE, {len(summaries)}개 시퀀스 평균): {pos_mean:.4f} %  '
+            f'(목표 ≤ {POS_MAPE_TARGET_PCT} %) -> {"PASS" if pos_mean <= POS_MAPE_TARGET_PCT else "FAIL"}',
+            f'[04] AR 회전 오차 (Roll·Pitch·Yaw 평균 절대 오차, {len(summaries)}개 시퀀스 평균): {rot_mean:.6f} °  '
+            f'(목표 ≤ {ROT_ABS_TARGET_DEG} °) -> {"PASS" if rot_mean <= ROT_ABS_TARGET_DEG else "FAIL"}',
+        ]
+    if not complete:
+        lines.append(f'INCOMPLETE: failed scenes = {failed}, evaluated {len(summaries)}/5 -> 공식 판정 불가')
+
+    report = '\n'.join(lines)
+    print('\n' + report)
+    (output_dir / 'output.txt').write_text(report + '\n', encoding='utf-8')
 
     print("\n=== Evaluation Complete ===")
     print(f"Results saved to: {output_dir}")
+    if not complete:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

@@ -268,6 +268,16 @@ python vo/eval_traj.py
 python depth/eval.py
 ```
 
+### target-metric AR Pose Evaluation (Redwood test split, items 03/04)
+```bash
+conda activate vslam
+python vo/eval_redwood.py            # --data-root /mnt/backup/SLAM/redwood --weights <pose_net.pth>
+```
+- 03 AR position error (target ≤ 2.96 %): for each consecutive frame pair (t-1, t), the camera translation is measured in **meters** (the model outputs metric translation; no scale alignment to GT). The pair error is `|GT distance − predicted distance| ÷ GT distance × 100` (%). The sequence result is the mean over all pairs (MAPE).
+- 04 AR rotation error: mean |GT − pred| of frame-to-frame Roll/Pitch/Yaw, ZYX, degrees (target ≤ 3.4 °)
+- Scenes: apartment, bedroom, boardroom, lobby, loft. Per-sequence mean, then the mean of the 5 sequences.
+- Output: `results/pairs_eval/<timestamp>/` with per-pair `*_pose_errors.csv`, `summary.csv`, `output.txt` (PASS/FAIL, weights sha256)
+
 Evaluation metrics:
 - **Depth**: AbsRel, SqRel, RMSE, RMSE_log, δ < 1.25^n
 - **Trajectory**: ATE (Absolute Trajectory Error), RPE (Relative Pose Error)
