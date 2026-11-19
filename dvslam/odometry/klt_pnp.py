@@ -40,13 +40,13 @@ class KLTPnPOdometry:
                  ransac_px: float = 2.0, min_inliers: int = 20, kf_ratio: float = 0.8, init_px: float = 10.0,
                  tri_deg: float = 1.5, retri: float = 1.5, rejoint: bool = True, ray_anchor: bool = True,
                  robust_k: float = 3.0, robust_min_px: float = 0.1, depth_min: float = 0.2, depth_max: float = 6.0,
-                 depth_edge: float = 1.05):
+                 depth_edge: float = 1.05, lk_iters: int = 30, lk_eps: float = 0.001):
         if mode not in ('depth_free', 'sensor_depth'):
             raise ValueError(f'mode must be depth_free or sensor_depth, got {mode}')
         self.mode = mode
         self.n_features, self.min_distance, self.quality = n_features, min_distance, quality
-        self.lk = dict(winSize=(lk_win, lk_win), maxLevel=lk_levels,
-                       criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.001))
+        self.lk = {'winSize': (lk_win, lk_win), 'maxLevel': lk_levels,
+                   'criteria': (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, lk_iters, lk_eps)}
         self.fb_px, self.ransac_px, self.min_inliers = fb_px, ransac_px, min_inliers
         self.kf_ratio, self.init_px, self.tri_cos = kf_ratio, init_px, np.cos(np.radians(tri_deg))
         self.rejoint, self.ray_anchor, self.retri = rejoint, ray_anchor, retri
@@ -90,9 +90,10 @@ class KLTPnPOdometry:
         need = self.n_features - len(self.px)
         if need <= 0:
             return 0
-        mask = np.full(gray.shape, 255, np.uint8)
-        for u, v in self.px:
-            cv2.circle(mask, (int(round(u)), int(round(v))), self.min_distance, 0, -1)
+        dm = getattr(self, 'detect_mask', None)       # optional allowed-region mask (EXP-011 field-of-view cap)
+        mask = np.full(gray.shape, 255, np.uint8) if dm is None else dm.copy()
+        for u, v in self.px:                            # int(): round(np.float32) stays np.float32 on NumPy < 2
+            cv2.circle(mask, (int(round(u)), int(round(v))), self.min_distance, 0, -1)  # noqa: RUF046
         c = cv2.goodFeaturesToTrack(gray, need, self.quality, self.min_distance, mask=mask, blockSize=7)
         if c is None:
             return 0
@@ -110,6 +111,12 @@ class KLTPnPOdometry:
         """LK t-1 -> t with forward-backward check; drops failed tracks. Returns (px in t-1, px in t)."""
         if len(self.px) == 0:
             return self.px.copy(), self.px.copy()
+        p1, ok = self._lk(gray)
+        self._keep(ok)
+        return self.px.copy(), p1[ok]
+
+    def _lk(self, gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """LK of every track t-1 -> t: (positions in t (n, 2) float32, passed forward-backward and bounds (n,))."""
         p0 = self.px.reshape(-1, 1, 2)
         p1, st1, _ = cv2.calcOpticalFlowPyrLK(self.prev_gray, gray, p0, None, **self.lk)
         p0b, st2, _ = cv2.calcOpticalFlowPyrLK(gray, self.prev_gray, p1, None, **self.lk)
@@ -117,8 +124,7 @@ class KLTPnPOdometry:
         w, h = self.size
         ok = (st1.ravel() == 1) & (st2.ravel() == 1) & (np.linalg.norm(p0b - self.px, axis=1) < self.fb_px)
         ok &= (p1[:, 0] >= 0) & (p1[:, 0] <= w - 1) & (p1[:, 1] >= 0) & (p1[:, 1] <= h - 1)
-        self._keep(ok)
-        return self.px.copy(), p1[ok]
+        return p1, ok
 
     def _project(self, T_wc: np.ndarray, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         T_cw = np.linalg.inv(T_wc)
@@ -315,10 +321,12 @@ class KLTPnPOdometry:
 
         ray_anchor: the scored ΔT_t is then refined frame to frame, with each inlier map point moved onto its
         observed ray in t-1 (depth kept from the map), so accumulated track drift against the map cancels.
-        Returns (ΔT_t, T_wc_t, n_inliers, rms_px) or None when tracking fails.
+        Returns (ΔT_t, T_wc_t, n_inliers, rms_px) or None when tracking fails; then self.fail_reason says why
+        (few_mapped | pnp_error | ransac_inliers | rejoint_inliers; diagnostics only).
         """
         m = np.isfinite(self.X[:, 0])
         if m.sum() < self.min_inliers:
+            self.fail_reason = 'few_mapped'
             return None
         X, uv1, uv0 = self.X[m], self.px[m].astype(np.float64), prev_px[m].astype(np.float64)
         try:
@@ -326,14 +334,17 @@ class KLTPnPOdometry:
                                                reprojectionError=self.ransac_px, confidence=0.999,
                                                flags=cv2.SOLVEPNP_SQPNP)
         except cv2.error:                              # SQPnP asserts on degenerate minimal sets
+            self.fail_reason = 'pnp_error'
             return None
         if not ok or inl is None or len(inl) < self.min_inliers:
+            self.fail_reason = 'ransac_inliers'
             return None
         inl = inl.ravel()
         if self.rejoint:   # the pair uses only points consistent with frame t-1 as well
             e0 = np.linalg.norm(self._project(T_prev, X[inl])[0] - uv0[inl], axis=1)
             inl = inl[e0 < 2 * self.ransac_px]
             if len(inl) < self.min_inliers:
+                self.fail_reason = 'rejoint_inliers'
                 return None
         T_cur, keep = self._robust_refine(X[inl], uv1[inl], _from_rt(r, t))
         if self.rejoint:

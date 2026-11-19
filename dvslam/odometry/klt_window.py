@@ -13,6 +13,9 @@ are reused unchanged.
                analytic sparse Jacobian. prior_per_kf: the landmarks of one host share a weight of 1/prior_sigma²
                (σ_j = prior_sigma·sqrt(n_host)), because the prior error is one jitter per frame, not per pixel.
                An update that moves a pose > ba_max_move_m / ba_max_turn_deg is discarded (divergence guard).
+               ba_guard (default off, EXP-003): depths are clipped to [BA_DEPTH_LO, BA_DEPTH_HI] inside the residual
+               (a zero-parallax landmark without prior can run x → −∞; exp(−x) then overflows in trial steps, which
+               trf rejects at the cost of evaluations) and landmarks accepted outside that range become unmapped.
   g          : one global log-scale, BA units = metric · e^g. After each BA, m_k = median(log d_BA − log d_p) over
                parallax-gated landmarks; after g_min_m samples g ← g + (m_k − g) / g_tau. Earlier increments are
                tagged BOOTSTRAP. Deviation from §4.5: g is NOT inside the prior factor by default (g_in_prior=False).
@@ -20,12 +23,40 @@ are reused unchanged.
                and the filter integrates it into a random walk (measured: g → −0.39 over 600 frames).
   output     : ΔT_t = inv(T_{t−1}) · T_t from one map state at t (BA units), then translation × e^{−g} once (§4.2).
                g and BA updates happen after ΔT_t is emitted. An increment that jumps > max_jump_m / max_jump_deg from
-               the previous one is treated as a PnP failure (motion model, DEGRADED).
+               the previous one is treated as a PnP failure (motion model, DEGRADED). jump_ref_tracked (default
+               off, EXP-003): the gate applies only when the previous pair was tracked. Without it a wrong increment
+               that passed the gate is repeated by the motion model and every later correct solve differs from it by
+               > max_jump_m, so the tracker never recovers (measured: room4 with quality=0.001 lk_win=15, 1,500 pairs).
 
-Prior: `prior` ∈ {perturbed (b = 2 %, jitter 3 %), oracle (GT depth), da3 (DA3METRIC-L), dav2_ft, ssl}. `prior_seed`
+Prior: `prior` ∈ {perturbed (b = 2 %, jitter 3 %), oracle (GT depth), da3 (DA3METRIC-L), dav2_ft, ssl, cache (maps
+cached on disk by scripts/exp003_cache_depth.py; prior_ckpt = the cache directory)}. `prior_seed`
 seeds the perturbed jitter. `ba=False kf_align=False` is the 0.7 sensor-depth path with a prior (baseline).
+EXP-007 front-end options (default off): flow_cache=<dir> moves tracks by dense flow cached offline instead of LK
+(klt_flow.py; diagnostic); flow_cache=raft_small|raft_large evaluates torchvision RAFT on the GPU when needed
+(EXP-008); photo=all|fallback refines the output increment of every pair /
+of motion-model pairs only by direct photometric LM on exposure- and vignette-normalised images with the SSL depth
+of frame t-1 rescaled to map units (klt_photo.py). A refined increment is kept only when its robust cost dropped,
+>= 50 points remain and it moved < photo_max_m (metric) / photo_max_deg from the tracker's increment; on a tracked
+pair only the output changes (the map pose stays the PnP one), on a motion-model pair the pose follows it.
+EXP-008: photo_tol / photo_max_pts (early stop, point cap); photo_ref_max > 1 refines frame t against a photometric
+reference frame (anchored at t-1 when the reference is older than photo_ref_max frames or a refinement was rejected)
+and outputs the difference of the two reference-relative poses; 1 = the pair refinement. flow_mode='hybrid' uses the
+flow only to re-acquire tracks on frames where LK keeps < flow_hybrid_frac of them.
+EXP-013 (CONDITIONAL, default off): out_lag=L emits pair (k-1, k) after frame k+L (klt_lag.py; smooth = fixed-lag
+constant-acceleration RTS on the step, window = causal increment corrected by the later window poses); flush() emits
+the last L pairs at the end of a sequence, so drivers must call it (scripts/exp003_track_log.py does).
+EXP-011: wide=<size> tracks on tumvi.wide_K(size) images (same f = 190 and principal ray, larger canvas; the central
+512 crop equals the standard image); the depth prior is still predicted on the standard image (built with K_OUT and
+512 x 512) and embedded in the canvas centre (no prior outside: those corners are triangulated); wide_fov_deg caps
+detection and tracks by angle. wide with a flow_cache directory is a ValueError (cached flow is of the standard image).
+Threads: OpenCV's own pool (pthreads) ignores OMP_NUM_THREADS and used ~8.7 cores for a job that needs ~1.6 (EXP-003,
+same output, same speed). reset() caps it with cv2.setNumThreads, which is PROCESS-WIDE (every later OpenCV call in
+the process, not only this tracker; deliberate, it protects the shared workstation): cv_threads=None (default) uses
+OMP_NUM_THREADS when that is set, else leaves OpenCV's pool alone; cv_threads=N > 0 sets N; cv_threads=0 leaves the
+pool as it is (it does NOT call cv2.setNumThreads(0), which would disable OpenCV threading).
 `head_inputs` (BA-unit ΔT^raw, g, BA depths of frame t−1) is exposed for the precision head (klt_head.py).
 """
+import os
 import time
 
 import cv2
@@ -37,9 +68,12 @@ from scipy.spatial.transform import Rotation
 from dvslam.odometry.base import Frame, PinholeCamera, PoseEstimate
 from dvslam.odometry.klt_pnp import _STATE_CODE, KLTPnPOdometry
 
+BA_DEPTH_LO, BA_DEPTH_HI = 0.01, 1000.0    # metres; ba_guard range of landmark depths in the window BA
+
 
 def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitter: float = 0.03,
-               ckpt: str | None = None):
+               ckpt: str | None = None, hw: tuple[int, int] | None = None):
+    """hw = (H, W) of the image the prior predicts on; only `cache` uses it (checked against <scene>.meta.json)."""
     if name == 'perturbed':
         from dvslam.depth.perturbed import PerturbedGTDepth
         return PerturbedGTDepth(bias=bias, jitter_logsd=jitter, seed=seed)
@@ -55,7 +89,10 @@ def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitt
     if name == 'ssl':
         from dvslam.depth.ssl import SSLDepth
         return SSLDepth(ckpt=ckpt, K=K)
-    raise ValueError(f'prior must be perturbed|oracle|da3|dav2_ft|ssl, got {name!r}')
+    if name == 'cache':
+        from dvslam.odometry.klt_depth_cache import CachedDepth
+        return CachedDepth(ckpt, hw)
+    raise ValueError(f'prior must be perturbed|oracle|da3|dav2_ft|ssl|cache, got {name!r}')
 
 
 def sample_depth(depth: np.ndarray, px: np.ndarray, dmin: float = 0.2, dmax: float = 6.0,
@@ -102,7 +139,14 @@ class KLTWindowOdometry(KLTPnPOdometry):
                  g_tau: float = 20.0, g_min_m: int = 5, g_gate_deg: float = 1.0, g_in_prior: bool = False,
                  tri_deg: float = 1.0, kf_refine: float = 2.0, kf_align: bool = True, max_jump_m: float = 0.10,
                  max_jump_deg: float = 20.0, ba_max_move_m: float = 0.05,
-                 ba_max_turn_deg: float = 3.0, prior_ckpt: str | None = None, **klt_kw):
+                 ba_max_turn_deg: float = 3.0, prior_ckpt: str | None = None, ba_guard: bool = False,
+                 cv_threads: int | None = None, jump_ref_tracked: bool = False, flow_cache: str | None = None,
+                 photo: str = 'off', photo_cell: int = 8, photo_grad: float = 0.01, photo_levels: int = 2,
+                 photo_iters: int = 10, photo_huber: float = 0.03, photo_max_m: float = 0.02,
+                 photo_max_deg: float = 1.0, photo_tol: float = 0.0, photo_max_pts: int = 0,
+                 flow_mode: str = 'replace', flow_hybrid_frac: float = 0.7, photo_ref_max: int = 1, wide: int = 0,
+                 wide_fov_deg: float = 0.0, out_lag: int = 0, out_lag_mode: str = 'smooth', out_lag_q: float = 0.002,
+                 out_lag_r: float = 0.001, **klt_kw):
         super().__init__(mode='sensor_depth', tri_deg=tri_deg, kf_ratio=kf_ratio, **klt_kw)
         self.prior_name, self.prior_seed, self.prior_bias, self.prior_jitter = prior, prior_seed, prior_bias, prior_jitter
         self.prior_ckpt = prior_ckpt                    # dav2_ft checkpoint; None = the model's default weights
@@ -113,21 +157,74 @@ class KLTWindowOdometry(KLTPnPOdometry):
         self.kf_align, self.prior_per_kf = kf_align, prior_per_kf
         self.max_jump_m, self.max_jump_deg = max_jump_m, max_jump_deg
         self.ba_max_move_m, self.ba_max_turn_deg = ba_max_move_m, ba_max_turn_deg
+        self.ba_guard, self.cv_threads, self.jump_ref_tracked = ba_guard, cv_threads, jump_ref_tracked
+        if photo not in ('off', 'all', 'fallback'):
+            raise ValueError(f'photo must be off|all|fallback, got {photo!r}')
+        self.flow_cache, self.photo = flow_cache, photo
+        self.photo_cell, self.photo_grad = photo_cell, photo_grad
+        self.photo_levels, self.photo_iters = photo_levels, photo_iters
+        self.photo_huber, self.photo_max_m, self.photo_max_deg = photo_huber, photo_max_m, photo_max_deg
+        self.photo_tol, self.photo_max_pts = photo_tol, photo_max_pts
+        if flow_mode not in ('replace', 'hybrid'):
+            raise ValueError(f'flow_mode must be replace|hybrid, got {flow_mode!r}')
+        self.flow_mode, self.flow_hybrid_frac, self.photo_ref_max = flow_mode, flow_hybrid_frac, photo_ref_max
+        self.wide, self.wide_fov_deg = wide, wide_fov_deg
+        if wide and flow_cache and flow_cache not in ('raft_small', 'raft_large'):
+            raise ValueError('wide with a cached flow directory is not supported: the cache holds flow of the standard '
+                             'image, the tracker would sample it at canvas pixels (flow_cache=raft_small|raft_large '
+                             'computes it on the canvas)')
+        if out_lag_mode not in ('smooth', 'window'):
+            raise ValueError(f'out_lag_mode must be smooth|window, got {out_lag_mode!r}')
+        self.out_lag, self.out_lag_mode = int(out_lag), out_lag_mode
+        self.out_lag_q, self.out_lag_r = out_lag_q, out_lag_r
+        self.flow = self.photo_norm = None
         self.kf_refine = kf_refine                     # max px change of the host->keyframe re-track (0 = off)
         self.prior = None
 
     # ------------------------------------------------------------------ setup
     def reset(self, camera: PinholeCamera) -> None:
         super().reset(camera)
+        self.detect_mask, self._woff = None, 0
+        K_prior, hw_prior = self.K, (camera.height, camera.width)   # the prior always sees the standard image
+        if self.wide:                                  # EXP-011: track on the wide canvas, same f and principal ray
+            from dvslam.data import tumvi
+            if not np.allclose(self.K, tumvi.K_OUT):
+                raise ValueError('wide needs the standard TUM-VI cam0 camera K_OUT')
+            self.K, self._woff = tumvi.wide_K(self.wide), tumvi.wide_offset(self.wide)
+            self.Kinv, self.size = np.linalg.inv(self.K), (self.wide, self.wide)
+        if self.wide_fov_deg > 0:                       # detect / keep corners only within this angle of the axis
+            w, h = self.size
+            uu, vv = np.meshgrid(np.arange(w), np.arange(h))
+            r = np.hypot((uu - self.K[0, 2]) / self.K[0, 0], (vv - self.K[1, 2]) / self.K[1, 1])
+            self.detect_mask = np.where(np.degrees(np.arctan(r)) <= self.wide_fov_deg, 255, 0).astype(np.uint8)
+        n = self.cv_threads if self.cv_threads is not None else os.environ.get('OMP_NUM_THREADS')
+        if n:
+            cv2.setNumThreads(int(n))
         if self.prior is None:
-            self.prior = make_prior(self.prior_name, self.K, self.prior_seed, self.prior_bias, self.prior_jitter,
-                                    self.prior_ckpt)
+            self.prior = make_prior(self.prior_name, K_prior, self.prior_seed, self.prior_bias, self.prior_jitter,
+                                    self.prior_ckpt, hw=hw_prior)
         self.g, self.n_m, self.n_jump, self.n_ba_reject = 0.0, 0, 0, 0
         self.fail_run = 0                               # consecutive untracked frames, for the reported state only
         self.last_prior = None                         # (frame index, depth map) of the last prior evaluation
         self.head_inputs = None
+        if self.flow_cache and self.flow is None:
+            from dvslam.odometry.klt_flow import FlowCache, OnlineRAFT
+            if self.flow_cache in ('raft_small', 'raft_large'):    # computed on demand on the GPU (EXP-008)
+                self.flow = OnlineRAFT(self.flow_cache.split('_')[1])
+            else:
+                self.flow = FlowCache(self.flow_cache, hw=(self.size[1], self.size[0]))
+        if self.photo != 'off' and self.photo_norm is None:
+            from dvslam.odometry.klt_photo import PhotoNorm
+            self.photo_norm = PhotoNorm(wide=self.wide)
+        self._photo_s, self._prev_frame, self._cur_path, self._photo_prep = None, None, None, None
+        self._photo_ref = None
+        self._lag_pending, self._lag_pose, self._lag_pushed = [], {}, 0
+        self._lag_R, self._lag_Rout = np.eye(3), np.eye(3)
+        if self.out_lag:
+            from dvslam.odometry.klt_lag import FixedLagCA
+            self._lag_ca = FixedLagCA(self.out_lag_q, self.out_lag_r, self.out_lag)
         self._clear_window()
-        for k in ('g', 'ba_ms', 'n_window', 'n_ba_lm'):
+        for k in ('g', 'ba_ms', 'n_window', 'n_ba_lm', 'fail', 'photo', 'flow_used'):
             self.diag[k] = []
 
     def _clear_window(self) -> None:
@@ -167,8 +264,18 @@ class KLTWindowOdometry(KLTPnPOdometry):
 
     def _predict_prior(self, frame: Frame) -> np.ndarray:
         if self.last_prior is None or self.last_prior[0] != frame.index:
-            self.last_prior = (frame.index, np.asarray(self.prior.predict(frame)[0], np.float32))
+            self.last_prior = (frame.index, self._prior_map(frame))
         return self.last_prior[1]
+
+    def _prior_map(self, frame: Frame) -> np.ndarray:
+        """Depth prior of frame (the network sees the standard 512 image); wide: embedded in the canvas, 0 outside."""
+        d = np.asarray(self.prior.predict(frame)[0], np.float32)
+        if not self.wide:
+            return d
+        out = np.zeros((self.wide, self.wide), np.float32)
+        o = self._woff
+        out[o:o + d.shape[0], o:o + d.shape[1]] = d
+        return out
 
     # ------------------------------------------------------------------ geometry
     def _bearing(self, px: np.ndarray) -> np.ndarray:
@@ -302,7 +409,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
                 continue
             u, p = uids[m], px[m]
             X = self._world_points_from(u, h)
-            uvk, zk = self._project(self.kf_poses[k], np.nan_to_num(X)) if len(u) else (None, None)
+            _, zk = self._project(self.kf_poses[k], np.nan_to_num(X)) if len(u) else (None, None)
             lp = np.log(sample_depth(self.kf_prior[k], p, self.depth_min, self.depth_max, self.depth_edge))
             has = np.isfinite(X[:, 0]) & (zk > 1e-6)
             x = np.where(has, -np.log(np.where(has, zk, 1.0)), -(lp + self._g_ba()))
@@ -356,6 +463,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
         n_p = 6 * (n_kf - 1)
         g_ba = self._g_ba()
         fx, fy, cx, cy = self.K[0, 0], self.K[1, 1], self.K[0, 2], self.K[1, 2]
+        x_lo, x_hi = -np.log(BA_DEPTH_HI), -np.log(BA_DEPTH_LO)
 
         def unpack(p):
             om = np.zeros((n_kf, 3))
@@ -366,7 +474,8 @@ class KLTWindowOdometry(KLTPnPOdometry):
 
         def geom(p):
             R, t, x = unpack(p)
-            ph = bear[o_lm] * np.exp(-x[o_lm])[:, None]
+            xo = np.clip(x[o_lm], x_lo, x_hi) if self.ba_guard else x[o_lm]
+            ph = bear[o_lm] * np.exp(-xo)[:, None]
             pw = np.einsum('nij,nj->ni', R[oh], ph) + t[oh]
             pk = np.einsum('nji,nj->ni', R[o_kf], pw - t[o_kf])
             return R, x, ph, pk
@@ -380,7 +489,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
             return np.r_[r_px, r_pr]
 
         def jac(p):
-            R, x, ph, pk = geom(p)
+            R, _, ph, pk = geom(p)
             X, Y, z = pk[:, 0], pk[:, 1], pk[:, 2]
             Jp = np.zeros((n_obs, 2, 3))
             Jp[:, 0, 0], Jp[:, 0, 2] = fx / z, -fx * X / z ** 2
@@ -427,6 +536,8 @@ class KLTWindowOdometry(KLTPnPOdometry):
             T = np.eye(4)
             T[:3, :3], T[:3, 3] = R[i], t[i]
             self.kf_poses[k] = T
+        if self.ba_guard:
+            x = np.where((x < x_lo) | (x > x_hi), np.nan, x)   # non-physical depth: unmapped from now on
         self.lm_x[lms] = x
         self._update_g(lms, host, o_lm, o_kf, R, t, x)
         self._log_ba(t0, n_lm)
@@ -458,6 +569,101 @@ class KLTWindowOdometry(KLTPnPOdometry):
         self._ba_ms += (time.perf_counter() - t0) * 1e3
         self._ba_lm = n_lm
 
+    # ------------------------------------------------------------------ EXP-007 front-end options
+    def _track(self, gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """_track_inner, then (wide_fov_deg) drop the tracks that left the detection mask."""
+        self._flow_used = False
+        if self.detect_mask is not None and len(self.px):   # wide_fov_deg: drop tracks that leave the cap
+            p0, p1 = self._track_inner(gray)
+            w, h = self.size
+            ui = np.clip(np.round(p1[:, 0]).astype(int), 0, w - 1)
+            vi = np.clip(np.round(p1[:, 1]).astype(int), 0, h - 1)
+            inside = self.detect_mask[vi, ui] > 0
+            self._keep(inside)
+            return p0[inside], p1[inside]
+        return self._track_inner(gray)
+
+    def _track_inner(self, gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """flow_cache set: move tracks by the cached dense flow t-1 -> t, check with the backward flow (fb_px).
+        flow_mode='hybrid' (EXP-008): LK first; only on a frame where LK keeps < flow_hybrid_frac of the tracks are the
+        lost tracks re-acquired from the flow (diag flow_used = frames that needed a flow evaluation)."""
+        if self.flow is None or len(self.px) == 0:
+            return super()._track(gray)
+        from dvslam.odometry.klt_flow import bilinear
+        if self.flow_mode == 'hybrid':
+            p1, ok = self._lk(gray)
+            if ok.mean() >= self.flow_hybrid_frac:
+                self._keep(ok)
+                return self.px.copy(), p1[ok]
+        else:
+            p1, ok = np.zeros((len(self.px), 2), np.float32), np.zeros(len(self.px), bool)
+        self._flow_used = True
+        fwd, bwd = self.flow.pair(self._cur_path, self.prev_gray, gray)
+        p0 = self.px.astype(np.float64)
+        f1 = p0 + bilinear(fwd, p0)
+        p0b = f1 + bilinear(bwd, f1)
+        w, h = self.size
+        okf = (np.linalg.norm(p0b - p0, axis=1) < self.fb_px) & (f1[:, 0] >= 0) & (f1[:, 0] <= w - 1)
+        okf &= (f1[:, 1] >= 0) & (f1[:, 1] <= h - 1)
+        use = okf & ~ok                                 # hybrid: LK survivors keep their LK position
+        p1 = p1.astype(np.float32)
+        p1[use] = f1[use]
+        ok = ok | okf
+        self._keep(ok)
+        return self.px.copy(), p1[ok]
+
+    def _photo_refine(self, frame: Frame, gray: np.ndarray, inc: np.ndarray, head_prev) -> np.ndarray | None:
+        """Photometric LM refinement of the BA-unit increment (klt_photo.py); None when skipped or not accepted."""
+        from dvslam.odometry.klt_photo import prepare, refine_prepared
+        pf, nm = self._prev_frame, self.photo_norm
+        if self._photo_prep is None or self._photo_prep[0] != pf.index:   # frame t-1 normally prepared at step t-1
+            I0, M0 = nm(pf.image_path, self.prev_gray, 1.0)
+            self._photo_prep = (pf.index, prepare(I0, M0, self.photo_levels), M0)
+        _, P0, M0 = self._photo_prep
+        I1, M1 = nm(frame.image_path, gray, 1.0)
+        P1 = prepare(I1, M1, self.photo_levels)
+        self._photo_prep = (frame.index, P1, M1)          # reference of the next pair
+        ref = self._photo_ref
+        if ref is None or ref['last'] != pf.index or frame.index - ref['index'] > self.photo_ref_max:
+            ref = self._photo_anchor(pf, P0, M0, head_prev)   # reference = frame t-1, A_{t-1} = I
+            if ref is None:
+                return None
+        A0 = np.linalg.inv(inc) @ ref['A']              # X_t = inv(ΔT) X_{t-1} = inv(ΔT) A_{t-1} X_ref
+        ratio = ref['e'] / nm.exposure(frame.image_path)
+        R, t, info = refine_prepared(ref['P'], P1, ratio, ref['pts'], ref['z'], self.K, A0[:3, :3], A0[:3, 3],
+                                     self.photo_levels, self.photo_iters, self.photo_huber, self.photo_tol)
+        A = np.eye(4)
+        A[:3, :3], A[:3, 3] = R, t
+        new = np.linalg.inv(A @ np.linalg.inv(ref['A']))
+        dt = np.linalg.norm(new[:3, 3] - inc[:3, 3]) * np.exp(-self.g)
+        dr = np.degrees(np.linalg.norm(Rotation.from_matrix(inc[:3, :3].T @ new[:3, :3]).as_rotvec()))
+        if info['n'] < 50 or not info['cost'] < info['cost0'] or dt > self.photo_max_m or dr > self.photo_max_deg:
+            self._photo_ref = None                      # re-anchor on the next pair
+            return None
+        ref.update(A=A, last=frame.index)
+        self._photo_ref = ref
+        return new
+
+    def _photo_anchor(self, pf: Frame, P0: list, M0: np.ndarray, head_prev) -> dict | None:
+        """Photometric reference at frame t-1: points, depths in map units (SSL depth × median z_map / d_p)."""
+        from dvslam.odometry.klt_photo import select_points_g
+        d0 = self._prior_map(pf)
+        if head_prev is not None:                       # SSL depth -> map units: median z_map / d_p, tracked points
+            dp = sample_depth(d0, head_prev[0], self.depth_min, self.depth_max, self.depth_edge)
+            ok = np.isfinite(dp) & (head_prev[1] > 0)
+            if ok.sum() >= 5:
+                self._photo_s = float(np.median(head_prev[1][ok] / dp[ok]))
+        if self._photo_s is None:
+            return None
+        pts = select_points_g(P0[0][..., 1], P0[0][..., 2], M0, self.photo_cell, self.photo_grad,
+                              self.photo_max_pts)[0]
+        z = sample_depth(d0, pts, self.depth_min, self.depth_max, self.depth_edge) * self._photo_s
+        v = np.isfinite(z)
+        if v.sum() < 50:
+            return None
+        return {'index': pf.index, 'last': pf.index, 'P': P0, 'pts': pts[v], 'z': z[v], 'A': np.eye(4),
+                'e': self.photo_norm.exposure(pf.image_path)}
+
     # ------------------------------------------------------------------ main step
     def _plausible(self, inc: np.ndarray, g: float) -> bool:
         """Reject an increment that jumps more than max_jump_m (metric) / max_jump_deg from the previous one."""
@@ -478,13 +684,22 @@ class KLTWindowOdometry(KLTPnPOdometry):
     def step(self, frame: Frame) -> PoseEstimate | None:
         t0 = time.perf_counter()
         self._ba_ms, self._ba_lm = 0.0, 0
-        gray = cv2.imread(str(frame.image_path), cv2.IMREAD_GRAYSCALE)
+        path = frame.image_path
+        if self.wide:
+            from dvslam.data import tumvi
+            path = tumvi.wide_path(path, self.wide)
+        gray = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if gray is None:
+            raise FileNotFoundError(path)
         if self.prev_gray is None:
             self._start_window(gray, frame, np.eye(4))
             self.prev_gray = gray
             self.last_inc_ba = np.eye(4)
+            self._prev_frame = frame
+            self._lag_record(frame.index, np.eye(4))
             return None
 
+        self._cur_path = frame.image_path
         prev_px, cur_px = self._track(gray)
         self.px = cur_px.astype(np.float32)
         n_tracks = len(self.px)
@@ -494,9 +709,12 @@ class KLTWindowOdometry(KLTPnPOdometry):
         g_out = self.g                                  # the g of this output; updated only after ΔT_t
         solved = self._solve_pair(prev_px, self.T_prev, self.T_prev @ self.last_inc_ba)
         inc, source, n_inl, rms = self.last_inc_ba, 'motion_model', 0, np.nan
-        if solved is not None and not self._plausible(solved[0], g_out):
+        fail = '' if solved is not None else self.fail_reason
+        gate = not (self.jump_ref_tracked and self.fail_run > 0)   # fail_run: untracked frames up to t−1
+        if solved is not None and gate and not self._plausible(solved[0], g_out):
             solved = None                               # degenerate PnP (e.g. a flipped solution): treat as a failure
             self.n_jump += 1
+            fail = 'jump'
         if solved is not None:
             inc, T_cur, n_inl, rms = solved
             source, self.state, self.n_fail = 'tracked', 'OK', 0
@@ -504,6 +722,14 @@ class KLTWindowOdometry(KLTPnPOdometry):
             self.n_fail += 1
             self.state = 'DEGRADED' if self.n_fail < 3 else 'LOST'
             T_cur = self.T_prev @ inc
+        photo = 0                                       # 0 not tried, 1 refined, 2 rejected
+        if self.photo == 'all' or (self.photo == 'fallback' and source == 'motion_model'):
+            ref = self._photo_refine(frame, gray, inc, head_prev)
+            photo = 2 if ref is None else 1
+            if ref is not None:
+                inc = ref
+                if source == 'motion_model':
+                    T_cur = self.T_prev @ inc
         # Reported state (labels only; re-init decisions above are unchanged). _start_window resets n_fail on every
         # re-init, so LOST is derived from the run of untracked frames instead (F11).
         self.fail_run = 0 if source == 'tracked' else self.fail_run + 1
@@ -526,13 +752,72 @@ class KLTWindowOdometry(KLTPnPOdometry):
             self._add_keyframe(gray, frame, T_cur)
             T_cur = self.kf_poses[frame.index]          # BA may have moved the newest keyframe
             is_kf = True
-        self.T_prev, self.last_inc_ba, self.prev_gray = T_cur, inc, gray
+        self.T_prev, self.last_inc_ba, self.prev_gray, self._prev_frame = T_cur, inc, gray, frame
         ms = (time.perf_counter() - t0) * 1e3
         d = self.diag
         for k, v in (('index', frame.index), ('state', _STATE_CODE[state]), ('n_tracks', n_tracks),
                      ('n_mapped', int(np.isfinite(self.X[:, 0]).sum())), ('n_inliers', n_inl),
                      ('is_keyframe', is_kf), ('reproj_rms_px', rms), ('total_ms', ms), ('g', g_out),
-                     ('ba_ms', self._ba_ms), ('n_window', len(self.kfs)), ('n_ba_lm', self._ba_lm)):
+                     ('ba_ms', self._ba_ms), ('n_window', len(self.kfs)), ('n_ba_lm', self._ba_lm), ('fail', fail),
+                     ('photo', photo), ('flow_used', self._flow_used)):
             d[k].append(v)
-        return PoseEstimate(frame.index, frame.timestamp, np.asarray(out, np.float64), state, source, is_kf,
-                            {'total': ms, 'ba': self._ba_ms})
+        est = PoseEstimate(frame.index, frame.timestamp, np.asarray(out, np.float64), state, source, is_kf,
+                           {'total': ms, 'ba': self._ba_ms})
+        if not self.out_lag:
+            return est
+        self._lag_record(frame.index, T_cur)
+        self._lag_pending.append((est, inc.copy(), g_out))
+        out = self._lag_emit(final=False)               # out_lag: the pair of frame index − out_lag, if any
+        return out[0] if out else None
+
+    # ------------------------------------------------------------------ EXP-013 fixed output lag (conditional)
+    def _lag_record(self, index: int, T_wc: np.ndarray) -> None:
+        """out_lag: pose of frame `index` as recorded now, plus its offset to the newest keyframe (window mode)."""
+        if not self.out_lag:
+            return
+        k = self.kfs[-1] if self.kfs else None
+        rel = np.linalg.inv(self.kf_poses[k]) @ T_wc if k in self.kf_poses else None
+        self._lag_pose[index] = (k, rel, T_wc.copy())
+
+    def _lag_now(self, index: int) -> np.ndarray:
+        k, rel, T = self._lag_pose[index]
+        return self.kf_poses[k] @ rel if rel is not None and k in self.kf_poses else T
+
+    def _lag_emit(self, final: bool) -> list[PoseEstimate]:
+        """The pairs whose lag has passed, oldest first (all held-back pairs when final). Not final: 0 or 1 pair,
+        since each step adds one pending pair and releases at most one (FixedLagCA.push returns 0 or 1 step)."""
+        out = []
+        if self.out_lag_mode == 'smooth':
+            new = []
+            for est, _, _ in self._lag_pending[self._lag_pushed:]:   # R_wc(k-1) · t_k, rotations chained causally
+                v = self._lag_R @ est.rel_increment[:3, 3]
+                self._lag_R = self._lag_R @ est.rel_increment[:3, :3]
+                new += self._lag_ca.push(v, est.source == 'tracked')
+            self._lag_pushed = len(self._lag_pending)
+            if final:
+                new += self._lag_ca.flush()
+            for vs in new:
+                est, _, _ = self._lag_pending.pop(0)
+                self._lag_pushed -= 1
+                Rw = self._lag_Rout
+                T = est.rel_increment.copy()
+                T[:3, 3] = Rw.T @ vs
+                self._lag_Rout = Rw @ T[:3, :3]
+                est.rel_increment = T
+                out.append(est)
+        else:
+            while self._lag_pending and (final or len(self._lag_pending) > self.out_lag):
+                est, inc, g_k = self._lag_pending.pop(0)
+                k = est.index
+                then = np.linalg.inv(self._lag_pose[k - 1][2]) @ self._lag_pose[k][2]
+                later = np.linalg.inv(self._lag_now(k - 1)) @ self._lag_now(k)
+                T = inc @ np.linalg.inv(then) @ later
+                T[:3, 3] *= np.exp(-g_k)
+                est.rel_increment = T
+                self._lag_pose.pop(k - 1, None)
+                out.append(est)
+        return out
+
+    def flush(self) -> list[PoseEstimate]:
+        """out_lag > 0: the pairs still held back at the end of a sequence (their lag shrinks to what is available)."""
+        return self._lag_emit(final=True) if self.out_lag else []

@@ -129,3 +129,53 @@ def load_sequence(scene: str, split: str | None = None, root: Path | str | None 
         dataset='tumvi', scene=scene, split=split, frame_ids=np.arange(len(t_cam)), image_paths=paths, T_wc=T_wc,
         K=K_OUT.copy(), width=OUT_SIZE, height=OUT_SIZE, timestamps=(t_cam - t_cam[0]) * 1e-9, timestamps_ns=t_cam,
         gt_valid=valid[keep], frame_rate_hz=FRAME_RATE_HZ)
+
+
+# ---------------------------------------------------------------- EXP-011: wider cam0 pinhole (tracker only)
+# Same focal length and principal ray as K_OUT on a larger size x size canvas, so the central OUT_SIZE x OUT_SIZE crop
+# (offset (size - OUT_SIZE) / 2) shows the same rays as the standard cache. Half field of view atan(size / 2 / 190):
+# 59.3 deg at 640, 63.7 deg at 768, 69.6 deg at 1024; all inside the 512 fisheye source (its edge is about 77 deg).
+# Separate cache tag 'cam0_pinhole_<size>_f190'; the standard cache and everything above are unchanged.
+
+def wide_offset(size: int) -> int:
+    if size < OUT_SIZE or (size - OUT_SIZE) % 2:
+        raise ValueError(f'wide size must be >= {OUT_SIZE} with an even margin, got {size}')
+    return (size - OUT_SIZE) // 2
+
+
+def wide_K(size: int) -> np.ndarray:
+    K = K_OUT.copy()
+    K[0, 2] = K[1, 2] = K_OUT[0, 2] + wide_offset(size)
+    return K
+
+
+def rectify_maps_wide(intrinsics: np.ndarray, dist: np.ndarray, size: int) -> tuple[np.ndarray, np.ndarray]:
+    """rectify_maps() for wide_K(size) on a size x size canvas."""
+    fx, fy, cx, cy = intrinsics
+    K_src = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+    return cv2.fisheye.initUndistortRectifyMap(K_src, dist, np.eye(3), wide_K(size), (size, size), cv2.CV_32FC1)
+
+
+def wide_cache_tag(size: int) -> str:
+    return f'cam0_pinhole_{size}_f190'
+
+
+def rectified_paths_wide(scene: str, images: list[Path], intrinsics: np.ndarray, dist: np.ndarray, size: int,
+                         build: bool) -> list[Path]:
+    """Cache paths of cam0 `images` rectified to wide_K(size); build=True first creates the missing files."""
+    dst = base.cache_dir('tumvi', scene, wide_cache_tag(size))
+    if not build:
+        return [dst / f'{p.stem}.png' for p in images]
+    map_x, map_y = rectify_maps_wide(intrinsics, dist, size)
+    meta = {'K': wide_K(size).tolist(), 'size': [size, size], 'source_model': 'equidistant',
+            'source_intrinsics': intrinsics.tolist(), 'source_distortion': dist.tolist(), 'bit_depth': 8,
+            'central_crop_of': CACHE_TAG, 'crop_offset': wide_offset(size)}
+    return base.rectify_to_cache(images, dst, map_x, map_y, meta)
+
+
+def wide_path(path: Path | str, size: int) -> Path:
+    """The wide-cache path of a standard cam0 cache image (same stem, sibling tag directory)."""
+    p = Path(path)
+    if p.parent.name != CACHE_TAG:
+        raise ValueError(f'{p} is not in a {CACHE_TAG} cache directory')
+    return p.parent.parent / wide_cache_tag(size) / p.name

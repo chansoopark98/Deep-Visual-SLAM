@@ -121,3 +121,266 @@ def test_g_scales_output_translation_only(scene):
     hi = odo.head_inputs
     np.testing.assert_allclose(est[-1].rel_increment[:3, 3], hi['T_raw'][:3, 3] * np.exp(-hi['g']), rtol=1e-12)
     np.testing.assert_allclose(est[-1].rel_increment[:3, :3], hi['T_raw'][:3, :3], atol=1e-15)
+
+
+def test_ba_guard_keeps_runaway_depth_finite(scene):
+    """EXP-003: a landmark whose log inverse depth ran to x = -800 (zero parallax, no prior) makes exp(-x) overflow in
+    the BA residual; with ba_guard the residual stays finite and the landmark ends inside the depth range or
+    unmapped."""
+    frames, _ = scene
+
+    def runaway(**o):
+        _, odo = _run(frames[:16], prior='perturbed', prior_jitter=0.05, **o)
+        lms = odo._ba_problem()[1]
+        odo.lm_x[lms[0]] = -800.0
+        return odo, lms[0]
+
+    odo, j = runaway()
+    with np.errstate(over='raise'), pytest.raises(FloatingPointError):
+        odo._bundle_adjust()
+    odo, j = runaway(ba_guard=True)
+    with np.errstate(over='raise'):
+        odo._bundle_adjust()
+    x = odo.lm_x[j]
+    assert np.isnan(x) or -np.log(kw.BA_DEPTH_HI) <= x <= -np.log(kw.BA_DEPTH_LO), x
+    assert odo.n_ba_reject == 0
+
+
+def test_cv_threads_follow_omp_cap(monkeypatch):
+    """EXP-003: OpenCV's pthreads pool ignores OMP_NUM_THREADS; reset() applies the cap (or cv_threads)."""
+    before = cv2.getNumThreads()
+    try:
+        monkeypatch.setenv('OMP_NUM_THREADS', '3')
+        KLTWindowOdometry(prior='oracle').reset(PinholeCamera(K, W, H))
+        assert cv2.getNumThreads() == 3
+        KLTWindowOdometry(prior='oracle', cv_threads=2).reset(PinholeCamera(K, W, H))
+        assert cv2.getNumThreads() == 2
+    finally:
+        cv2.setNumThreads(before)
+
+
+def test_fallback_reason_is_recorded(scene, tmp_path):
+    """A frame on which every KLT track is lost falls back to the motion model with reason few_mapped."""
+    frames, _ = scene
+    blank = tmp_path / 'blank.png'
+    cv2.imwrite(str(blank), np.full((H, W), 40, np.uint8))
+    fr = list(frames[:14])
+    fr[10] = Frame(10, fr[10].timestamp, blank, fr[10].depth_path)
+    est, odo = _run(fr, prior='oracle')
+    fail = odo.finalize()['fail']
+    assert est[9].source == 'motion_model' and fail[9] == 'few_mapped', (est[9].source, fail[9])
+    assert all(f == '' for f in fail[:9])
+
+
+def test_jump_gate_does_not_lock_onto_motion_model(scene):
+    """EXP-003: after a wrong increment (0.2 m) was repeated by the motion model, a correct solve differs from it by
+    more than max_jump_m. With jump_ref_tracked the gate is skipped after an untracked frame, so tracking resumes."""
+    frames, gt = scene
+
+    def resume(**o):
+        odo = KLTWindowOdometry(min_distance=10, lk_win=15, kf_max=5, window=6, g_min_m=2, n_features=150,
+                                prior='oracle', **o)
+        odo.reset(PinholeCamera(K, W, H))
+        for f in frames[:10]:
+            odo.step(f)
+        odo.last_inc_ba = np.eye(4)
+        odo.last_inc_ba[2, 3] = 0.2                     # stale motion-model increment
+        odo.fail_run = 1                                # the previous pair came from the motion model
+        return odo.step(frames[10])
+
+    assert resume().source == 'motion_model'
+    e = resume(jump_ref_tracked=True)
+    assert e.source == 'tracked'
+    assert np.linalg.norm(e.rel_increment[:3, 3] - gt[9, :3, 3]) < 1e-3
+
+
+def test_photo_refine_recovers_increment_on_textured_plane():
+    """EXP-007 klt_photo.refine: from a zero-motion start, LM on a rendered textured plane recovers X1 = R X0 + t."""
+    from dvslam.odometry.klt_photo import refine, select_points
+    n, f, c = 256, 190.0, 127.5
+    Kp = np.array([[f, 0, c], [0, f, c], [0, 0, 1]])
+    uu, vv = np.meshgrid(np.arange(n), np.arange(n))
+    ray = np.stack([(uu - c) / f, (vv - c) / f, np.ones((n, n))], -1)
+
+    def render(R, t):                                   # camera X_c = R X_w + t, plane Z_w = 2 m
+        rw, cw = ray @ R, -R.T @ t
+        d = (2.0 - cw[2]) / rw[..., 2]
+        P = cw + d[..., None] * rw
+        img = 0.5 + 0.2 * np.sin(9 * P[..., 0]) * np.cos(7 * P[..., 1]) + 0.1 * np.sin(23 * P[..., 0] + 11 * P[..., 1])
+        return img.astype(np.float32), d
+
+    R1 = Rotation.from_euler('xyz', [0.3, -0.4, 0.2], degrees=True).as_matrix()
+    t1 = np.array([0.02, -0.01, 0.03])
+    I0, D0 = render(np.eye(3), np.zeros(3))
+    I1, _ = render(R1, t1)
+    M = np.ones((n, n), bool)
+    pts = select_points(I0, M, 8, 0.002)
+    z = D0[pts[:, 1].astype(int), pts[:, 0].astype(int)]
+    R, t, info = refine(1.1 * I0 + 0.05, I1, M, pts, z, Kp, np.eye(3), np.zeros(3), levels=3, iters=30)
+    assert info['cost'] < info['cost0'] and info['n'] > 200
+    assert np.linalg.norm(t - t1) < 5e-4, t - t1                       # < 0.5 mm of a 37 mm step
+    assert np.degrees(np.linalg.norm(Rotation.from_matrix(R.T @ R1).as_rotvec())) < 0.02
+
+
+def test_flow_tracks_follow_cached_flow(scene):
+    """EXP-007 flow_cache: tracks move by the sampled forward flow; a backward-flow mismatch drops the track."""
+    frames, _ = scene
+    odo = KLTWindowOdometry(prior='oracle')
+    odo.reset(PinholeCamera(K, W, H))
+    odo.px = np.array([[50.0, 60.0], [100.5, 80.25], [200.0, 150.0]], np.float32)
+    odo.anchor_idx, odo.anchor_px = np.zeros(3, np.int64), odo.px.astype(np.float64)
+    odo.X, odo.par, odo.uid = np.full((3, 3), np.nan), np.zeros(3), np.arange(3)
+    fwd = np.zeros((2, H, W), np.float32)
+    fwd[0], fwd[1] = 1.5, -0.5
+    bwd = -fwd.copy()
+    bwd[:, 140:160, 195:210] = 0                        # third track lands here: backward flow disagrees by 1.6 px
+
+    class Fake:
+        def pair(self, path, prev_gray, gray):
+            return fwd, bwd
+    odo.flow, odo._cur_path = Fake(), frames[1].image_path
+    p0, p1 = odo._track(None)
+    np.testing.assert_allclose(p1, [[51.5, 59.5], [102.0, 79.75]], atol=1e-5)
+    assert len(p0) == 2 and list(odo.uid) == [0, 1]
+
+
+def test_hybrid_flow_reacquires_only_lost_tracks(scene):
+    """EXP-008 flow_mode='hybrid': LK survivors keep their LK position; when LK keeps < flow_hybrid_frac of the
+    tracks, the lost ones are re-acquired from the flow; with enough LK survivors the flow is not used at all."""
+    frames, _ = scene
+    odo = KLTWindowOdometry(prior='oracle', flow_mode='hybrid', flow_hybrid_frac=0.7)
+    odo.reset(PinholeCamera(K, W, H))
+    fwd = np.zeros((2, H, W), np.float32)
+    fwd[0], fwd[1] = 1.5, -0.5
+
+    class Fake:
+        def pair(self, path, prev_gray, gray):
+            return fwd, -fwd
+
+    def setup(lk_ok):
+        odo.px = np.array([[50.0, 60.0], [100.0, 80.0], [200.0, 150.0]], np.float32)
+        odo.anchor_idx, odo.anchor_px = np.zeros(3, np.int64), odo.px.astype(np.float64)
+        odo.X, odo.par, odo.uid = np.full((3, 3), np.nan), np.zeros(3), np.arange(3)
+        odo.flow, odo._cur_path = Fake(), frames[1].image_path
+        odo._lk = lambda gray: (odo.px + np.float32([3.0, 0.0]), np.array(lk_ok))
+
+    setup([True, False, False])                         # LK keeps 1/3 < 0.7: re-acquire the other two from the flow
+    _, p1 = odo._track(None)
+    np.testing.assert_allclose(p1, [[53.0, 60.0], [101.5, 79.5], [201.5, 149.5]], atol=1e-5)
+    assert odo._flow_used
+    setup([True, True, True])
+    _, p1 = odo._track(None)
+    assert not odo._flow_used and len(p1) == 3
+
+
+def test_wide_canvas_camera_cap_and_prior_embedding():
+    """EXP-011 wide=768: K shifted to the canvas centre, field-of-view cap by angle, 512 prior embedded centrally."""
+    from dvslam.data import tumvi
+    odo = KLTWindowOdometry(prior='oracle', wide=768, wide_fov_deg=60.0)
+    odo.reset(PinholeCamera(tumvi.K_OUT, 512, 512))
+    assert odo.size == (768, 768) and odo.K[0, 2] == 383.5 and odo.K[0, 0] == 190.0
+    m = odo.detect_mask
+    assert m[383, 383] == 255 and m[0, 0] == 0                         # corner of the canvas is at 70.7 deg
+    edge = round(383.5 + 190.0 * np.tan(np.radians(59.0)))
+    assert m[383, edge] == 255 and m[383, 767] == 0                     # 59 deg inside, 63.7 deg outside
+
+    class Ones:
+        def predict(self, frame):
+            return np.ones((512, 512), np.float32), None
+    odo.prior = Ones()
+    d = odo._prior_map(Frame(0, 0.0, 'x.png'))
+    assert d.shape == (768, 768) and d[128:640, 128:640].min() == 1 and d[:128].max() == 0 and d[:, 640:].max() == 0
+    with pytest.raises(ValueError):
+        KLTWindowOdometry(prior='oracle', wide=768).reset(PinholeCamera(K, W, H))
+
+
+def _run_lag(frames, **opts):
+    odo = KLTWindowOdometry(min_distance=10, lk_win=15, kf_max=5, window=6, g_min_m=2, n_features=150, **opts)
+    odo.reset(PinholeCamera(K, W, H))
+    returned = [odo.step(f) for f in frames]
+    return returned, odo.flush(), odo
+
+
+def test_out_lag_default_unchanged_and_alignment(scene):
+    """EXP-013 out_lag (conditional, default 0): lag 0 is the old output; with lag L the first L+1 steps return None,
+    flush() returns the last L pairs, and every pair 1..n-1 is emitted once, in order, with its own timestamp."""
+    frames, _ = scene
+    base, _ = _run(frames, prior='oracle')
+    ret0, fl0, _ = _run_lag(frames, prior='oracle', out_lag=0)
+    assert fl0 == []
+    np.testing.assert_array_equal(np.stack([e.rel_increment for e in base]),
+                                  np.stack([e.rel_increment for e in ret0[1:]]))
+    for mode in ('smooth', 'window'):
+        ret, fl, _ = _run_lag(frames, prior='oracle', out_lag=2, out_lag_mode=mode)
+        assert all(r is None for r in ret[:3]) and all(r is not None for r in ret[3:]) and len(fl) == 2
+        est = [r for r in ret if r is not None] + fl
+        assert [e.index for e in est] == list(range(1, len(frames)))
+        assert [e.timestamp for e in est] == [f.timestamp for f in frames[1:]]
+
+
+def test_out_lag_smooth_equals_offline_fixed_lag_filter(scene):
+    """smooth mode = scripts/exp008_filter.py (mode ca, same q, r, lag) applied to the lag-0 output."""
+    from scripts.exp008_filter import filter_run
+    frames, _ = scene
+    base, _ = _run(frames, prior='perturbed', prior_jitter=0.05)
+    inc = {'rel_increment': np.stack([e.rel_increment for e in base]), 'source': np.array([e.source for e in base])}
+    ret, fl, _ = _run_lag(frames, prior='perturbed', prior_jitter=0.05, out_lag=2, out_lag_q=0.002, out_lag_r=0.001)
+    got = np.stack([e.rel_increment for e in [r for r in ret if r is not None] + fl])
+    np.testing.assert_allclose(got, filter_run(inc, 'ca', 0.002, 0.001, 2), atol=1e-12)
+
+
+def test_out_lag_window_mode_applies_only_later_window_changes(scene):
+    """window mode = causal increment × (change of the window's relative pose since it was emitted): with no BA the
+    keyframe poses never move, so the lagged output equals the causal one; with BA it differs (and stays sane)."""
+    frames, gt = scene
+    base, _ = _run(frames, prior='oracle', ba=False, kf_align=False)
+    ret, fl, _ = _run_lag(frames, prior='oracle', ba=False, kf_align=False, out_lag=2, out_lag_mode='window')
+    got = np.stack([e.rel_increment for e in [r for r in ret if r is not None] + fl])
+    np.testing.assert_allclose(got, np.stack([e.rel_increment for e in base]), atol=1e-12)
+    ret, fl, _ = _run_lag(frames, prior='oracle', out_lag=2, out_lag_mode='window')
+    inc = np.stack([e.rel_increment for e in [r for r in ret if r is not None] + fl])
+    assert np.linalg.norm(inc[:, :3, 3] - gt[:, :3, 3], axis=1).max() * 1e3 < 1.0
+
+
+def test_wide_rejects_cached_flow_directory():
+    """A flow cache holds flow of the standard 512 image; wide tracks live on the canvas, so the pair is refused.
+    Online RAFT sees the canvas images and stays allowed."""
+    with pytest.raises(ValueError, match='wide'):
+        KLTWindowOdometry(prior='oracle', wide=768, flow_cache='/some/flow/dir')
+    KLTWindowOdometry(prior='oracle', wide=768, flow_cache='raft_small')
+    KLTWindowOdometry(prior='oracle', wide_fov_deg=60.0, flow_cache='/some/flow/dir')   # standard canvas: fine
+
+
+def test_wide_prior_gets_the_standard_camera(monkeypatch):
+    """wide: the prior predicts on the standard image, so it is built with K_OUT and 512 x 512 (live SSLDepth
+    rejects any other K), as the cached prior whose maps are embedded in the canvas by _prior_map."""
+    from dvslam.data import tumvi
+    got = []
+    monkeypatch.setattr(kw, 'make_prior', lambda name, K, *a, **k: got.append((K.copy(), k.get('hw'))) or None)
+    odo = KLTWindowOdometry(prior='ssl', wide=768)
+    odo.reset(PinholeCamera(tumvi.K_OUT, 512, 512))
+    assert odo.K[0, 2] == 383.5
+    np.testing.assert_array_equal(got[0][0], tumvi.K_OUT)
+    assert got[0][1] == (512, 512)
+
+
+def test_cv_threads_zero_leaves_opencv_pool(monkeypatch):
+    """cv_threads=0 keeps OpenCV's current pool (it does not call cv2.setNumThreads(0), which disables threading)."""
+    before = cv2.getNumThreads()
+    try:
+        cv2.setNumThreads(3)
+        monkeypatch.setenv('OMP_NUM_THREADS', '2')
+        KLTWindowOdometry(prior='oracle', cv_threads=0).reset(PinholeCamera(K, W, H))
+        assert cv2.getNumThreads() == 3
+    finally:
+        cv2.setNumThreads(before)
+
+
+def test_option_values_checked_and_lk_defaults_unchanged():
+    """Unknown photo / flow_mode / out_lag_mode values are a ValueError; lk_iters / lk_eps default to the former
+    hard-coded LK stop criteria (30 iterations, eps 0.001)."""
+    for kw_bad in ({'photo': 'on'}, {'flow_mode': 'blend'}, {'out_lag_mode': 'rts'}):
+        with pytest.raises(ValueError, match=next(iter(kw_bad))):
+            KLTWindowOdometry(prior='oracle', **kw_bad)
+    assert KLTWindowOdometry(prior='oracle').lk['criteria'][1:] == (30, 0.001)
+    assert KLTWindowOdometry(prior='oracle', lk_iters=50, lk_eps=0.01).lk['criteria'][1:] == (50, 0.01)
