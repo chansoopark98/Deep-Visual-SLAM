@@ -32,7 +32,7 @@ it, so an interior extremum is possible in principle; V_point is added to the gr
 Bootstrap replicates are refitted without the full-data conditioning check; a replicate whose normal matrix is
 near-singular (1 − c²/(a·d) < 1e-6, possible only if the resample keeps pairs with proportional s² and w²) would give
 inf/NaN or arbitrary (j², σ_px²), so it is dropped from the quantiles and counted in 'ill_conditioned_reps'.
-The hyper-parameters (block, outlier_k, z̄ estimate) are fixed on the selection split (room1–2) by the caller; b, j,
+The hyper-parameters (block, outlier_k, z̄ estimate) are fixed on the validation split (TUM-VI room5) by the caller; b, j,
 σ_px are always re-estimated on the split being judged.
 
 Well-posedness: j² and σ_px² are separated only through the spread of s² relative to w². If s_i and w_i are
@@ -48,7 +48,7 @@ from dvslam.eval.diagnostics import _pct_errors, block_bootstrap_ci, sigma_paral
 from dvslam.eval.metrics import POS_MAPE_TARGET_PCT
 
 REDWOOD_STEP_RANGE_M = (4.5e-3, 9.1e-3)    # §12.2 (b): Redwood scene median GT steps 4.48–9.07 mm
-DEFAULT_BLOCK = 20                         # ≈ 1 s at 20 Hz (TUM-VI); fix on room1–2
+DEFAULT_BLOCK = 20                         # ≈ 1 s at 20 Hz (TUM-VI); fix on the validation split
 # Plausibility limits that catch millimetre inputs (§12.2.1): a 0.5 m median step per frame pair or a 50 m median
 # patch depth is not an indoor hand-held sequence.
 _MAX_MEDIAN_STEP_M, _MAX_MEDIAN_DEPTH_M = 0.5, 50.0

@@ -66,7 +66,7 @@ import sys; sys.path.insert(0, sys.argv[1])
 from dvslam.data import registry as r
 ok = True
 for ds in ('euroc', 'tumvi', 'redwood'):
-    for sp in ('validation', 'test'):
+    for sp in (('train', 'validation', 'test') if ds == 'tumvi' else ('validation', 'test')):
         exp, got = r.expected_scenes(ds, sp), r.scenes(ds, sp)
         miss = [s for s in exp if s not in got]
         ok &= not miss

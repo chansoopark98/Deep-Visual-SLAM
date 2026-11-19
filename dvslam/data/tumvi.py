@@ -1,4 +1,9 @@
-"""TUM-VI room sequences, cam0 only, 512x512 version (plan v3.2 item T.1, splits §12.3).
+"""TUM-VI room sequences, cam0 only, 512x512 version (plan v3.2 item T.1).
+
+Splits (user decision 2026-11-19, target-metric track; replaces plan §12.3's room1-2 validation / room3-6 test): whole
+sequences, train room1-4, validation room5, test room6. All six rooms are the same motion-capture room, so the split
+separates trajectories, not scenes. The official target-metric evaluation set is train + test (room1-4, room6).
+A Redwood-style 80/10/10 split in time within each room is a separate evaluation: apps/eval_pairs_temporal.py.
 
 Layout per sequence <root>/dataset-room{N}_512_16/: mav0/cam0/data.csv + data/<ns>.png (grayscale fisheye),
 mav0/mocap0/data.csv (120 Hz), dso/camchain.yaml (cam0: T_cam_imu, equidistant intrinsics and k1..k4).
@@ -33,7 +38,7 @@ from dvslam.data import base
 
 DEFAULT_ROOT = Path(os.environ.get('DVSLAM_TUMVI_ROOT', '/home/park-ubuntu/park/datasets/tum_vi'))
 SCENES = ('room1', 'room2', 'room3', 'room4', 'room5', 'room6')
-SPLITS = {'validation': ('room1', 'room2'), 'test': ('room3', 'room4', 'room5', 'room6')}
+SPLITS = {'train': ('room1', 'room2', 'room3', 'room4'), 'validation': ('room5',), 'test': ('room6',)}
 FRAME_RATE_HZ = 20.0
 MAX_GAP_S = 0.02            # mocap is 120 Hz (8.3 ms); a larger gap between the two samples around a frame is a dropout
 OUT_SIZE = 512
@@ -69,7 +74,7 @@ def rectify_maps(intrinsics: np.ndarray, dist: np.ndarray) -> tuple[np.ndarray, 
 
 def load_sequence(scene: str, split: str | None = None, root: Path | str | None = None,
                   time_offset_s: float = 0.0, load_images: bool = True) -> base.Sequence:
-    """split=None infers the split from SPLITS; a split that does not contain `scene` is an error (§12.3).
+    """split=None infers the split from SPLITS; a split that does not contain `scene` is an error.
 
     load_images=False leaves the image cache untouched and returns the paths the cache would have (GT-only use).
     """

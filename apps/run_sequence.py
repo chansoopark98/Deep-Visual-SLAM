@@ -1,6 +1,7 @@
 """Run an odometry over a dataset (Redwood by default; --dataset tumvi | euroc) and write causal increments
 
   python apps/run_sequence.py --odometry legacy_posenet --split test
+  python apps/run_sequence.py --odometry klt_window --dataset tumvi --split train test   # target-metric set (room1-4, 6)
   -> runs/<id>/<scene>.inc.npz, <scene>.causal.tum, timings.csv
 """
 import argparse
@@ -60,8 +61,9 @@ def main():
     ap.add_argument('--odometry', choices=sorted(ODOMETRY), required=True)
     ap.add_argument('--opt', action='append', default=[], help='tracker option k=v (repeatable)')
     ap.add_argument('--dataset', choices=registry.DATASETS, default='redwood')
-    ap.add_argument('--split', choices=['validation', 'test'], default='test')
-    ap.add_argument('--scenes', nargs='+', default=None, help='default: every scene of the split')
+    ap.add_argument('--split', nargs='+', choices=['train', 'validation', 'test'], default=['test'],
+                    help='one or more splits; several only where each scene belongs to one split (TUM-VI, EuRoC)')
+    ap.add_argument('--scenes', nargs='+', default=None, help='default: every scene of the split(s)')
     ap.add_argument('--data-root', type=Path, default=None, help="default: the dataset's own root")
     ap.add_argument('--time-offset', type=float, default=0.0,
                     help='GT lookup offset in seconds (TUM-VI / EuRoC); it also decides which end frames have GT')
@@ -69,18 +71,30 @@ def main():
     ap.add_argument('--out', type=Path, default=None, help='default: runs/<odometry>-<split>-<YYYYmmdd-HHMMSS>')
     args = ap.parse_args()
     args.data_root = args.data_root or registry.default_root(args.dataset)
+    splits = list(dict.fromkeys(args.split))
+    if len(splits) > 1 and args.dataset == 'redwood':
+        sys.exit('Redwood has the same five scenes in every split: run one split per output directory')
+    # scene -> split; with several splits a scene must belong to exactly one of them
+    scene_split = {}
+    for split in splits:
+        for scene in registry.expected_scenes(args.dataset, split):
+            scene_split.setdefault(scene, split)
     if not args.scenes:
-        args.scenes = registry.scenes(args.dataset, args.split, args.data_root)
-        missing = sorted(set(registry.expected_scenes(args.dataset, args.split)) - set(args.scenes))
+        args.scenes = [s for split in splits for s in registry.scenes(args.dataset, split, args.data_root)]
+        missing = sorted(set(scene_split) - set(args.scenes))
         if missing:
-            print(f'INCOMPLETE split: {args.dataset} {args.split} is missing {missing} on disk')
+            print(f'INCOMPLETE split: {args.dataset} {"+".join(splits)} is missing {missing} on disk')
+    elif len(splits) > 1:
+        unknown = sorted(set(args.scenes) - set(scene_split))
+        if unknown:
+            sys.exit(f'{unknown} not in split(s) {splits}')
     frame_rate_hz, frame_rate_verified = registry.frame_rate(args.dataset)
 
     if torch is not None:
         torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     prefix = args.odometry if args.dataset == 'redwood' else f'{args.odometry}-{args.dataset}'
-    out = args.out or REPO_ROOT / 'runs' / f'{prefix}-{args.split}-{datetime.now():%Y%m%d-%H%M%S}'
+    out = args.out or REPO_ROOT / 'runs' / f'{prefix}-{"+".join(splits)}-{datetime.now():%Y%m%d-%H%M%S}'
     out.mkdir(parents=True, exist_ok=False)
     commit = subprocess.run(['git', '-C', str(REPO_ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
     opts = parse_opts(args.opt)
@@ -90,7 +104,8 @@ def main():
         tw = csv.writer(tf)
         tw.writerow(['scene', 'index', 'total_ms'])
         for scene in args.scenes:
-            seq = registry.load_sequence(args.dataset, scene, args.split, args.data_root, args.time_offset)
+            split = scene_split.get(scene, splits[0])
+            seq = registry.load_sequence(args.dataset, scene, split, args.data_root, args.time_offset)
             odo.reset(PinholeCamera(seq.K, seq.width, seq.height))
             estimates = []
             for i in range(len(seq)):
@@ -101,7 +116,7 @@ def main():
                     tw.writerow([scene, est.index, f'{est.timings_ms.get("total", float("nan")):.3f}'])
             if [e.index for e in estimates] != list(range(1, len(seq))):
                 raise RuntimeError(f'{scene}: odometry must emit one increment per frame t >= 1')
-            meta = {'dataset': args.dataset, 'scene': scene, 'split': args.split, 'odometry': args.odometry,
+            meta = {'dataset': args.dataset, 'scene': scene, 'split': split, 'odometry': args.odometry,
                     'opts': opts, 'seed': args.seed,
                     'data_root': str(args.data_root), 'n_frames': len(seq), 'git_commit': commit,
                     'frame_rate_hz': frame_rate_hz, 'frame_rate_verified': frame_rate_verified,

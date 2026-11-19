@@ -96,7 +96,7 @@ def test_gt_composition_trimming_and_dropout(tmp_path, monkeypatch, offset_s):
     monkeypatch.setattr(base, 'CACHE_ROOT', tmp_path / 'cache')
     t_cam = write_fixture(tmp_path / 'data')
     seq = tumvi.load_sequence('room1', root=tmp_path / 'data', time_offset_s=offset_s)
-    assert seq.dataset == 'tumvi' and seq.split == 'validation' and len(seq) == 8          # frames 2..9 kept
+    assert seq.dataset == 'tumvi' and seq.split == 'train' and len(seq) == 8          # frames 2..9 kept
     np.testing.assert_array_equal(seq.timestamps_ns, t_cam[2:10])
     np.testing.assert_allclose(seq.timestamps, np.arange(8) * 0.05, atol=1e-12)
     # only the 0.25 s frame (index 3 after trimming) falls in the dropout (mocap gap about 0.21-0.29 s), also when
@@ -133,15 +133,17 @@ def test_load_images_false_does_not_touch_cache(tmp_path, monkeypatch):
 def test_split_validation(tmp_path, monkeypatch):
     monkeypatch.setattr(base, 'CACHE_ROOT', tmp_path / 'cache')
     write_fixture(tmp_path / 'data')
-    assert tumvi.load_sequence('room1', root=tmp_path / 'data', load_images=False).split == 'validation'
-    assert tumvi.load_sequence('room1', 'validation', tmp_path / 'data', load_images=False).split == 'validation'
-    for split in ('test', 'train'):
+    assert tumvi.load_sequence('room1', root=tmp_path / 'data', load_images=False).split == 'train'
+    assert tumvi.load_sequence('room1', 'train', tmp_path / 'data', load_images=False).split == 'train'
+    for split in ('test', 'validation', 'all'):
         with pytest.raises(ValueError):
             tumvi.load_sequence('room1', split, tmp_path / 'data', load_images=False)
 
 
-def test_splits_follow_plan():
-    assert tumvi.SPLITS == {'validation': ('room1', 'room2'), 'test': ('room3', 'room4', 'room5', 'room6')}
+def test_splits_are_whole_sequences():
+    # user decision 2026-11-19: train room1-4, validation room5, test room6; every room in exactly one split
+    assert tumvi.SPLITS == {'train': ('room1', 'room2', 'room3', 'room4'), 'validation': ('room5',), 'test': ('room6',)}
+    assert sorted(sc for v in tumvi.SPLITS.values() for sc in v) == list(tumvi.SCENES)
     assert set(tumvi.available_scenes('test', '/nonexistent')) == set()
 
 

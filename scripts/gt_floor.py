@@ -59,7 +59,7 @@ def main():
     rows, missing = [], []
     for dataset in registry.DATASETS:
         fps, _ = registry.frame_rate(dataset)
-        for split in ('validation', 'test'):
+        for split in (('train', 'validation', 'test') if dataset == 'tumvi' else ('validation', 'test')):
             present = registry.scenes(dataset, split)
             missing += [f'{dataset} {split} {m}' for m in registry.expected_scenes(dataset, split) if m not in present]
             for scene in present:

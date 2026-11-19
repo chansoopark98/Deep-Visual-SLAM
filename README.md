@@ -123,7 +123,9 @@ These live outside the repo and are located through `DVSLAM_TUMVI_ROOT`, `DVSLAM
 ```bash
 scripts/fetch_datasets.sh check                # are all sequences of every split usable? (no download)
 scripts/fetch_datasets.sh tumvi room5 room6    # download missing TUM-VI sequences from the official server
-python apps/run_sequence.py --odometry <name> --dataset tumvi --split test
+python apps/run_sequence.py --odometry <name> --dataset tumvi --split train test   # target-metric set: room1-4 + room6
+python apps/eval_pairs.py --runs runs/<id>                                         # PASS/FAIL on that set
+python apps/eval_pairs_temporal.py --runs runs/<id>   # Redwood-style 80/10/10 per room (run all three splits)
 ```
 
 Layouts, source URLs, environment variables, the rectified-image cache and workstation notes are in

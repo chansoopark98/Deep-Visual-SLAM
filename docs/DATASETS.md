@@ -26,11 +26,17 @@ sequence, not just that a directory exists. Required sequences:
 |---|---|---|---|
 | EuRoC (machine hall) | validation | MH_01_easy, MH_02_easy | `apps/run_sequence.py --dataset euroc` |
 | EuRoC (machine hall) | test | MH_03_medium, MH_04_difficult, MH_05_difficult | same |
-| TUM-VI (512_16, cam0) | validation | room1, room2 | `--dataset tumvi` |
-| TUM-VI (512_16, cam0) | test | room3, room4, room5, room6 | same |
+| TUM-VI (512_16, cam0) | train | room1, room2, room3, room4 | `--dataset tumvi` |
+| TUM-VI (512_16, cam0) | validation | room5 | same |
+| TUM-VI (512_16, cam0) | test | room6 | same |
 | Redwood | validation / test | apartment, bedroom, boardroom, lobby, loft | `--dataset redwood`, `vo/eval_redwood.py` |
 
 Splits are defined in `SPLITS` of each loader (`euroc.py`, `tumvi.py`), not here; if they change, rerun `check`.
+TUM-VI (since 2026-11-19, target-metric track): split by whole sequence; all six rooms are the same motion-capture room. The
+official target-metric set is train + test:
+`apps/run_sequence.py --dataset tumvi --split train test` then `apps/eval_pairs.py` (PASS/FAIL only on that set).
+A Redwood-style 80/10/10 split in time per room is scored separately: run all three splits, then
+`apps/eval_pairs_temporal.py --runs <dir>`.
 State on 2026-11-19 before the download below: everything present except TUM-VI room5 and room6.
 
 ## 2. Download
@@ -78,7 +84,7 @@ export DVSLAM_TUMVI_ROOT=/path/to/tum_vi   # only if the data is not at the defa
 export DVSLAM_EUROC_ROOT=/path/to/euroc
 export DVSLAM_CACHE_ROOT=/path/to/cache
 scripts/fetch_datasets.sh check
-python apps/run_sequence.py --odometry <name> --dataset tumvi --split test --scenes room3
+python apps/run_sequence.py --odometry <name> --dataset tumvi --split test --scenes room6
 ```
 
 On a shared workstation cap the math libraries first (`OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1`);

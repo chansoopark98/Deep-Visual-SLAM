@@ -1,6 +1,9 @@
 """Score a run directory of <scene>.inc.npz files: target-metric items 03/04 + diagnostics (plan v3 §4.8, item 0.4).
 
   python apps/eval_pairs.py --runs runs/<id>     -> prints and writes runs/<id>/eval_pairs.txt, summary.csv
+
+PASS/FAIL is given for the two official sets: Redwood test (5 scenes) and, since 2026-11-19 (target-metric approved the
+change), TUM-VI train + test (room1-4, room6; tumvi.SPLITS). Any other set gets raw values only.
 """
 import argparse
 import csv
@@ -21,9 +24,11 @@ from dvslam.odometry.base import causal_trajectory, load_increments  # noqa: E40
 from scripts.verify_baseline import DEFAULT_BASELINE, sha256_of  # noqa: E402
 
 BASELINE_MANIFEST = DEFAULT_BASELINE / 'MANIFEST.json'
+target-metric_TUMVI_SPLITS = ('train', 'test')                  # official TUM-VI set (user decision 2026-11-19)
 
 
-def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.ndarray, dict]:
+def load_run_scene(inc_path: Path, data_root: Path | None):
+    """(increments, meta, GT sequence) of one scene of a run, checked to cover frames 1..n-1 in order."""
     inc = load_increments(inc_path)
     meta = inc['meta']
     dataset = meta.get('dataset', 'redwood')            # runs written before V0 have no 'dataset' key
@@ -33,6 +38,11 @@ def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.nda
     n = len(seq)
     if not np.array_equal(inc['index'], np.arange(1, n)):
         raise ValueError(f'{inc_path}: increments must cover frames 1..{n - 1} in order')
+    return inc, meta, seq
+
+
+def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.ndarray, dict]:
+    inc, meta, seq = load_run_scene(inc_path, data_root)
     pos, rpy, gt_t, pred_t = [], [], [], []
     for k, t in enumerate(inc['index']):
         m = pair_metrics(relative_pose(seq.T_wc[t - 1], seq.T_wc[t]), inc['rel_increment'][k])
@@ -115,26 +125,37 @@ def main():
     splits = {m['split'] for m in metas}
     datasets = {m.get('dataset', 'redwood') for m in metas}
     is_redwood = datasets == {'redwood'}
-    complete = is_redwood and sorted(s['scene'] for s in summaries) == sorted(redwood.SCENES) and splits == {'test'}
+    scored = sorted(s['scene'] for s in summaries)
+    complete = is_redwood and scored == sorted(redwood.SCENES) and splits == {'test'}
+    target-metric_tumvi = datasets == {'tumvi'} and splits == set(target-metric_TUMVI_SPLITS) and scored == sorted(
+        sc for sp in target-metric_TUMVI_SPLITS for sc in registry.expected_scenes('tumvi', sp))
+    verdict = is_redwood or target-metric_tumvi
     lines.insert(1, f'split: {", ".join(sorted(splits))}   GT sha256 vs baseline MANIFEST: {gt_check}')
     lines += ['',
               f'[03] {k["item03_mape_pct"]:.4f} %  95 % block CI [{lo:.2f}, {hi:.2f}]  (≤ {POS_MAPE_TARGET_PCT} %) -> '
-              + (('PASS' if k['item03_pass'] else 'FAIL') if is_redwood else 'raw value, no verdict'),
-              f'[04] {k["item04_rpy_mean_deg"]:.6f} °  (≤ {ROT_ABS_TARGET_DEG} °) -> {"PASS" if k["item04_pass"] else "FAIL"}',
+              + (('PASS' if k['item03_pass'] else 'FAIL') if verdict else 'raw value, no verdict'),
+              f'[04] {k["item04_rpy_mean_deg"]:.6f} °  (≤ {ROT_ABS_TARGET_DEG} °) -> '
+              + (('PASS' if k['item04_pass'] else 'FAIL') if verdict else 'raw value, no verdict'),
               f'G0 oracle (scale fitted per window, uses GT): 1 s {win[1]:.3f} %, 2 s {win[2]:.3f} %',
               'G1\' (NO-GO branch ranking): stride-3 item 03 {:.3f} %, min-2mm item 03 {:.3f} %, RPE 1 s {:.4f} m, ATE SE3 {:.4f} m'.format(
                   *(float(np.mean([s[c] for s in summaries])) for c in ('g1p_stride3_mape_pct', 'g1p_min2mm_mape_pct', 'rpe30_trans_m', 'ate_se3_m'))),
               f'tracked-only pairs: {sum(s["tracked_pairs"] for s in summaries)} / {sum(s["pairs"] for s in summaries)}']
     if not is_redwood:
         tau = sorted({m.get('time_offset_s', 0.0) for m in metas})
-        lines.append(f'dataset: {", ".join(sorted(datasets))} -> items 03/04 above are raw values (plan §12.2 diagnostic c), '
-                     f'pairs without measured GT are excluded, and the verdict needs metric (a), not this PASS/FAIL')
+        if target-metric_tumvi:
+            lines.append('target-metric set: TUM-VI train + test (room1-4, room6), raw items 03/04; pairs without measured '
+                         'GT are excluded. The model may have been trained on these sequences: say so in the report')
+        else:
+            lines.append(f'dataset: {", ".join(sorted(datasets))} -> items 03/04 above are raw values (plan §12.2 '
+                         f'diagnostic c), pairs without measured GT are excluded; PASS/FAIL only on the target-metric set '
+                         f'(TUM-VI train + test)')
         lines.append(f'GT time offset used: {tau} s (not measured yet: plan T.1); bootstrap blocks and the 1 s / 2 s '
                      f'windows run over the kept pairs, so they span GT dropouts')
-        if len(datasets) == 1 and len(splits) == 1:
-            missing = sorted(set(registry.expected_scenes(*datasets, *splits)) - {s['scene'] for s in summaries})
+        if len(datasets) == 1:
+            expected = {sc for sp in splits for sc in registry.expected_scenes(*datasets, sp)}
+            missing = sorted(expected - set(scored))
             if missing:
-                lines.append(f'INCOMPLETE: {missing} of the {", ".join(splits)} split not scored')
+                lines.append(f'INCOMPLETE: {missing} of the {"+".join(sorted(splits))} split not scored')
     elif not complete:
         lines.append(f'INCOMPLETE: scenes {sorted(s["scene"] for s in summaries)}, split {sorted(splits)} '
                      f'-> not an official result (needs the 5 test scenes once each)')

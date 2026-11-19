@@ -27,15 +27,22 @@ def load_sequence(dataset: str, scene: str, split: str, root: Path | str | None 
     return m.load_sequence(scene, split, root, time_offset_s=time_offset_s, load_images=load_images)
 
 
+def _check_split(m, dataset: str, split: str) -> None:
+    if dataset != 'redwood' and split not in m.SPLITS:
+        raise ValueError(f'{dataset} has no split {split!r}; splits: {sorted(m.SPLITS)}')
+
+
 def scenes(dataset: str, split: str, root: Path | str | None = None) -> list[str]:
     """Scenes of a split. Redwood: its five rooms. TUM-VI / EuRoC: the sequences of the split present on disk."""
     m = _module(dataset)
+    _check_split(m, dataset, split)
     return list(m.SCENES) if dataset == 'redwood' else list(m.available_scenes(split, root))
 
 
 def expected_scenes(dataset: str, split: str) -> list[str]:
-    """The split as defined, whether or not every sequence is on disk (TUM-VI room5-6 are not downloaded)."""
+    """The split as defined, whether or not every sequence is on disk."""
     m = _module(dataset)
+    _check_split(m, dataset, split)
     return list(m.SCENES) if dataset == 'redwood' else list(m.SPLITS[split])
 
 
