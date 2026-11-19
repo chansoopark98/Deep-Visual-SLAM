@@ -7,12 +7,12 @@ compared at the truth and at perturbations; a tiny real SSLModel checks that wei
 import numpy as np
 import pytest
 import torch
+from test_ssl_geometry import K_NP, H, W, pose, render_plane
 
 from dvslam.geometry.se3 import relative_pose
-from dvslam.ssl import geometry, losses
+from dvslam.ssl import geometry, losses, models
 from dvslam.ssl.losses import SSLLoss
 from dvslam.ssl.models import SSLModel
-from test_ssl_geometry import K_NP, H, W, pose, render_plane
 
 MIN_D, MAX_D = 0.1, 20.0
 ONLY = {k: 0.0 for k in losses.TERMS}
@@ -30,7 +30,8 @@ def scene():
     views = [render_plane(T) for T in T_WC] + [render_plane(T_WC[1] @ np.linalg.inv(T_STEREO))]
     img = t32(np.stack([v[0] for v in views]))                    # (4, H, W)
     rel = {(0, 1): relative_pose(T_WC[0], T_WC[1]), (1, 2): relative_pose(T_WC[1], T_WC[2]),
-           (1, 0): relative_pose(T_WC[1], T_WC[0]), (2, 1): relative_pose(T_WC[2], T_WC[1])}
+           (1, 0): relative_pose(T_WC[1], T_WC[0]), (2, 1): relative_pose(T_WC[2], T_WC[1]),
+           (0, 2): relative_pose(T_WC[0], T_WC[2])}
     batch = {'net': img[:3, None].expand(3, 3, H, W)[None].contiguous(), 'pho': img[None, :, None].clone(),
              'valid': torch.ones(1, 4, 1, H, W), 'K': t32(K_NP)[None], 'T_stereo': t32(T_STEREO)[None],
              'R_gyro': t32(np.stack([rel[(0, 1)][:3, :3], np.linalg.inv(rel[(1, 2)])[:3, :3]]))[None],
@@ -104,7 +105,7 @@ def test_geometric_and_flow_zero_for_consistent_truth(scene):
             return geometry.rigid_flow(geometry.reproject(depth[1], t32(T)[None], batch['K'])[0])
 
     fake = FakeModel(batch['net'], depth, rel)
-    total, terms = SSLLoss({**ONLY, 'flow': 1.0}, teacher=Teacher())(fake, batch)
+    total, _ = SSLLoss({**ONLY, 'flow': 1.0}, teacher=Teacher())(fake, batch)
     assert float(total) < 1e-6
     fake.ts = 1.2
     assert float(SSLLoss({**ONLY, 'flow': 1.0}, teacher=Teacher())(fake, batch)[0]) > 1e-3
@@ -203,6 +204,151 @@ def test_zero_weight_skips_term_and_forward_passes(tiny, weights, pose_iters, ex
     assert set(terms) == set(weights) and torch.isfinite(total)
     assert n == expect
     total.backward()
+
+
+def test_gap2_terms_zero_at_truth_and_sensitive_to_the_gap2_pose(scene):
+    batch, depth, rel = scene
+
+    class Teacher(torch.nn.Module):                     # true flow target -> source for the three (tgt, src) pairs
+        def forward(self, tgt, src):
+            frame = {batch['net'][:, i].data_ptr(): i for i in range(3)}
+            T = rel[(frame[src.data_ptr()], frame[tgt.data_ptr()])] if (frame[src.data_ptr()], frame[
+                tgt.data_ptr()]) in rel else np.linalg.inv(rel[(frame[tgt.data_ptr()], frame[src.data_ptr()])])
+            return geometry.rigid_flow(geometry.reproject(depth[frame[tgt.data_ptr()]], t32(T)[None],
+                                                          batch['K'])[0])
+
+    weights = {**ONLY, 'temporal': 1.0, 'flow': 1.0, 'gyro': 1.0, 'pose_consistency': 1.0, 'gap2': 0.5}
+    gap2 = ('gap2_comp', 'gap2_photo', 'gap2_flow', 'gap2_gyro')
+
+    def run(fake):
+        torch.manual_seed(0)
+        loss = SSLLoss(weights, teacher=Teacher())
+        total, terms = loss(fake, batch)
+        assert all(loss.w[k] == 0.5 * loss.w[b] for k, b in losses.GAP2_TERMS.items())
+        assert total == pytest.approx(sum(float(loss.w[k] * v) for k, v in terms.items()), rel=1e-5)
+        return {k: float(terms[k]) for k in gap2}
+
+    truth = run(FakeModel(batch['net'], depth, rel))
+    assert truth['gap2_comp'] < 1e-4 and truth['gap2_flow'] < 1e-5 and truth['gap2_gyro'] < 1e-4, truth
+    assert truth['gap2_photo'] < 0.01, truth
+    wrong = {**rel, (0, 2): rel[(0, 2)] @ pose([0.0, 0.02, 0.0], [0.02, 0.0, 0.0])}     # only the gap-2 pose is off
+    bad = run(FakeModel(batch['net'], depth, wrong))
+    assert bad['gap2_comp'] > 0.1 and bad['gap2_flow'] > 1e-2 and bad['gap2_gyro'] > 0.01, bad
+    assert bad['gap2_photo'] > 1.5 * truth['gap2_photo'], (bad, truth)
+
+
+def test_gap2_off_by_default_and_its_forward_passes(tiny):
+    for pose_iters, expect in ((2, {'depth': 2, 'pose_net': 3, 'residual': 3}),
+                               (1, {'depth': 2, 'pose_net': 3, 'residual': 0})):     # t+1 depth without grad
+        model = SSLModel(MIN_D, MAX_D, False, 0.01, pose_iters, pretrained=False)
+        n = count_calls(model)
+        total, terms = SSLLoss({**ONLY, 'temporal': 1.0, 'gap2': 1.0})(model, tiny)
+        assert set(terms) == {'temporal', 'gap2_photo'} and n == expect
+        total.backward()
+    assert set(SSLLoss({**ONLY, 'temporal': 1.0})(SSLModel(MIN_D, MAX_D, False, 0.01, 1, False), tiny)[1]) == {
+        'temporal'}
+
+
+def test_zero_motion_term_and_static_copy(tiny):
+    T = torch.eye(4).repeat(2, 1, 1)
+    assert float(losses.zero_motion_term(T)) == 0.0
+    T[0, 0, 3] = 0.005                                   # 5 mm on one of 6 translation components
+    assert float(losses.zero_motion_term(T)) == pytest.approx(0.5 / 3, rel=1e-5)
+    torch.manual_seed(0)
+    img = tiny['net'][:, 1, :1].expand(-1, 3, -1, -1)    # gray replicated, like the dataset's 'net' images
+    copy = losses.static_copy(img)
+    assert copy.shape == img.shape and 0 <= float(copy.min()) and float(copy.max()) <= 1
+    assert 0.003 < float((copy - img).abs().mean()) < 0.1
+    assert torch.equal(copy[:, 0], copy[:, 2])           # still a gray image replicated to 3 channels
+
+    model = SSLModel(MIN_D, MAX_D, False, 0.01, 2, pretrained=False)
+    n = count_calls(model)
+    total, terms = SSLLoss({**ONLY, 'zero_motion': 0.01})(model, tiny)
+    assert set(terms) == {'zero_motion'} and n == {'depth': 1, 'pose_net': 1, 'residual': 1}
+    assert float(total) == pytest.approx(0.01 * float(terms['zero_motion']))
+    total.backward()
+    assert model.pose_net.head[-1].weight.grad.abs().sum() > 0
+
+
+def test_stereo_hint_gated_log_depth(scene):
+    """True hint: zero at the true depth, log(1.1) when the network depth is 10 % long (the hint wins everywhere).
+    A wrong hint (x 1.5) loses the reprojection comparison to the true network depth, so it is (mostly) ignored."""
+    batch, depth, rel = scene
+
+    def run(hint, **fake):
+        b = {**batch, 'hint': hint}
+        torch.manual_seed(0)
+        total, terms = SSLLoss({**ONLY, 'stereo_hint': 2.0})(FakeModel(batch['net'], depth, rel, **fake), b)
+        assert set(terms) == {'stereo_hint'} and float(total) == pytest.approx(2 * float(terms['stereo_hint']))
+        return float(terms['stereo_hint'])
+
+    true = depth[1].clone()
+    assert run(true) < 1e-5
+    assert run(true, depth_scale=1.1) == pytest.approx(np.log(1.1), rel=0.05)
+    assert run(true * 1.5) < 0.1 * np.log(1.5)
+    holes = true.clone()
+    holes[..., :, : W // 2] = 0                          # no hint on the left half: those pixels never count
+    assert run(holes, depth_scale=1.1) == pytest.approx(np.log(1.1), rel=0.05)
+    assert run(torch.zeros_like(true), depth_scale=1.1) == 0.0
+
+
+def test_stereo_hint_trains_depth_only(tiny):
+    model = SSLModel(MIN_D, MAX_D, False, 0.01, 2, pretrained=False)
+    n = count_calls(model)
+    b = {**tiny, 'hint': torch.full((1, 1, H, W), 2.0)}
+    total, terms = SSLLoss({**ONLY, 'stereo_hint': 1.0})(model, b)
+    assert set(terms) == {'stereo_hint'} and n == {'depth': 1, 'pose_net': 0, 'residual': 0}
+    total.backward()
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.depth_net.parameters())
+    assert all(p.grad is None for p in model.pose_net.parameters())
+
+
+def test_amp_covers_the_networks_only(tiny):
+    """bfloat16 autocast on CPU: convolutions run in low precision, every output, pose composition and loss is float32,
+    and autocast is never left enabled outside a network forward."""
+    model = SSLModel(MIN_D, MAX_D, False, 0.01, 2, pretrained=False)
+    ref = {k: v.clone() for k, v in model.state_dict().items()}
+    model.set_amp(torch.bfloat16)
+    seen = {'conv': set(), 'leak': []}
+    convs = [model.depth_net.encoder.encoder.conv1, model.pose_net.encoder.encoder.conv1,
+             model.residual_net.encoder.encoder.conv1]
+    for c in convs:
+        c.register_forward_hook(lambda m, i, o: seen['conv'].add(o.dtype))
+    for net in (model.pose_net, model.residual_net):     # autocast is entered inside PoseNet.forward
+        net.register_forward_hook(lambda m, i, o: seen['leak'].append(torch.is_autocast_enabled('cpu')))
+    depth = model.depth
+
+    def depth_hook(img):                                 # ... and inside SSLModel.depth around depth_net
+        out = depth(img)
+        seen['leak'].append(torch.is_autocast_enabled('cpu'))
+        return out
+    model.depth = depth_hook
+
+    class Teacher(torch.nn.Module):
+        amp_dtype = None
+
+        def forward(self, tgt, src):
+            with models.autocast(tgt, self.amp_dtype):
+                out = torch.nn.functional.conv2d(tgt, torch.zeros(2, 3, 1, 1))
+            return out.float()
+
+    teacher = Teacher()
+    teacher.amp_dtype = torch.bfloat16
+    weights = {**{k: 1.0 for k in losses.TERMS}, 'gap2': 1.0, 'zero_motion': 0.01}
+    total, terms = SSLLoss(weights, teacher=teacher)(model, tiny)
+    assert seen['conv'] == {torch.bfloat16} and not any(seen['leak'])
+    assert total.dtype == torch.float32 and all(v.dtype == torch.float32 for v in terms.values()), terms
+    disps, _ = model.depth(tiny['net'][:, 1])
+    T, T0 = model.pose(tiny['net'][:, 0], tiny['net'][:, 1], tiny['K'])
+    assert all(d.dtype == torch.float32 for d in disps) and T.dtype == T0.dtype == torch.float32
+    assert not torch.is_autocast_enabled('cpu')
+    total.backward()
+    assert all(p.grad.dtype == torch.float32 for p in model.parameters() if p.grad is not None)
+    assert set(model.state_dict()) == set(ref)          # no new state: checkpoints are unchanged in layout
+    model.set_amp(None)
+    seen['conv'].clear()
+    model.depth(tiny['net'][:, 1])
+    assert seen['conv'] == {torch.float32}
 
 
 def test_flow_teacher_called_only_with_positive_weight(tiny):

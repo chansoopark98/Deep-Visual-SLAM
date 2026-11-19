@@ -163,3 +163,23 @@ def test_room5_caches_and_cam0_meta_unchanged(room5):
     seq = tumvi.load_sequence('room5')
     assert {str(p) for p in seq.image_paths} <= set(f['cam0'])
     assert f['V']['cam1'].max() <= 1 and f['V']['cam1'].dtype == np.float32
+
+
+@pytest.mark.skipif('room5' not in ON_DISK, reason='TUM-VI room5 not found under DVSLAM_TUMVI_ROOT')
+def test_room5_stereo_hint_field(room5, tmp_path):
+    n = len(room5.data[0]['t_ns'])
+    hints = np.lib.format.open_memmap(tmp_path / 'room5.npy', 'w+', np.float16, (n, 512, 512))   # sparse file
+    _, t = room5.samples[7]
+    hints[t] = np.linspace(0, 4, 512 * 512, dtype=np.float32).reshape(512, 512)
+    hints.flush()
+    ds = tumvi_data.TumviSSLDataset(['room5'], train=False, hints_dir=tmp_path)
+    s = ds[7]
+    assert s['hint'].shape == (1, 512, 512) and s['hint'].dtype == torch.float32
+    np.testing.assert_array_equal(s['hint'][0].numpy(), np.asarray(hints[t], np.float32))
+    assert float(ds[8]['hint'].abs().max()) == 0.0
+    assert ds._hints is not None and ds.__getstate__()['_hints'] is None
+    assert 'hint' not in room5[7]
+    (tmp_path / 'bad').mkdir()
+    np.save(tmp_path / 'bad' / 'room5.npy', np.zeros((3, 2, 2), np.float16))          # wrong frame count
+    with pytest.raises(ValueError):
+        tumvi_data.TumviSSLDataset(['room5'], train=False, hints_dir=tmp_path / 'bad')

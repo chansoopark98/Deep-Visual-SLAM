@@ -11,10 +11,15 @@ Conventions:
   refine : pose_iters - 1 residual steps (MonoIndoor-style). A is warped into B's view with depth(B) and the current
            T (warped image detached); the residual net on (warped, B) returns T_{w<-B} of the virtual camera w with
            X_w = T^-1 T_true X_B, so T <- T @ T_{w<-B}. The residual net is shared across steps and starts at identity.
+  amp    : set_amp(dtype) runs the network forwards alone (depth encoder / decoder, pose encoder / head) under autocast
+           in `dtype`; their outputs are cast back to float32 before anything else, so the pose vector -> matrix, the
+           composition T @ residual, the warps and every loss stay float32. Off (None) by default and in checkpoints.
 """
+import contextlib
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from dvslam.ssl import geometry
 from model.depthnet import DepthNet
@@ -24,11 +29,17 @@ NUM_SCALES = 4
 POSE_SCALE = 0.1
 
 
+def autocast(x: torch.Tensor, dtype: torch.dtype | None):
+    """Autocast to `dtype` on x's device, or no context at all for None (the float32 default path is unchanged)."""
+    return contextlib.nullcontext() if dtype is None else torch.autocast(x.device.type, dtype=dtype)
+
+
 class PoseNet(nn.Module):
     """ResNet-18 on the 6-channel pair (A, B) + conv head -> T_{A<-B}; 6 outputs x 0.1 = (rotvec rad, t m)."""
 
     def __init__(self, pretrained: bool, zero_init: bool = False):
         super().__init__()
+        self.amp_dtype = None
         self.encoder = ResnetEncoder(18, pretrained, num_input_images=2)
         self.head = nn.Sequential(nn.Conv2d(512, 256, 1), nn.ReLU(),
                                   nn.Conv2d(256, 256, 3, 1, 1), nn.ReLU(),
@@ -39,7 +50,9 @@ class PoseNet(nn.Module):
             nn.init.zeros_(self.head[-1].bias)
 
     def forward(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-        x = self.head(self.encoder(torch.cat([a, b], 1))[-1]).mean((2, 3)) * POSE_SCALE
+        with autocast(a, self.amp_dtype):
+            x = self.head(self.encoder(torch.cat([a, b], 1))[-1])
+        x = x.float().mean((2, 3)) * POSE_SCALE
         return geometry.pose_vec_to_mat(x[:, :3], x[:, 3:])
 
 
@@ -52,16 +65,24 @@ class SSLModel(nn.Module):
         self.depth_net = DepthNet(18, pretrained, scales=range(NUM_SCALES), num_output_channels=1 + uncertainty)
         self.pose_net = PoseNet(pretrained)
         self.residual_net = PoseNet(pretrained, zero_init=True) if pose_iters > 1 else None
+        self.amp_dtype = None
+
+    def set_amp(self, dtype: torch.dtype | None) -> None:
+        """Autocast dtype of the network forwards (None = float32 everywhere); see the module docstring."""
+        self.amp_dtype = self.pose_net.amp_dtype = dtype
+        if self.residual_net is not None:
+            self.residual_net.amp_dtype = dtype
 
     def disp_to_depth(self, disp: torch.Tensor) -> torch.Tensor:
         return 1 / (1 / self.max_depth + (1 / self.min_depth - 1 / self.max_depth) * disp)
 
     def depth(self, img: torch.Tensor) -> tuple[list[torch.Tensor], list[torch.Tensor] | None]:
         """Per scale (0..3) disparity (B, 1, H, W) and sigma (or None), all at the input resolution."""
-        out = self.depth_net(img)
+        with autocast(img, self.amp_dtype):
+            out = self.depth_net(img)
         disps, sigmas = [], []
         for s in range(NUM_SCALES):
-            x = out[('disp', s)]
+            x = out[('disp', s)].float()
             if x.shape[-2:] != img.shape[-2:]:
                 x = F.interpolate(x, img.shape[-2:], mode='bilinear', align_corners=False)
             disps.append(x[:, :1])

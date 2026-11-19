@@ -11,6 +11,9 @@ Gyro: the IMU rate (rad/s, IMU frame) is integrated on SO(3) between camera time
 rate at the partial end intervals and the trapezoidal rate on each segment; no bias estimation. Rotations follow
 X_a = R_{a<-b} X_b and are expressed in the camera frame with cam0's R_ci (X_cam = R_ci X_imu):
 R_{cam_a<-cam_b} = R_ci R_{imu_a<-imu_b} R_ci^T. Mocap GT is not used.
+Stereo hints (optional, `hints_dir`): <hints_dir>/<scene>.npy (N, H, W) float16, the stereo-matched metric z-depth of
+cam0 frame i in the rectified cam0 pinhole (cam0 + cam1 SGBM, runs/eval/exp010_cache_hints.py), 0 = no hint. The
+sample gets 'hint' (1, H, W) float32 of the target frame t. Training-only (cam1); never an inference input.
 """
 from pathlib import Path
 
@@ -108,8 +111,10 @@ class TumviSSLDataset(torch.utils.data.Dataset):
     """Samples: every cam0 frame t with neighbours t-1 and t+1 both 50 +- 5 ms away (see module docstring for items)."""
 
     def __init__(self, scenes: list[str], train: bool, root: Path | str | None = None, v_min: float = 0.25,
-                 sat_level: int = 250):
+                 sat_level: int = 250, hints_dir: Path | str | None = None):
         self.scenes = list(scenes)
+        self.hints_dir = hints_dir
+        self._hints = None               # memory maps, opened lazily in each worker (see __getstate__)
         self.v_min = v_min
         self.sat_level = sat_level
         self.aug = train                 # gamma / brightness augmentation of the network images
@@ -118,6 +123,15 @@ class TumviSSLDataset(torch.utils.data.Dataset):
         for k, f in enumerate(self.data):
             gap_ok = np.abs(np.diff(f['t_ns']) - FRAME_DT_NS) <= FRAME_DT_TOL_NS
             self.samples += [(k, int(i) + 1) for i in np.flatnonzero(gap_ok[:-1] & gap_ok[1:])]
+
+        if hints_dir is not None:
+            for s, f in zip(self.scenes, self.data):
+                n = np.load(Path(hints_dir) / f'{s}.npy', mmap_mode='r').shape[0]
+                if n != len(f['t_ns']):
+                    raise ValueError(f'{s}: {n} stereo hints for {len(f["t_ns"])} frames')
+
+    def __getstate__(self) -> dict:
+        return {**self.__dict__, '_hints': None}         # a pickled memmap would copy the whole array
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -141,7 +155,13 @@ class TumviSSLDataset(torch.utils.data.Dataset):
         if self.aug:
             gamma, gain = torch.empty(2).uniform_(*AUG_RANGE)
             net = (gain * net ** gamma).clamp(0, 1)
+        extra = {}
+        if self.hints_dir is not None:
+            if self._hints is None:
+                self._hints = [np.load(Path(self.hints_dir) / f'{s}.npy', mmap_mode='r') for s in self.scenes]
+            extra['hint'] = torch.from_numpy(self._hints[k][t].astype(np.float32))[None]
         return {
+            **extra,
             'net': net[:, None].expand(3, 3, *net.shape[1:]).contiguous(),
             'pho': torch.from_numpy(np.stack(pho)[:, None]),
             'valid': torch.from_numpy(np.stack(valid)[:, None]),

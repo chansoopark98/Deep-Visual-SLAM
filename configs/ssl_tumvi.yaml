@@ -4,13 +4,14 @@ data:
   train_scenes: [room1, room2, room3, room4]
   val_scene: room5               # scored with mocap GT (item 03 MAPE picks best.pt); never a training signal
   root: null                     # null = dvslam.data.tumvi.DEFAULT_ROOT
+  stereo_hints: null             # dir of <scene>.npy stereo depth hints (training only, cam1); needed by loss.stereo_hint
 
 model:
   pretrained: true               # ImageNet ResNet-18 encoders
   min_depth: 0.1                 # metres
   max_depth: 20.0                # metres
-  uncertainty: true              # per-pixel sigma in (sigma_min, 1] for the photometric terms
-  sigma_min: 0.01
+  uncertainty: false             # per-pixel sigma in (sigma_min, 1] for the photometric terms. Off: with it on, the
+  sigma_min: 0.01                # official-set item 03 of the pose net went 12.2 % -> 22.5 % (runs no_unc / base)
   pose_iters: 2                  # 1 = no residual pose refinement
 
 # Loss weights: UNTUNED defaults. Weight 0 disables a term and its extra forward passes.
@@ -22,10 +23,13 @@ loss:
   gyro: 5.0
   pose_consistency: 0.05
   flow: 0.02                     # > 0 builds the frozen torchvision RAFT-large teacher (downloads its weights once)
+  gap2: 0.0                      # > 0: gap-2 pair (t-1, t+1) terms, each g x its gap-1 weight (dvslam/ssl/losses.py)
+  zero_motion: 0.0               # > 0: synthetic static pairs pulled to the identity pose (dvslam/ssl/losses.py)
+  stereo_hint: 0.0               # > 0: gated log-depth L1 to the stereo hint (dvslam/ssl/losses.py, data.stereo_hints)
 
 train:
   device: cuda
-  batch_size: 8
+  batch_size: 8                  # per GPU; with torchrun the global batch is batch_size x GPUs
   epochs: 20
   val_every: 1
   num_workers: 6
@@ -36,3 +40,4 @@ train:
   warmup_steps: 500
   grad_clip: 1.0
   ema_decay: 0.999
+  amp: false                     # true: autocast on the network forwards only (float16 + GradScaler on CUDA)

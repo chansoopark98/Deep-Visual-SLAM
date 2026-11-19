@@ -112,6 +112,23 @@ def test_odometry_wrapper_and_depth_prior(trained, tmp_path):
     assert conf is None and depth.shape == (H, W) and (depth >= 0.1 - 1e-4).all() and (depth <= 20.0 + 1e-3).all()
 
 
+def test_amp_option(tmp_path):
+    """train.amp on CPU: bfloat16 autocast on the training model's networks only; the EMA copy (validated and saved)
+    stays float32, no grad scaler on CPU, the step is finite and the checkpoint carries no extra model state."""
+    cfg = config()
+    assert cfg['train']['amp'] is False and Trainer(cfg, tmp_path, [synthetic_batch()]).model.amp_dtype is None
+    tr = Trainer(apply_overrides(config(), ['train.amp=true']), tmp_path, [synthetic_batch()])
+    assert tr.model.amp_dtype == tr.model.pose_net.amp_dtype == tr.model.residual_net.amp_dtype == torch.bfloat16
+    assert tr.ema.module.amp_dtype is None and tr.ema.module.pose_net.amp_dtype is None
+    assert not tr.scaler.is_enabled()
+    log = tr.train_step(synthetic_batch())
+    assert all(np.isfinite(v) for v in log.values()), log
+    tr.save(tmp_path / 'last.pt')
+    ckpt = torch.load(tmp_path / 'last.pt', map_location='cpu', weights_only=False)
+    assert set(ckpt['model']) == set(Trainer(config(), tmp_path, [synthetic_batch()]).model.state_dict())
+    assert Predictor.from_checkpoint(tmp_path / 'last.pt', 'cpu').model.amp_dtype is None
+
+
 def test_set_overrides():
     cfg = apply_overrides(config(), ['loss.flow=0.5', 'train.epochs=3', 'data.train_scenes=[room1, room2]',
                                      'model.uncertainty=false', 'data.root=/x/y'])

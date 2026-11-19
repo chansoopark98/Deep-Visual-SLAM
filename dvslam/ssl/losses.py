@@ -20,18 +20,48 @@ Terms (each switched off, with its extra forward passes, by weight 0):
   flow      : scale 0, Huber (delta 1 px) between the rigid flow target -> source and a frozen RAFT-large teacher flow
               on the 'net' images, over in-view valid pixels.
 Photometric, smoothness and the masks are averaged over the 4 scales; every term returns a scalar.
+
+Optional terms (config `loss` keys, absent or 0 = off, nothing extra is computed):
+  gap2 (multiplier g): the gap-2 pair (t-1, t+1) from the same triplet, no new data. T_gap = pose(I_{t-1}, I_{t+1})
+              = T_{t-1<-t+1} with the depth of t+1 (detached: these terms train the pose networks only). Terms, each
+              with weight g x the weight of its gap-1 counterpart:
+                gap2_comp  (x pose_consistency): pose_consistency_term(inv(T_gap), T_prev @ T_next), ties the composed
+                           gap-1 poses to the directly predicted gap-2 pose.
+                gap2_photo (x temporal): I_{t-1} warped into t+1 with T_gap, scale 0, auto-mask, same masking as above.
+                gap2_flow  (x flow): Huber against the teacher flow t+1 -> t-1 (only when the teacher exists).
+                gap2_gyro  (x gyro): angle of R_gap^T R_{t-1<-t} R_{t<-t+1} from the two gyro rotations.
+  zero_motion (weight z): synthetic static pairs. The target network image I_t and a copy of it with an independent
+              brightness gain / gamma in ZERO_JITTER and Gaussian noise ZERO_NOISE (what changes between two frames of a
+              static camera) form a pair whose true relative pose is the identity by construction; the final pose (with
+              refinement) of (copy, I_t) is pulled to it by (mean|t| + mean|rotvec|) / SMALL_STEP. This is the only
+              signal, so no mocap is involved. Purpose: near-static real pairs (5 % under 5 mm) dominate the relative
+              item 03, and photometric auto-masking removes their gradient (ManyDepth uses the same kind of
+              static-input augmentation for depth).
+  stereo_hint (weight h; needs batch 'hint' (B, 1, H, W) = stereo-matched metric z-depth of the target frame t from
+              cam0 + cam1 SGBM with left-right check, 0 = no hint; dvslam.ssl.tumvi_data): Watson et al. 2019 "depth
+              hints" in log space. Per scale, at pixels with a hint where the hint's stereo reprojection residual
+              p(cam1 warped with the hint, target) is lower than the network depth's p(cam1 warped with depth_s,
+              target) (both with the stereo term's masking for the hint warp; an out-of-view network warp counts as
+              worse), |log depth_s - log hint| is summed and divided by the number of usable hint pixels (so the
+              term fades as the network matches or beats the hint); averaged over the 4 scales.
+              The gate is a comparison, so no gradient flows through it. cam1 is training-only; inference stays mono.
 """
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from dvslam.ssl import geometry
-from dvslam.ssl.models import NUM_SCALES, SSLModel
+from dvslam.ssl.models import NUM_SCALES, SSLModel, autocast
 
 TERMS = ('temporal', 'stereo', 'smooth', 'geometric', 'gyro', 'pose_consistency', 'flow')
+GAP2_TERMS = {'gap2_comp': 'pose_consistency', 'gap2_photo': 'temporal', 'gap2_flow': 'flow', 'gap2_gyro': 'gyro'}
 SSIM_W = 0.85
 UNUSABLE = 1e4          # residual of an unusable source, larger than any real photometric residual
 POSE_CONSISTENCY_SCALE = 0.05
+SMALL_STEP = 0.005      # m and rad: normaliser of the zero-motion term (the 5 mm bucket of the metric)
+ZERO_JITTER = (0.95, 1.05)  # brightness gain and gamma of the synthetic static copy
+ZERO_NOISE = 0.01       # std of its additive Gaussian noise, in [0, 1] image units
+HINT_MIN = 0.1          # m; a stereo hint at or below this is "no hint" (stored as 0)
 
 
 def ssim(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -117,20 +147,36 @@ def flow_term(rigid: torch.Tensor, teacher: torch.Tensor, mask: torch.Tensor) ->
     return masked_mean(F.huber_loss(rigid, teacher, reduction='none', delta=1.0).sum(1, True), mask)
 
 
+def zero_motion_term(T: torch.Tensor) -> torch.Tensor:
+    """T (B, 4, 4) predicted for a pair whose true pose is the identity: (mean|t| + mean|rotvec|) / SMALL_STEP."""
+    return (T[:, :3, 3].abs().mean() + geometry.rotation_log(T[:, :3, :3]).abs().mean()) / SMALL_STEP
+
+
+def static_copy(img: torch.Tensor) -> torch.Tensor:
+    """(B, 3, H, W) [0, 1] network image -> the same view with a new gain, gamma and sensor noise per sample."""
+    gain, gamma = torch.empty(2, img.shape[0], 1, 1, 1, device=img.device).uniform_(*ZERO_JITTER)
+    noise = torch.randn_like(img[:, :1]) * ZERO_NOISE         # gray image replicated to 3 channels: one noise map
+    return (gain * img.clamp(min=0) ** gamma + noise).clamp(0, 1)
+
+
 class RaftTeacher(nn.Module):
-    """Frozen torchvision RAFT-large (default pretrained weights); flow img1 -> img2 for [0, 1] inputs."""
+    """Frozen torchvision RAFT-large (default pretrained weights); flow img1 -> img2 for [0, 1] inputs.
+    amp_dtype (set by the trainer with train.amp): autocast dtype of the network forward, flow returned as float32."""
 
     def __init__(self):
         super().__init__()
         from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
         self.net = raft_large(weights=Raft_Large_Weights.DEFAULT).eval().requires_grad_(False)
+        self.amp_dtype = None
 
     def train(self, mode: bool = True):
         return super().train(False)
 
     @torch.no_grad()
     def forward(self, img1: torch.Tensor, img2: torch.Tensor) -> torch.Tensor:
-        return self.net(img1 * 2 - 1, img2 * 2 - 1)[-1]
+        with autocast(img1, self.amp_dtype):
+            flow = self.net(img1 * 2 - 1, img2 * 2 - 1)[-1]
+        return flow.float()
 
 
 class SSLLoss(nn.Module):
@@ -139,6 +185,10 @@ class SSLLoss(nn.Module):
     def __init__(self, weights: dict, teacher: nn.Module | None = None):
         super().__init__()
         self.w = {k: float(weights[k]) for k in TERMS}
+        gap2 = float(weights.get('gap2', 0.0))
+        self.w.update({k: gap2 * self.w[base] for k, base in GAP2_TERMS.items()})
+        self.w['zero_motion'] = float(weights.get('zero_motion', 0.0))
+        self.w['stereo_hint'] = float(weights.get('stereo_hint', 0.0))
         self.teacher = (teacher or RaftTeacher()) if self.w['flow'] > 0 else None
 
     def forward(self, model: SSLModel, batch: dict) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
@@ -150,7 +200,7 @@ class SSLLoss(nn.Module):
         terms = {}
 
         T_src = None
-        if any(w[k] > 0 for k in ('temporal', 'geometric', 'gyro', 'flow', 'pose_consistency')):
+        if any(w[k] > 0 for k in ('temporal', 'geometric', 'gyro', 'flow', 'pose_consistency', *GAP2_TERMS)):
             d_src = [None, None]
             if w['geometric'] > 0:
                 d_src = [model.depth_m(net[:, 0]), model.depth_m(net[:, 2])]
@@ -167,6 +217,29 @@ class SSLLoss(nn.Module):
             if w['gyro'] > 0:
                 R_pred = torch.stack([T[:, :3, :3] for T in T_src], 1)
                 terms['gyro'] = gyro_term(R_pred, batch['R_gyro'], batch['gyro_ok'])
+            if any(w[k] > 0 for k in GAP2_TERMS):
+                if d_src[1] is None:
+                    with torch.no_grad():
+                        d_src[1] = model.depth_m(net[:, 2])
+                d_next = d_src[1].detach()
+                T_gap = model.pose(net[:, 0], net[:, 2], K, d_next)[0]           # T_{t-1<-t+1}
+                if w['gap2_comp'] > 0:
+                    terms['gap2_comp'] = pose_consistency_term(geometry.se3_inverse(T_gap), T_prev @ T_next)
+                if w['gap2_gyro'] > 0:
+                    R_gap = batch['R_gyro'][:, 0] @ batch['R_gyro'][:, 1].transpose(-1, -2)
+                    terms['gap2_gyro'] = gyro_term(T_gap[:, None, :3, :3], R_gap[:, None], batch['gyro_ok'])
+                if w['gap2_photo'] > 0 or w['gap2_flow'] > 0:
+                    out, vis, _, pix = geometry.warp(torch.cat([pho[:, 0], valid[:, 0]], 1), d_next, T_gap, K)
+                    mask = erode(vis * valid[:, 2] * (out[:, 1:] > 0.999).float())
+                    if w['gap2_photo'] > 0:
+                        terms['gap2_photo'] = temporal_term(pho[:, 2], [out[:, :1]], [mask], [pho[:, 0]],
+                                                            [erode(valid[:, 0])])
+                    if w['gap2_flow'] > 0:
+                        terms['gap2_flow'] = flow_term(geometry.rigid_flow(pix), self.teacher(net[:, 2], net[:, 0]),
+                                                       mask)
+        if w['zero_motion'] > 0:
+            T_zero = model.pose(static_copy(net[:, 1]), net[:, 1], K, depths[0].detach())[0]
+            terms['zero_motion'] = zero_motion_term(T_zero)
 
         def warp_masked(src: int, depth: torch.Tensor, T: torch.Tensor):
             """(warped loss image, usable mask, z_src, pix); usable = in view, target and warped source valid."""
@@ -190,7 +263,13 @@ class SSLLoss(nn.Module):
             if flow:
                 terms['flow'] = sum(flow) / 2
 
-        for name in ('temporal', 'stereo', 'smooth'):
+        if w['stereo_hint'] > 0:
+            hint = batch['hint']
+            hint_warped, hint_mask, _, _ = warp_masked(3, hint.clamp(min=HINT_MIN), batch['T_stereo'])
+            hint_res = photometric(hint_warped, target)
+            hint_ok = hint_mask * (hint > HINT_MIN).float()
+            log_hint = torch.log(hint.clamp(min=HINT_MIN))
+        for name in ('temporal', 'stereo', 'smooth', 'stereo_hint'):
             if w[name] > 0:
                 terms[name] = 0.0
         for s in range(NUM_SCALES):
@@ -200,12 +279,18 @@ class SSLLoss(nn.Module):
                 terms['temporal'] = terms['temporal'] + temporal_term(
                     target, [x[0] for x in warped], [x[1] for x in warped], [pho[:, 0], pho[:, 2]],
                     [erode(valid[:, 0]), erode(valid[:, 2])], geo_w, sigma)
-            if w['stereo'] > 0:
+            if w['stereo'] > 0 or w['stereo_hint'] > 0:
                 warped, mask, _, _ = warp_masked(3, depths[s], batch['T_stereo'])
+            if w['stereo'] > 0:
                 terms['stereo'] = terms['stereo'] + stereo_term(target, warped, mask, sigma)
+            if w['stereo_hint'] > 0:
+                net_res = torch.where(mask > 0, photometric(warped, target), UNUSABLE)
+                use = hint_ok * (hint_res < net_res).float()
+                terms['stereo_hint'] = terms['stereo_hint'] + masked_mean(
+                    (torch.log(depths[s]) - log_hint).abs() * use, hint_ok)
             if w['smooth'] > 0:
                 terms['smooth'] = terms['smooth'] + smooth_term(disps[s], target) / 2 ** s
-        for name in ('temporal', 'stereo', 'smooth'):
+        for name in ('temporal', 'stereo', 'smooth', 'stereo_hint'):
             if w[name] > 0:
                 terms[name] = terms[name] / NUM_SCALES
 
