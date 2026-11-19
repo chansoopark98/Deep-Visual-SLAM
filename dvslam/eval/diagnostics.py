@@ -38,10 +38,15 @@ def best_rescale(gt_t: np.ndarray, pred_t: np.ndarray) -> tuple[float, float]:
     return s, float(_pct_errors(gt_t, s * pred_t).mean())
 
 
-def stride_mape(T_gt: np.ndarray, increments: np.ndarray, k: int) -> float:
-    """G1' variant of item 03 on pairs (t-k, t): increments composed over k frames vs GT (plan NO-GO branch, Q4)."""
+def stride_mape(T_gt: np.ndarray, increments: np.ndarray, k: int, valid: np.ndarray | None = None) -> float:
+    """G1' variant of item 03 on pairs (t-k, t): increments composed over k frames vs GT (plan NO-GO branch, Q4).
+
+    valid: optional (N,) bool per frame; pairs whose end frames lack measured GT are skipped.
+    """
     gt, pred = [], []
     for t in range(k, len(T_gt)):
+        if valid is not None and not (valid[t - k] and valid[t]):
+            continue
         gt.append(relative_pose(T_gt[t - k], T_gt[t])[:3, 3])
         P = np.eye(4)
         for dT in increments[t - k:t]:
@@ -108,10 +113,15 @@ def ate_rmse(T_gt: np.ndarray, T_est: np.ndarray, sim3: bool) -> tuple[float, fl
     return float(np.sqrt((err ** 2).sum(1).mean())), s
 
 
-def rpe(T_gt: np.ndarray, T_est: np.ndarray, delta: int) -> dict:
-    """RPE over a fixed frame delta: translation RMSE (m) and mean rotation error (deg)."""
+def rpe(T_gt: np.ndarray, T_est: np.ndarray, delta: int, valid: np.ndarray | None = None) -> dict:
+    """RPE over a fixed frame delta: translation RMSE (m) and mean rotation error (deg).
+
+    valid: optional (N,) bool per frame; windows whose end frames lack measured GT are skipped.
+    """
     te, re = [], []
     for i in range(len(T_gt) - delta):
+        if valid is not None and not (valid[i] and valid[i + delta]):
+            continue
         E = np.linalg.inv(relative_pose(T_gt[i], T_gt[i + delta])) @ relative_pose(T_est[i], T_est[i + delta])
         te.append(np.linalg.norm(E[:3, 3]))
         re.append(rotation_angle_deg(E[:3, :3]))

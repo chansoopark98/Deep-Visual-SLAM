@@ -1,4 +1,4 @@
-"""Run an odometry over Redwood sequences and write causal increments (plan v3 §4.8, item 0.4).
+"""Run an odometry over a dataset (Redwood by default; --dataset tumvi | euroc) and write causal increments
 
   python apps/run_sequence.py --odometry legacy_posenet --split test
   -> runs/<id>/<scene>.inc.npz, <scene>.causal.tum, timings.csv
@@ -21,7 +21,7 @@ except ImportError:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from dvslam.data import redwood  # noqa: E402
+from dvslam.data import registry  # noqa: E402
 from dvslam.odometry.base import Frame, PinholeCamera, causal_trajectory, save_increments, write_tum  # noqa: E402
 
 
@@ -59,17 +59,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--odometry', choices=sorted(ODOMETRY), required=True)
     ap.add_argument('--opt', action='append', default=[], help='tracker option k=v (repeatable)')
+    ap.add_argument('--dataset', choices=registry.DATASETS, default='redwood')
     ap.add_argument('--split', choices=['validation', 'test'], default='test')
-    ap.add_argument('--scenes', nargs='+', default=list(redwood.SCENES))
-    ap.add_argument('--data-root', type=Path, default=redwood.DEFAULT_ROOT)
+    ap.add_argument('--scenes', nargs='+', default=None, help='default: every scene of the split')
+    ap.add_argument('--data-root', type=Path, default=None, help="default: the dataset's own root")
+    ap.add_argument('--time-offset', type=float, default=0.0,
+                    help='GT lookup offset in seconds (TUM-VI / EuRoC); it also decides which end frames have GT')
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--out', type=Path, default=None, help='default: runs/<odometry>-<split>-<YYYYmmdd-HHMMSS>')
     args = ap.parse_args()
+    args.data_root = args.data_root or registry.default_root(args.dataset)
+    if not args.scenes:
+        args.scenes = registry.scenes(args.dataset, args.split, args.data_root)
+        missing = sorted(set(registry.expected_scenes(args.dataset, args.split)) - set(args.scenes))
+        if missing:
+            print(f'INCOMPLETE split: {args.dataset} {args.split} is missing {missing} on disk')
+    frame_rate_hz, frame_rate_verified = registry.frame_rate(args.dataset)
 
     if torch is not None:
         torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    out = args.out or REPO_ROOT / 'runs' / f'{args.odometry}-{args.split}-{datetime.now():%Y%m%d-%H%M%S}'
+    prefix = args.odometry if args.dataset == 'redwood' else f'{args.odometry}-{args.dataset}'
+    out = args.out or REPO_ROOT / 'runs' / f'{prefix}-{args.split}-{datetime.now():%Y%m%d-%H%M%S}'
     out.mkdir(parents=True, exist_ok=False)
     commit = subprocess.run(['git', '-C', str(REPO_ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
     opts = parse_opts(args.opt)
@@ -79,19 +90,22 @@ def main():
         tw = csv.writer(tf)
         tw.writerow(['scene', 'index', 'total_ms'])
         for scene in args.scenes:
-            seq = redwood.load_sequence(scene, args.split, args.data_root)
+            seq = registry.load_sequence(args.dataset, scene, args.split, args.data_root, args.time_offset)
             odo.reset(PinholeCamera(seq.K, seq.width, seq.height))
             estimates = []
             for i in range(len(seq)):
-                est = odo.step(Frame(i, float(seq.timestamps[i]), seq.image_paths[i], seq.depth_paths[i]))
+                depth_path = seq.depth_paths[i] if seq.depth_paths else None   # TUM-VI / EuRoC have no sensor depth
+                est = odo.step(Frame(i, float(seq.timestamps[i]), seq.image_paths[i], depth_path))
                 if est is not None:
                     estimates.append(est)
                     tw.writerow([scene, est.index, f'{est.timings_ms.get("total", float("nan")):.3f}'])
             if [e.index for e in estimates] != list(range(1, len(seq))):
                 raise RuntimeError(f'{scene}: odometry must emit one increment per frame t >= 1')
-            meta = {'scene': scene, 'split': args.split, 'odometry': args.odometry, 'opts': opts, 'seed': args.seed,
+            meta = {'dataset': args.dataset, 'scene': scene, 'split': args.split, 'odometry': args.odometry,
+                    'opts': opts, 'seed': args.seed,
                     'data_root': str(args.data_root), 'n_frames': len(seq), 'git_commit': commit,
-                    'frame_rate_hz': redwood.FRAME_RATE_HZ, 'frame_rate_verified': redwood.FRAME_RATE_VERIFIED}
+                    'frame_rate_hz': frame_rate_hz, 'frame_rate_verified': frame_rate_verified,
+                    'time_offset_s': args.time_offset}
             save_increments(out / f'{scene}.inc.npz', estimates, meta)
             T_out = causal_trajectory(np.stack([e.rel_increment for e in estimates]))
             write_tum(out / f'{scene}.causal.tum', seq.timestamps, T_out)
