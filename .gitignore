@@ -211,3 +211,8 @@ third_party/**/*.o
 third_party/**/*.egg-info/
 third_party/*/models/
 cpp/build/
+
+# OMC runtime state (machine-local); plans/research/handoffs are tracked
+.omc/state/
+.omc/sessions/
+.omc/project-memory.json
