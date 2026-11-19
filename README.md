@@ -111,7 +111,23 @@ pip install -r requirements.txt
 |---------|-------------|-------|
 | [Redwood RGBD](http://redwood-data.org/indoor_lidar_rgbd/download.html) | Indoor RGB-D sequences with camera poses | VO Training/Evaluation |
 | [NYU Depth V2](https://cs.nyu.edu/~silberman/datasets/nyu_depth_v2.html) | Indoor RGB-D pairs | Depth Training |
+| [TUM-VI](https://cvg.cit.tum.de/data/datasets/visual-inertial-dataset) | Fisheye + IMU + mocap GT, room1-6 (512_16) | VO/SLAM validation and test |
+| [EuRoC MAV](https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets) | Stereo + IMU, machine hall MH_01-05 | VO/SLAM validation and test |
 | Custom | User-defined RGB-D data | Both |
+
+### SLAM evaluation datasets (TUM-VI, EuRoC)
+
+These live outside the repo and are located through `DVSLAM_TUMVI_ROOT`, `DVSLAM_EUROC_ROOT` and
+`DVSLAM_CACHE_ROOT`. Check and fetch them with:
+
+```bash
+scripts/fetch_datasets.sh check                # are all sequences of every split usable? (no download)
+scripts/fetch_datasets.sh tumvi room5 room6    # download missing TUM-VI sequences from the official server
+python apps/run_sequence.py --odometry <name> --dataset tumvi --split test
+```
+
+Layouts, source URLs, environment variables, the rectified-image cache and workstation notes are in
+[docs/DATASETS.md](docs/DATASETS.md).
 
 ### Redwood Dataset Preparation
 
