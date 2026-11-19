@@ -1,4 +1,4 @@
-"""TUM-VI room sequences, cam0 only, 512x512 version (plan v3.2 item T.1).
+"""TUM-VI room sequences, cam0, 512x512 version (plan v3.2 item T.1).
 
 Splits (user decision 2026-11-19, target-metric track; replaces plan §12.3's room1-2 validation / room3-6 test): whole
 sequences, train room1-4, validation room5, test room6. All six rooms are the same motion-capture room, so the split
@@ -13,7 +13,8 @@ Rectification: the equidistant (Kannala-Brandt) fisheye is remapped to ONE fixed
 the image centre keeps its native resolution and the plan's "f about 190 px" holds. Field of view: 106.8 deg
 horizontal and vertical, 124.6 deg diagonal (2 atan(256 / 190) and 2 atan(256 sqrt 2 / 190)); every output pixel
 samples inside the 512x512 source. The remainder of the fisheye view (up to 195 deg) is dropped. K_OUT is written to
-the cache meta.json next to the rectified PNGs.
+the cache meta.json next to the rectified PNGs. cam1 (dvslam.ssl.tumvi_data) is rectified the same way with
+`rectified_paths`, also with R = identity: each camera keeps its own orientation.
 
 GT: the mocap rows (p_RS_R, q_RS) are the pose of the IMU frame S in the mocap world R (the gyro matches the mocap
 angular rate in the IMU frame, not in the camera frame). Camera pose: T_wc = T_w_imu @ inv(T_cam_imu).
@@ -43,7 +44,7 @@ FRAME_RATE_HZ = 20.0
 MAX_GAP_S = 0.02            # mocap is 120 Hz (8.3 ms); a larger gap between the two samples around a frame is a dropout
 OUT_SIZE = 512
 K_OUT = np.array([[190.0, 0.0, 255.5], [0.0, 190.0, 255.5], [0.0, 0.0, 1.0]])
-CACHE_TAG = 'cam0_pinhole_512_f190'
+CACHE_TAG = 'cam0_pinhole_512_f190'      # cam1 (stereo partner, SSL training only): 'cam1_pinhole_512_f190'
 
 
 def sequence_dir(scene: str, root: Path | str | None = None) -> Path:
@@ -55,14 +56,26 @@ def available_scenes(split: str, root: Path | str | None = None) -> list[str]:
     return [s for s in SPLITS[split] if sequence_dir(s, root).is_dir()]
 
 
-def load_cam0_calib(seq_dir: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(T_cam_imu (4,4), intrinsics [fx, fy, cx, cy], distortion k1..k4) of cam0."""
+def load_cam_calib(seq_dir: Path, cam: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(T_cam_imu (4,4), intrinsics [fx, fy, cx, cy], distortion k1..k4) of camera `cam` ('cam0' or 'cam1')."""
     with open(seq_dir / 'dso/camchain.yaml') as f:
-        cam = yaml.safe_load(f)['cam0']
-    if cam['distortion_model'] != 'equidistant':
-        raise ValueError(f'{seq_dir}: cam0 distortion model is {cam["distortion_model"]}, expected equidistant')
-    return (np.array(cam['T_cam_imu'], dtype=np.float64), np.array(cam['intrinsics'], dtype=np.float64),
-            np.array(cam['distortion_coeffs'], dtype=np.float64))
+        c = yaml.safe_load(f)[cam]
+    if c['distortion_model'] != 'equidistant':
+        raise ValueError(f'{seq_dir}: {cam} distortion model is {c["distortion_model"]}, expected equidistant')
+    return (np.array(c['T_cam_imu'], dtype=np.float64), np.array(c['intrinsics'], dtype=np.float64),
+            np.array(c['distortion_coeffs'], dtype=np.float64))
+
+
+def load_cam0_calib(seq_dir: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    return load_cam_calib(seq_dir, 'cam0')
+
+
+def camera_frames(seq_dir: Path, cam: str) -> tuple[np.ndarray, list[Path]]:
+    """(timestamps ns (N,) int64, fisheye source image paths) of every frame of camera `cam`."""
+    with open(seq_dir / f'mav0/{cam}/data.csv') as f:
+        rows = [r for r in csv.reader(f) if r and not r[0].startswith('#')]
+    t_ns = np.array([int(r[0]) for r in rows], dtype=np.int64)
+    return t_ns, [seq_dir / f'mav0/{cam}/data' / r[1].strip() for r in rows]
 
 
 def rectify_maps(intrinsics: np.ndarray, dist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -70,6 +83,18 @@ def rectify_maps(intrinsics: np.ndarray, dist: np.ndarray) -> tuple[np.ndarray, 
     fx, fy, cx, cy = intrinsics
     K_src = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
     return cv2.fisheye.initUndistortRectifyMap(K_src, dist, np.eye(3), K_OUT, (OUT_SIZE, OUT_SIZE), cv2.CV_32FC1)
+
+
+def rectified_paths(scene: str, cam: str, images: list[Path], intrinsics: np.ndarray, dist: np.ndarray,
+                    build: bool) -> list[Path]:
+    """Cache paths of `images` rectified to K_OUT with R = identity; build=True first creates the missing files."""
+    dst = base.cache_dir('tumvi', scene, CACHE_TAG.replace('cam0', cam))
+    if not build:
+        return [dst / f'{p.stem}.png' for p in images]
+    map_x, map_y = rectify_maps(intrinsics, dist)
+    meta = {'K': K_OUT.tolist(), 'size': [OUT_SIZE, OUT_SIZE], 'source_model': 'equidistant',
+            'source_intrinsics': intrinsics.tolist(), 'source_distortion': dist.tolist(), 'bit_depth': 8}
+    return base.rectify_to_cache(images, dst, map_x, map_y, meta)
 
 
 def load_sequence(scene: str, split: str | None = None, root: Path | str | None = None,
@@ -85,10 +110,7 @@ def load_sequence(scene: str, split: str | None = None, root: Path | str | None 
     d = sequence_dir(scene, root)
     if not d.is_dir():
         raise FileNotFoundError(f'{scene}: {d} not found')
-    with open(d / 'mav0/cam0/data.csv') as f:
-        rows = [r for r in csv.reader(f) if r and not r[0].startswith('#')]
-    t_cam = np.array([int(r[0]) for r in rows], dtype=np.int64)
-    images = [d / 'mav0/cam0/data' / r[1].strip() for r in rows]
+    t_cam, images = camera_frames(d, 'cam0')
     mocap = d / 'mav0/mocap0/data.csv'
     t_gt = np.loadtxt(mocap, delimiter=',', comments='#', usecols=0, dtype=np.int64)
     gt = np.loadtxt(mocap, delimiter=',', comments='#', usecols=range(1, 8), dtype=np.float64)
@@ -101,15 +123,8 @@ def load_sequence(scene: str, split: str | None = None, root: Path | str | None 
     T_cam_imu, intrinsics, dist = load_cam0_calib(d)
     T_wc = T_w_imu[keep] @ np.linalg.inv(T_cam_imu)
     t_cam = t_cam[keep]
-    dst = base.cache_dir('tumvi', scene, CACHE_TAG)
-    if load_images:
-        # all frames, independent of the GT range, so the cache does not depend on time_offset_s
-        map_x, map_y = rectify_maps(intrinsics, dist)
-        meta = {'K': K_OUT.tolist(), 'size': [OUT_SIZE, OUT_SIZE], 'source_model': 'equidistant',
-                'source_intrinsics': intrinsics.tolist(), 'source_distortion': dist.tolist(), 'bit_depth': 8}
-        paths = base.rectify_to_cache(images, dst, map_x, map_y, meta)[keep]
-    else:
-        paths = [dst / f'{p.stem}.png' for p in images[keep]]
+    # all frames, independent of the GT range, so the cache does not depend on time_offset_s
+    paths = rectified_paths(scene, 'cam0', images, intrinsics, dist, load_images)[keep]
     return base.Sequence(
         dataset='tumvi', scene=scene, split=split, frame_ids=np.arange(len(t_cam)), image_paths=paths, T_wc=T_wc,
         K=K_OUT.copy(), width=OUT_SIZE, height=OUT_SIZE, timestamps=(t_cam - t_cam[0]) * 1e-9, timestamps_ns=t_cam,

@@ -22,7 +22,7 @@ are reused unchanged.
                g and BA updates happen after ΔT_t is emitted. An increment that jumps > max_jump_m / max_jump_deg from
                the previous one is treated as a PnP failure (motion model, DEGRADED).
 
-Prior: `prior` ∈ {perturbed (b = 2 %, jitter 3 %), oracle (GT depth), da3 (DA3METRIC-L), dav2_ft}. `prior_seed`
+Prior: `prior` ∈ {perturbed (b = 2 %, jitter 3 %), oracle (GT depth), da3 (DA3METRIC-L), dav2_ft, ssl}. `prior_seed`
 seeds the perturbed jitter. `ba=False kf_align=False` is the 0.7 sensor-depth path with a prior (baseline).
 `head_inputs` (BA-unit ΔT^raw, g, BA depths of frame t−1) is exposed for the precision head (klt_head.py).
 """
@@ -52,7 +52,10 @@ def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitt
     if name == 'dav2_ft':
         from dvslam.depth.dav2_ft import DAv2FT
         return DAv2FT(ckpt=ckpt, K=K)
-    raise ValueError(f'prior must be perturbed|oracle|da3|dav2_ft, got {name!r}')
+    if name == 'ssl':
+        from dvslam.depth.ssl import SSLDepth
+        return SSLDepth(ckpt=ckpt, K=K)
+    raise ValueError(f'prior must be perturbed|oracle|da3|dav2_ft|ssl, got {name!r}')
 
 
 def sample_depth(depth: np.ndarray, px: np.ndarray, dmin: float = 0.2, dmax: float = 6.0,

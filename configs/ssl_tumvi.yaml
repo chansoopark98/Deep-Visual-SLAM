@@ -1,0 +1,38 @@
+# Self-supervised METRIC depth + pose on TUM-VI (dvslam/ssl, apps/train_ssl.py).
+# Inference is monocular cam0; cam1 (stereo, metric anchor), gyro and photometric calibration are training-only.
+data:
+  train_scenes: [room1, room2, room3, room4]
+  val_scene: room5               # scored with mocap GT (item 03 MAPE picks best.pt); never a training signal
+  root: null                     # null = dvslam.data.tumvi.DEFAULT_ROOT
+
+model:
+  pretrained: true               # ImageNet ResNet-18 encoders
+  min_depth: 0.1                 # metres
+  max_depth: 20.0                # metres
+  uncertainty: true              # per-pixel sigma in (sigma_min, 1] for the photometric terms
+  sigma_min: 0.01
+  pose_iters: 2                  # 1 = no residual pose refinement
+
+# Loss weights: UNTUNED defaults. Weight 0 disables a term and its extra forward passes.
+loss:
+  temporal: 1.0
+  stereo: 1.0
+  smooth: 1.0e-3
+  geometric: 0.5
+  gyro: 5.0
+  pose_consistency: 0.05
+  flow: 0.02                     # > 0 builds the frozen torchvision RAFT-large teacher (downloads its weights once)
+
+train:
+  device: cuda
+  batch_size: 8
+  epochs: 20
+  val_every: 1
+  num_workers: 6
+  seed: 0
+  lr: 1.0e-4
+  min_lr: 1.0e-6
+  weight_decay: 1.0e-2
+  warmup_steps: 500
+  grad_clip: 1.0
+  ema_decay: 0.999

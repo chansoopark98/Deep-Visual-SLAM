@@ -36,6 +36,7 @@ ODOMETRY = {
     'dpvo_metric': ('dvslam.odometry.dpvo_metric', 'DPVOMetricOdometry'),  # plan 1.1/1.2 (B + depth prior)
     'klt_window': ('dvslam.odometry.klt_window', 'KLTWindowOdometry'),    # plan 1.3 (C + window BA + prior)
     'klt_head': ('dvslam.odometry.klt_head', 'KLTHeadOdometry'),          # plan 1.5 (precision head over any base)
+    'ssl_posenet': ('dvslam.odometry.ssl_posenet', 'SSLPoseNetOdometry'),  # self-supervised metric pose (dvslam/ssl)
 }
 
 
