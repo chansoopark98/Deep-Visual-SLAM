@@ -384,3 +384,43 @@ def test_option_values_checked_and_lk_defaults_unchanged():
             KLTWindowOdometry(prior='oracle', **kw_bad)
     assert KLTWindowOdometry(prior='oracle').lk['criteria'][1:] == (30, 0.001)
     assert KLTWindowOdometry(prior='oracle', lk_iters=50, lk_eps=0.01).lk['criteria'][1:] == (50, 0.01)
+
+
+class _UnitNorm:
+    """Stand-in for klt_photo.PhotoNorm on the synthetic scene: image / 255, all pixels valid, unit exposure."""
+
+    def __call__(self, image_path, gray, ratio):
+        return gray.astype(np.float32) / 255 * ratio, np.ones(gray.shape, bool)
+
+    def exposure(self, image_path):
+        return 1.0
+
+
+def test_photo_bidir_combines_both_directions(scene, monkeypatch):
+    """EXP-018 photo_bidir: the t -> t-1 refinement runs on every refined pair, the output is the midpoint of the two
+    accepted refinements (differs from forward-only; here closer to GT, 0.07 vs 0.11 mm mean), and photo_ref_max > 1
+    is a ValueError."""
+    frames, gt = scene
+
+    def run(**o):
+        odo = KLTWindowOdometry(min_distance=10, lk_win=15, kf_max=5, window=6, g_min_m=2, n_features=150,
+                                prior='oracle', photo='all', photo_cell=2, photo_grad=0.002, **o)
+        odo.photo_norm = _UnitNorm()
+        odo.reset(PinholeCamera(K, W, H))
+        est = [odo.step(f) for f in frames][1:]
+        return np.stack([e.rel_increment for e in est]), np.array(odo.diag['photo'])
+
+    back = []
+    real_back = KLTWindowOdometry._photo_back
+    monkeypatch.setattr(KLTWindowOdometry, '_photo_back', lambda self, *a: back.append(real_back(self, *a)) or back[-1])
+    fwd, ph_f = run()
+    assert not back
+    bid, ph_b = run(photo_bidir=True)
+    assert len(back) == (ph_b > 0).sum() and (ph_f == 1).sum() >= 10 and (ph_b == 1).sum() >= 10
+    both = [k for k, (T, info) in enumerate(back) if info is not None and info['cost'] < info['cost0']]
+    assert len(both) >= 10
+    err = lambda inc: np.linalg.norm(inc[:, :3, 3] - gt[:, :3, 3], axis=1) * 1e3
+    assert np.abs(bid - fwd).max() > 1e-7                          # the backward result enters the output
+    assert err(bid).max() < 0.5 and err(bid).mean() < err(fwd).mean(), (err(bid).mean(), err(fwd).mean())
+    with pytest.raises(ValueError, match='photo_bidir'):
+        KLTWindowOdometry(prior='oracle', photo_bidir=True, photo_ref_max=2)

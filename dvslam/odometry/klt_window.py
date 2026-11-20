@@ -45,6 +45,10 @@ flow only to re-acquire tracks on frames where LK keeps < flow_hybrid_frac of th
 EXP-013 (CONDITIONAL, default off): out_lag=L emits pair (k-1, k) after frame k+L (klt_lag.py; smooth = fixed-lag
 constant-acceleration RTS on the step, window = causal increment corrected by the later window poses); flush() emits
 the last L pairs at the end of a sequence, so drivers must call it (scripts/exp003_track_log.py does).
+EXP-018 (default off): photo_bidir=True also refines the pair from frame t to frame t-1 (points and SSL depth of frame
+t, the same map-unit ratio); each direction passes the acceptance test on its own, and when both pass the output is
+their midpoint (mean translation, geodesic rotation midpoint). Needs photo_ref_max=1. Asks the prior for frame t's
+depth one step earlier than the next anchor does (a cached prior is a lookup; a live network prior runs twice).
 EXP-011: wide=<size> tracks on tumvi.wide_K(size) images (same f = 190 and principal ray, larger canvas; the central
 512 crop equals the standard image); the depth prior is still predicted on the standard image (built with K_OUT and
 512 x 512) and embedded in the canvas centre (no prior outside: those corners are triangulated); wide_fov_deg caps
@@ -146,7 +150,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
                  photo_max_deg: float = 1.0, photo_tol: float = 0.0, photo_max_pts: int = 0,
                  flow_mode: str = 'replace', flow_hybrid_frac: float = 0.7, photo_ref_max: int = 1, wide: int = 0,
                  wide_fov_deg: float = 0.0, out_lag: int = 0, out_lag_mode: str = 'smooth', out_lag_q: float = 0.002,
-                 out_lag_r: float = 0.001, **klt_kw):
+                 out_lag_r: float = 0.001, photo_bidir: bool = False, **klt_kw):
         super().__init__(mode='sensor_depth', tri_deg=tri_deg, kf_ratio=kf_ratio, **klt_kw)
         self.prior_name, self.prior_seed, self.prior_bias, self.prior_jitter = prior, prior_seed, prior_bias, prior_jitter
         self.prior_ckpt = prior_ckpt                    # dav2_ft checkpoint; None = the model's default weights
@@ -177,6 +181,9 @@ class KLTWindowOdometry(KLTPnPOdometry):
             raise ValueError(f'out_lag_mode must be smooth|window, got {out_lag_mode!r}')
         self.out_lag, self.out_lag_mode = int(out_lag), out_lag_mode
         self.out_lag_q, self.out_lag_r = out_lag_q, out_lag_r
+        if photo_bidir and photo_ref_max != 1:
+            raise ValueError('photo_bidir needs photo_ref_max=1 (pair refinement)')
+        self.photo_bidir = bool(photo_bidir)
         self.flow = self.photo_norm = None
         self.kf_refine = kf_refine                     # max px change of the host->keyframe re-track (0 = off)
         self.prior = None
@@ -635,14 +642,51 @@ class KLTWindowOdometry(KLTPnPOdometry):
         A = np.eye(4)
         A[:3, :3], A[:3, 3] = R, t
         new = np.linalg.inv(A @ np.linalg.inv(ref['A']))
-        dt = np.linalg.norm(new[:3, 3] - inc[:3, 3]) * np.exp(-self.g)
-        dr = np.degrees(np.linalg.norm(Rotation.from_matrix(inc[:3, :3].T @ new[:3, :3]).as_rotvec()))
-        if info['n'] < 50 or not info['cost'] < info['cost0'] or dt > self.photo_max_m or dr > self.photo_max_deg:
+        if self.photo_bidir:                            # EXP-018: refine t -> t-1 too, combine the accepted ones
+            self._photo_ref = None                      # (photo_ref_max == 1: the next pair re-anchors anyway)
+            got = [T for T, i in ((new, info), self._photo_back(frame, P0, P1, M1, inc)) if self._photo_ok(i, T, inc)]
+            if not got:
+                return None
+            if len(got) == 1:
+                return got[0]
+            mid = got[0].copy()
+            half = Rotation.from_rotvec(0.5 * Rotation.from_matrix(got[0][:3, :3].T @ got[1][:3, :3]).as_rotvec())
+            mid[:3, :3] = got[0][:3, :3] @ half.as_matrix()
+            mid[:3, 3] = 0.5 * (got[0][:3, 3] + got[1][:3, 3])
+            return mid
+        if not self._photo_ok(info, new, inc):
             self._photo_ref = None                      # re-anchor on the next pair
             return None
         ref.update(A=A, last=frame.index)
         self._photo_ref = ref
         return new
+
+    def _photo_ok(self, info: dict | None, new: np.ndarray, inc: np.ndarray) -> bool:
+        """Acceptance of a refined increment: cost dropped, >= 50 points, within photo_max_m / photo_max_deg of inc."""
+        if info is None:
+            return False
+        dt = np.linalg.norm(new[:3, 3] - inc[:3, 3]) * np.exp(-self.g)
+        dr = np.degrees(np.linalg.norm(Rotation.from_matrix(inc[:3, :3].T @ new[:3, :3]).as_rotvec()))
+        return not (info['n'] < 50 or not info['cost'] < info['cost0'] or dt > self.photo_max_m
+                    or dr > self.photo_max_deg)
+
+    def _photo_back(self, frame: Frame, P0: list, P1: list, M1: np.ndarray, inc: np.ndarray):
+        """EXP-018 photo_bidir: the same LM from frame t to frame t-1 (points and SSL depth of frame t, same map-unit
+        ratio _photo_s); X_{t-1} = ΔT X_t, so the result is the increment itself. (ΔT, info), info None if skipped."""
+        from dvslam.odometry.klt_photo import refine_prepared, select_points_g
+        pts = select_points_g(P1[0][..., 1], P1[0][..., 2], M1, self.photo_cell, self.photo_grad,
+                              self.photo_max_pts)[0]
+        z = sample_depth(self._prior_map(frame), pts, self.depth_min, self.depth_max, self.depth_edge) * self._photo_s
+        v = np.isfinite(z)
+        if v.sum() < 50:
+            return inc, None
+        nm = self.photo_norm
+        ratio = nm.exposure(frame.image_path) / nm.exposure(self._prev_frame.image_path)
+        R, t, info = refine_prepared(P1, P0, ratio, pts[v], z[v], self.K, inc[:3, :3], inc[:3, 3], self.photo_levels,
+                                     self.photo_iters, self.photo_huber, self.photo_tol)
+        out = np.eye(4)
+        out[:3, :3], out[:3, 3] = R, t
+        return out, info
 
     def _photo_anchor(self, pf: Frame, P0: list, M0: np.ndarray, head_prev) -> dict | None:
         """Photometric reference at frame t-1: points, depths in map units (SSL depth × median z_map / d_p)."""
