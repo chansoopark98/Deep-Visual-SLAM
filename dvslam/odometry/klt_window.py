@@ -13,6 +13,14 @@ are reused unchanged.
                analytic sparse Jacobian. prior_per_kf: the landmarks of one host share a weight of 1/prior_sigma²
                (σ_j = prior_sigma·sqrt(n_host)), because the prior error is one jitter per frame, not per pixel.
                An update that moves a pose > ba_max_move_m / ba_max_turn_deg is discarded (divergence guard).
+               S4 options (default off): prior_obs scales the window's prior weight by w = clip(prior_obs_ref / θ_w,
+               prior_obs_min, prior_obs_max) (σ_j / sqrt(w)), θ_w = median over prior landmarks of the largest
+               host-to-observer ray angle (deg) before the BA: low parallax → stronger prior. One weight per window
+               BA (MegaSaM weights once per video; no per-window precedent). The global scale direction itself is
+               an exact gauge of the reprojection term (Hessian eigenvalue 0), so parallax measures how well the
+               geometry fixes the relative depths, not the scale. prior_loss ∈ {huber, cauchy} replaces the prior
+               residual r = log d_p − log d by ψ(r) (robust_log_residual, scale prior_loss_c in log units); the
+               BA's shared ba_loss / huber still applies on top of ψ / σ_j.
                ba_guard (default off, EXP-003): depths are clipped to [BA_DEPTH_LO, BA_DEPTH_HI] inside the residual
                (a zero-parallax landmark without prior can run x → −∞; exp(−x) then overflows in trial steps, which
                trf rejects at the cost of evaluations) and landmarks accepted outside that range become unmapped.
@@ -49,10 +57,20 @@ EXP-018 (default off): photo_bidir=True also refines the pair from frame t to fr
 t, the same map-unit ratio); each direction passes the acceptance test on its own, and when both pass the output is
 their midpoint (mean translation, geodesic rotation midpoint). Needs photo_ref_max=1. Asks the prior for frame t's
 depth one step earlier than the next anchor does (a cached prior is a lookup; a live network prior runs twice).
+S1 (plan v3.4 §14.4, default numpy): photo_backend=torch|torch32 runs the photometric LM with klt_photo_torch.py
+(GPU when available; per-point work in float64 / float32). Points, depths and acceptance are unchanged.
+S2 (plan v3.4 §14.4, default off): photo_feat=<ckpt> runs that LM with a learned PhotoNet (photo_learned.py:
+per-pixel weights and / or an alignment feature of each frame); needs photo_backend=torch|torch32 and photo_levels=1
+(the net is trained on level 1 only). photo_feat / photo_backend with photo=off is a ValueError.
 EXP-011: wide=<size> tracks on tumvi.wide_K(size) images (same f = 190 and principal ray, larger canvas; the central
 512 crop equals the standard image); the depth prior is still predicted on the standard image (built with K_OUT and
 512 x 512) and embedded in the canvas centre (no prior outside: those corners are triangulated); wide_fov_deg caps
 detection and tracks by angle. wide with a flow_cache directory is a ValueError (cached flow is of the standard image).
+G0c (plan v3.4 §14.4, default off): pt_subset=left|right|blocks_a|blocks_b|random_a|random_b runs the tracker on one
+point subset (subset_mask): corners are detected only inside the mask, the photometric points (both directions) are
+only those inside it, and n_features is halved (every subset covers half the image: same corner density as the full
+tracker). Region subsets also drop a track once it leaves the mask (as wide_fov_deg), so the two halves never share a
+point; random subsets keep a track wherever it moves (membership is fixed at detection).
 Threads: OpenCV's own pool (pthreads) ignores OMP_NUM_THREADS and used ~8.7 cores for a job that needs ~1.6 (EXP-003,
 same output, same speed). reset() caps it with cv2.setNumThreads, which is PROCESS-WIDE (every later OpenCV call in
 the process, not only this tracker; deliberate, it protects the shared workstation): cv_threads=None (default) uses
@@ -73,6 +91,24 @@ from dvslam.odometry.base import Frame, PinholeCamera, PoseEstimate
 from dvslam.odometry.klt_pnp import _STATE_CODE, KLTPnPOdometry
 
 BA_DEPTH_LO, BA_DEPTH_HI = 0.01, 1000.0    # metres; ba_guard range of landmark depths in the window BA
+PT_SUBSETS = ('off', 'left', 'right', 'blocks_a', 'blocks_b', 'random_a', 'random_b')
+
+
+def subset_mask(mode: str, w: int, h: int, block: int = 128, cell: int = 16, seed: int = 0) -> np.ndarray:
+    """G0c point subset: (h, w) bool, True where corners are detected and photometric points used.
+    left / right: column < w / 2 / the rest. blocks_a / blocks_b: the two colours of a block×block checkerboard.
+    random_a / random_b (control): every cell×cell cell is kept with probability 1/2, independently in a and b (seed
+    streams (seed, 0) / (seed, 1)): each subset holds half the image like a region subset, and the two overlap in a
+    quarter of the cells (half of each), as two independent draws would."""
+    uu, vv = np.meshgrid(np.arange(w), np.arange(h))
+    if mode in ('left', 'right'):
+        return (uu < w / 2) == (mode == 'left')
+    if mode in ('blocks_a', 'blocks_b'):
+        return ((uu // block + vv // block) % 2 == 0) == (mode == 'blocks_a')
+    if mode in ('random_a', 'random_b'):
+        keep = np.random.default_rng([seed, int(mode == 'random_b')]).random((-(-h // cell), -(-w // cell))) < 0.5
+        return keep[vv // cell, uu // cell]
+    raise ValueError(f'pt_subset must be one of {PT_SUBSETS[1:]}, got {mode!r}')
 
 
 def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitter: float = 0.03,
@@ -128,6 +164,44 @@ def huber_location(x: np.ndarray, c: float = 1.345, iters: int = 10) -> float:
     return mu
 
 
+def window_parallax(R, t, bear, x, host, o_lm, o_kf, pri) -> float:
+    """S4: median over the prior landmarks `pri` of the largest ray angle (deg) between the host keyframe and any
+    keyframe observing the landmark (poses R, t and log inverse depths x of the window before the BA; scale-free).
+    x is clipped to the ba_guard depth range and NaN angles are ignored, so an extreme depth cannot give NaN."""
+    x = np.clip(x, -np.log(BA_DEPTH_HI), -np.log(BA_DEPTH_LO))
+    pw = np.einsum('nij,nj->ni', R[host], bear * np.exp(-x)[:, None]) + t[host]
+    a, b = pw[o_lm] - t[host[o_lm]], pw[o_lm] - t[o_kf]
+    cos = (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1))
+    ang = np.zeros(len(x))
+    np.fmax.at(ang, o_lm, np.degrees(np.arccos(np.clip(cos, -1.0, 1.0))))
+    return float(np.median(ang[pri])) if len(pri) else float('nan')
+
+
+def prior_obs_weight(theta_deg: float, ref_deg: float, w_min: float, w_max: float) -> float:
+    """S4 observability weight of the window's depth prior: w = clip(ref_deg / θ_w, w_min, w_max), applied as
+    σ_j / sqrt(w). Low parallax (geometry barely fixes depth) → stronger prior; θ_w not finite or 0 → w_max."""
+    if not np.isfinite(theta_deg) or theta_deg <= 0:
+        return float(w_max)
+    return float(np.clip(ref_deg / theta_deg, w_min, w_max))
+
+
+def robust_log_residual(r: np.ndarray, c: float, kind: str) -> tuple[np.ndarray, np.ndarray]:
+    """S4: ψ(r) = c · sign(s) · sqrt(2ρ(s)), s = r / c, and dψ/dr, for the log-depth prior residual r (log units).
+    Σψ² = 2c² Σρ(s), so least squares on ψ minimises the robust cost. huber: ρ = s²/2 (|s| ≤ 1), |s| − 1/2;
+    cauchy: ρ = log(1 + s²) / 2. |s| ≤ 1 (huber) or s → 0 (cauchy): ψ = r, dψ/dr = 1."""
+    s = np.asarray(r, float) / c
+    a = np.abs(s)
+    if kind == 'huber':
+        rho2 = np.where(a <= 1, a * a, 2 * a - 1)
+        d = np.where(a <= 1, 1.0, 1 / np.sqrt(np.maximum(2 * a - 1, 1.0)))
+    elif kind == 'cauchy':
+        rho2 = np.log1p(a * a)
+        d = np.where(a < 1e-6, 1.0, a / ((1 + a * a) * np.sqrt(np.maximum(rho2, 1e-300))))
+    else:
+        raise ValueError(f'kind must be huber|cauchy, got {kind!r}')
+    return c * np.sign(s) * np.sqrt(rho2), d
+
+
 def _skew(v: np.ndarray) -> np.ndarray:
     S = np.zeros(v.shape[:-1] + (3, 3))
     S[..., 0, 1], S[..., 0, 2], S[..., 1, 2] = -v[..., 2], v[..., 1], -v[..., 0]
@@ -150,7 +224,10 @@ class KLTWindowOdometry(KLTPnPOdometry):
                  photo_max_deg: float = 1.0, photo_tol: float = 0.0, photo_max_pts: int = 0,
                  flow_mode: str = 'replace', flow_hybrid_frac: float = 0.7, photo_ref_max: int = 1, wide: int = 0,
                  wide_fov_deg: float = 0.0, out_lag: int = 0, out_lag_mode: str = 'smooth', out_lag_q: float = 0.002,
-                 out_lag_r: float = 0.001, photo_bidir: bool = False, **klt_kw):
+                 out_lag_r: float = 0.001, photo_bidir: bool = False, pt_subset: str = 'off', pt_block: int = 128,
+                 pt_cell: int = 16, pt_seed: int = 0, photo_backend: str = 'numpy', prior_obs: bool = False,
+                 prior_obs_ref: float = 1.0, prior_obs_min: float = 0.5, prior_obs_max: float = 2.0,
+                 prior_loss: str = 'off', prior_loss_c: float = 0.05, photo_feat: str = '', **klt_kw):
         super().__init__(mode='sensor_depth', tri_deg=tri_deg, kf_ratio=kf_ratio, **klt_kw)
         self.prior_name, self.prior_seed, self.prior_bias, self.prior_jitter = prior, prior_seed, prior_bias, prior_jitter
         self.prior_ckpt = prior_ckpt                    # dav2_ft checkpoint; None = the model's default weights
@@ -184,6 +261,26 @@ class KLTWindowOdometry(KLTPnPOdometry):
         if photo_bidir and photo_ref_max != 1:
             raise ValueError('photo_bidir needs photo_ref_max=1 (pair refinement)')
         self.photo_bidir = bool(photo_bidir)
+        if photo_backend not in ('numpy', 'torch', 'torch32'):
+            raise ValueError(f'photo_backend must be numpy|torch|torch32, got {photo_backend!r}')
+        self.photo_backend = photo_backend
+        if photo == 'off' and (photo_feat or photo_backend != 'numpy'):
+            raise ValueError('photo_feat / photo_backend need photo=all|fallback (they have no effect with photo=off)')
+        if photo_feat and photo_backend == 'numpy':
+            raise ValueError('photo_feat needs photo_backend=torch|torch32')
+        if photo_feat and photo_levels != 1:
+            raise ValueError(f'photo_feat needs photo_levels=1 (PhotoNet is trained on level 1), got {photo_levels}')
+        self.photo_feat, self._photo_net = photo_feat, None
+        if prior_loss not in ('off', 'huber', 'cauchy'):
+            raise ValueError(f'prior_loss must be off|huber|cauchy, got {prior_loss!r}')
+        self.prior_obs, self.prior_obs_ref = bool(prior_obs), prior_obs_ref
+        self.prior_obs_min, self.prior_obs_max = prior_obs_min, prior_obs_max
+        self.prior_loss, self.prior_loss_c = prior_loss, prior_loss_c
+        if pt_subset not in PT_SUBSETS:
+            raise ValueError(f'pt_subset must be one of {PT_SUBSETS}, got {pt_subset!r}')
+        self.pt_subset, self.pt_block, self.pt_cell, self.pt_seed = pt_subset, int(pt_block), int(pt_cell), int(pt_seed)
+        if pt_subset != 'off':                          # half the image: same corner density as the full tracker
+            self.n_features = max(1, round(self.n_features / 2))
         self.flow = self.photo_norm = None
         self.kf_refine = kf_refine                     # max px change of the host->keyframe re-track (0 = off)
         self.prior = None
@@ -204,6 +301,13 @@ class KLTWindowOdometry(KLTPnPOdometry):
             uu, vv = np.meshgrid(np.arange(w), np.arange(h))
             r = np.hypot((uu - self.K[0, 2]) / self.K[0, 0], (vv - self.K[1, 2]) / self.K[1, 1])
             self.detect_mask = np.where(np.degrees(np.arctan(r)) <= self.wide_fov_deg, 255, 0).astype(np.uint8)
+        self.track_mask, self._pt_mask = self.detect_mask, None   # track_mask: tracks that leave it are dropped
+        if self.pt_subset != 'off':                     # G0c point subset
+            self._pt_mask = subset_mask(self.pt_subset, *self.size, self.pt_block, self.pt_cell, self.pt_seed)
+            base = self.detect_mask if self.detect_mask is not None else np.uint8(255)
+            self.detect_mask = np.where(self._pt_mask, base, 0).astype(np.uint8)
+            if not self.pt_subset.startswith('random'):
+                self.track_mask = self.detect_mask
         n = self.cv_threads if self.cv_threads is not None else os.environ.get('OMP_NUM_THREADS')
         if n:
             cv2.setNumThreads(int(n))
@@ -214,6 +318,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
         self.fail_run = 0                               # consecutive untracked frames, for the reported state only
         self.last_prior = None                         # (frame index, depth map) of the last prior evaluation
         self.head_inputs = None
+        self.prior_obs_log = []                         # S4: (newest keyframe, θ_w deg, weight) per window BA
         if self.flow_cache and self.flow is None:
             from dvslam.odometry.klt_flow import FlowCache, OnlineRAFT
             if self.flow_cache in ('raft_small', 'raft_large'):    # computed on demand on the GPU (EXP-008)
@@ -466,6 +571,11 @@ class KLTWindowOdometry(KLTPnPOdometry):
         # host share a total weight of 1 / prior_sigma², i.e. σ_j = prior_sigma · sqrt(n_host)
         n_host = np.bincount(host[pri], minlength=n_kf)
         sig = self.prior_sigma * (np.sqrt(n_host[host[pri]]) if self.prior_per_kf else np.ones(len(pri)))
+        if self.prior_obs:                              # S4: one observability weight per window, σ_j / sqrt(w)
+            theta = window_parallax(R0, t0w, bear, self.lm_x[lms], host, o_lm, o_kf, pri)
+            w = prior_obs_weight(theta, self.prior_obs_ref, self.prior_obs_min, self.prior_obs_max)
+            self.prior_obs_log.append((self.kfs[-1], theta, w))
+            sig = sig / np.sqrt(w)
         oh = host[o_lm]
         n_p = 6 * (n_kf - 1)
         g_ba = self._g_ba()
@@ -492,11 +602,13 @@ class KLTWindowOdometry(KLTPnPOdometry):
             z = pk[:, 2]
             uv = np.c_[fx * pk[:, 0] / z + cx, fy * pk[:, 1] / z + cy]
             r_px = ((uv - o_px) / self.px_sigma).ravel()
-            r_pr = (lp[pri] + g_ba + x[pri]) / sig
-            return np.r_[r_px, r_pr]
+            r_pr = lp[pri] + g_ba + x[pri]
+            if self.prior_loss != 'off':
+                r_pr = robust_log_residual(r_pr, self.prior_loss_c, self.prior_loss)[0]
+            return np.r_[r_px, r_pr / sig]
 
         def jac(p):
-            R, _, ph, pk = geom(p)
+            R, x, ph, pk = geom(p)
             X, Y, z = pk[:, 0], pk[:, 1], pk[:, 2]
             Jp = np.zeros((n_obs, 2, 3))
             Jp[:, 0, 0], Jp[:, 0, 2] = fx / z, -fx * X / z ** 2
@@ -518,7 +630,10 @@ class KLTWindowOdometry(KLTPnPOdometry):
                 for a in range(2):
                     rows.append(np.repeat(r2[m] + a, nc)), cols.append(col[m].ravel()), vals.append(val[m, a].ravel())
             rows.append(2 * n_obs + np.arange(len(pri))), cols.append(n_p + pri)
-            vals.append(1.0 / sig)
+            if self.prior_loss != 'off':
+                vals.append(robust_log_residual(lp[pri] + g_ba + x[pri], self.prior_loss_c, self.prior_loss)[1] / sig)
+            else:
+                vals.append(1.0 / sig)
             return csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
                               shape=(2 * n_obs + len(pri), n_p + n_lm))
 
@@ -578,14 +693,14 @@ class KLTWindowOdometry(KLTPnPOdometry):
 
     # ------------------------------------------------------------------ EXP-007 front-end options
     def _track(self, gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """_track_inner, then (wide_fov_deg) drop the tracks that left the detection mask."""
+        """_track_inner, then (wide_fov_deg, pt_subset regions) drop the tracks that left track_mask."""
         self._flow_used = False
-        if self.detect_mask is not None and len(self.px):   # wide_fov_deg: drop tracks that leave the cap
+        if self.track_mask is not None and len(self.px):    # wide_fov_deg / pt_subset: drop tracks that leave it
             p0, p1 = self._track_inner(gray)
             w, h = self.size
             ui = np.clip(np.round(p1[:, 0]).astype(int), 0, w - 1)
             vi = np.clip(np.round(p1[:, 1]).astype(int), 0, h - 1)
-            inside = self.detect_mask[vi, ui] > 0
+            inside = self.track_mask[vi, ui] > 0
             self._keep(inside)
             return p0[inside], p1[inside]
         return self._track_inner(gray)
@@ -621,7 +736,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
 
     def _photo_refine(self, frame: Frame, gray: np.ndarray, inc: np.ndarray, head_prev) -> np.ndarray | None:
         """Photometric LM refinement of the BA-unit increment (klt_photo.py); None when skipped or not accepted."""
-        from dvslam.odometry.klt_photo import prepare, refine_prepared
+        from dvslam.odometry.klt_photo import prepare
         pf, nm = self._prev_frame, self.photo_norm
         if self._photo_prep is None or self._photo_prep[0] != pf.index:   # frame t-1 normally prepared at step t-1
             I0, M0 = nm(pf.image_path, self.prev_gray, 1.0)
@@ -637,7 +752,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
                 return None
         A0 = np.linalg.inv(inc) @ ref['A']              # X_t = inv(ΔT) X_{t-1} = inv(ΔT) A_{t-1} X_ref
         ratio = ref['e'] / nm.exposure(frame.image_path)
-        R, t, info = refine_prepared(ref['P'], P1, ratio, ref['pts'], ref['z'], self.K, A0[:3, :3], A0[:3, 3],
+        R, t, info = self._photo_lm(ref['P'], P1, ratio, ref['pts'], ref['z'], self.K, A0[:3, :3], A0[:3, 3],
                                      self.photo_levels, self.photo_iters, self.photo_huber, self.photo_tol)
         A = np.eye(4)
         A[:3, :3], A[:3, 3] = R, t
@@ -670,19 +785,36 @@ class KLTWindowOdometry(KLTPnPOdometry):
         return not (info['n'] < 50 or not info['cost'] < info['cost0'] or dt > self.photo_max_m
                     or dr > self.photo_max_deg)
 
+    def _photo_lm(self, *args):
+        """klt_photo.refine_prepared, or (photo_backend=torch|torch32, S1) its PyTorch port with the same arguments;
+        photo_feat (S2): the port with the learned features / weights of photo_learned.LearnedPhoto."""
+        if self.photo_backend == 'numpy':
+            from dvslam.odometry.klt_photo import refine_prepared
+            return refine_prepared(*args)
+        import torch
+
+        dtype = torch.float64 if self.photo_backend == 'torch' else torch.float32
+        if self.photo_feat:
+            if self._photo_net is None:
+                from dvslam.odometry.photo_learned import LearnedPhoto
+                self._photo_net = LearnedPhoto(self.photo_feat)
+            return self._photo_net(*args, dtype=dtype)
+        from dvslam.odometry.klt_photo_torch import refine_prepared_torch
+        return refine_prepared_torch(*args, dtype=dtype)
+
     def _photo_back(self, frame: Frame, P0: list, P1: list, M1: np.ndarray, inc: np.ndarray):
         """EXP-018 photo_bidir: the same LM from frame t to frame t-1 (points and SSL depth of frame t, same map-unit
         ratio _photo_s); X_{t-1} = ΔT X_t, so the result is the increment itself. (ΔT, info), info None if skipped."""
-        from dvslam.odometry.klt_photo import refine_prepared, select_points_g
-        pts = select_points_g(P1[0][..., 1], P1[0][..., 2], M1, self.photo_cell, self.photo_grad,
-                              self.photo_max_pts)[0]
+        from dvslam.odometry.klt_photo import select_points_g
+        pts = self._pt_select(select_points_g(P1[0][..., 1], P1[0][..., 2], M1, self.photo_cell, self.photo_grad,
+                                              self.photo_max_pts)[0])
         z = sample_depth(self._prior_map(frame), pts, self.depth_min, self.depth_max, self.depth_edge) * self._photo_s
         v = np.isfinite(z)
         if v.sum() < 50:
             return inc, None
         nm = self.photo_norm
         ratio = nm.exposure(frame.image_path) / nm.exposure(self._prev_frame.image_path)
-        R, t, info = refine_prepared(P1, P0, ratio, pts[v], z[v], self.K, inc[:3, :3], inc[:3, 3], self.photo_levels,
+        R, t, info = self._photo_lm(P1, P0, ratio, pts[v], z[v], self.K, inc[:3, :3], inc[:3, 3], self.photo_levels,
                                      self.photo_iters, self.photo_huber, self.photo_tol)
         out = np.eye(4)
         out[:3, :3], out[:3, 3] = R, t
@@ -699,14 +831,21 @@ class KLTWindowOdometry(KLTPnPOdometry):
                 self._photo_s = float(np.median(head_prev[1][ok] / dp[ok]))
         if self._photo_s is None:
             return None
-        pts = select_points_g(P0[0][..., 1], P0[0][..., 2], M0, self.photo_cell, self.photo_grad,
-                              self.photo_max_pts)[0]
+        pts = self._pt_select(select_points_g(P0[0][..., 1], P0[0][..., 2], M0, self.photo_cell, self.photo_grad,
+                                              self.photo_max_pts)[0])
         z = sample_depth(d0, pts, self.depth_min, self.depth_max, self.depth_edge) * self._photo_s
         v = np.isfinite(z)
         if v.sum() < 50:
             return None
         return {'index': pf.index, 'last': pf.index, 'P': P0, 'pts': pts[v], 'z': z[v], 'A': np.eye(4),
                 'e': self.photo_norm.exposure(pf.image_path)}
+
+    def _pt_select(self, pts: np.ndarray) -> np.ndarray:
+        """pt_subset: the photometric points (integer pixel centres) inside the subset mask; all of them when off.
+        photo_max_pts (if set) caps the points before this selection."""
+        if self._pt_mask is None:
+            return pts
+        return pts[self._pt_mask[pts[:, 1].astype(int), pts[:, 0].astype(int)]]
 
     # ------------------------------------------------------------------ main step
     def _plausible(self, inc: np.ndarray, g: float) -> bool:

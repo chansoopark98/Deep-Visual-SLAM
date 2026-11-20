@@ -424,3 +424,181 @@ def test_photo_bidir_combines_both_directions(scene, monkeypatch):
     assert err(bid).max() < 0.5 and err(bid).mean() < err(fwd).mean(), (err(bid).mean(), err(fwd).mean())
     with pytest.raises(ValueError, match='photo_bidir'):
         KLTWindowOdometry(prior='oracle', photo_bidir=True, photo_ref_max=2)
+
+
+def test_subset_mask_regions_and_random_control():
+    """G0c subset_mask: left / right and blocks_a / blocks_b are complementary halves (blocks: block×block
+    checkerboard); random_a / random_b keep half of the cells each, independently (overlap ≈ a quarter of the image),
+    constant inside a cell, reproducible per seed; unknown modes are a ValueError (also in the tracker)."""
+    m = {k: kw.subset_mask(k, 512, 512) for k in kw.PT_SUBSETS[1:]}
+    for a, b in (('left', 'right'), ('blocks_a', 'blocks_b')):
+        assert m[a].mean() == 0.5 and not (m[a] & m[b]).any() and (m[a] | m[b]).all()
+    assert m['left'][:, :256].all() and not m['left'][:, 256:].any()
+    assert m['blocks_a'][0, 0] and m['blocks_a'][127, 127] and not m['blocks_a'][0, 128] and m['blocks_a'][128, 128]
+    ra, rb = m['random_a'], m['random_b']
+    assert 0.45 < ra.mean() < 0.55 and 0.45 < rb.mean() < 0.55 and 0.2 < (ra & rb).mean() < 0.3
+    assert (ra.reshape(32, 16, 32, 16) == ra[::16, ::16][:, None, :, None]).all()          # 16 px cells
+    assert (kw.subset_mask('random_a', 512, 512) == ra).all()
+    assert not (kw.subset_mask('random_a', 512, 512, seed=1) == ra).all()
+    assert kw.subset_mask('random_b', 100, 70, cell=16).shape == (70, 100)
+    with pytest.raises(ValueError, match='pt_subset'):
+        kw.subset_mask('odd', 64, 64)
+    with pytest.raises(ValueError, match='pt_subset'):
+        KLTWindowOdometry(prior='oracle', pt_subset='even')
+
+
+def test_pt_subset_restricts_tracks_and_photometric_points(scene, monkeypatch):
+    """pt_subset: off leaves the masks untouched; left keeps every track and every photometric point (both
+    directions) in the left half and halves n_features; random_a detects only in its cells but keeps a track that
+    moves out of them."""
+    import dvslam.odometry.klt_photo as kp
+    frames, _ = scene
+    seen = []
+    real = kp.refine_prepared
+    monkeypatch.setattr(kp, 'refine_prepared', lambda P0, P1, ratio, pts, *a: seen.append(pts) or
+                        real(P0, P1, ratio, pts, *a))
+
+    def run(**o):
+        odo = KLTWindowOdometry(min_distance=10, lk_win=15, kf_max=5, window=6, g_min_m=2, n_features=150,
+                                prior='oracle', photo='all', photo_cell=2, photo_grad=0.002, photo_bidir=True, **o)
+        odo.photo_norm = _UnitNorm()
+        odo.reset(PinholeCamera(K, W, H))
+        px, anchors = [], []
+        for f in frames:
+            odo.step(f)
+            px.append(odo.px.copy())
+            anchors.append(odo.anchor_px.copy())
+        return odo, np.concatenate(px), np.concatenate(anchors)
+
+    odo, _, _ = run()
+    assert odo._pt_mask is None and odo.track_mask is None and odo.detect_mask is None and odo.n_features == 150
+    seen.clear()
+    odo, px, _ = run(pt_subset='left')
+    assert odo.n_features == 75 and len(px) > 0 and px[:, 0].max() < W / 2 + 1   # cornerSubPix may move 1 px
+    assert len(seen) >= 20 and max(p[:, 0].max() for p in seen) < W / 2
+    assert (np.array(odo.diag['photo']) == 1).sum() >= 10
+    odo, px, anchors = run(pt_subset='random_a', pt_cell=32)
+    mask = odo._pt_mask
+    inside = lambda p: mask[np.round(p[:, 1]).astype(int).clip(0, H - 1), np.round(p[:, 0]).astype(int).clip(0, W - 1)]
+    assert odo.track_mask is None and inside(anchors).all() and not inside(px).all()
+
+
+def test_prior_obs_weight_bounds_and_direction():
+    """S4: w = clip(ref / θ, w_min, w_max); low parallax → stronger prior, degenerate θ → w_max."""
+    f = kw.prior_obs_weight
+    assert f(1.0, 1.0, 0.5, 2.0) == 1.0
+    assert f(0.8, 1.0, 0.5, 2.0) == pytest.approx(1.25) and f(1.6, 1.0, 0.5, 2.0) == pytest.approx(0.625)
+    assert f(0.1, 1.0, 0.5, 2.0) == 2.0 and f(50.0, 1.0, 0.5, 2.0) == 0.5          # bounded
+    assert f(0.0, 1.0, 0.5, 2.0) == 2.0 and f(float('nan'), 1.0, 0.5, 2.0) == 2.0
+    th = np.geomspace(0.01, 100, 50)
+    w = np.array([f(t, 1.3, 0.25, 4.0) for t in th])
+    assert (np.diff(w) <= 0).all() and w.min() == 0.25 and w.max() == 4.0
+
+
+def test_window_parallax_two_keyframes():
+    """S4: a landmark 2 m in front of the host seen from a keyframe 0.2 m to the side has ray angle atan(0.1);
+    a landmark seen only by its host has 0; the median runs over the prior landmarks only."""
+    R = np.stack([np.eye(3), np.eye(3)])
+    t = np.array([[0.0, 0, 0], [0.2, 0, 0]])
+    bear = np.array([[0.0, 0, 1], [0.0, 0, 1], [0.0, 0, 1]])
+    x = -np.log(np.array([2.0, 2.0, 4.0]))
+    host = np.array([0, 0, 0])
+    o_lm, o_kf = np.array([0, 0, 1, 2, 2]), np.array([0, 1, 0, 0, 1])
+    a1, a2 = np.degrees(np.arctan(0.1)), np.degrees(np.arctan(0.05))
+    assert kw.window_parallax(R, t, bear, x, host, o_lm, o_kf, np.array([0])) == pytest.approx(a1)
+    assert kw.window_parallax(R, t, bear, x, host, o_lm, o_kf, np.array([0, 1, 2])) == pytest.approx(a2)
+    assert kw.window_parallax(R, t * 7.0, bear, x - np.log(7.0), host, o_lm, o_kf, np.array([0, 2])) == \
+        pytest.approx((a1 + a2) / 2)                                                   # scale-free
+    assert np.isnan(kw.window_parallax(R, t, bear, x, host, o_lm, o_kf, np.array([], int)))
+
+
+def test_window_parallax_extreme_depth_is_finite():
+    """S4: log inverse depths far outside the ba_guard range (exp overflow, zero depth) are clipped to it, so the
+    angle stays finite; in-range depths are unchanged."""
+    R = np.stack([np.eye(3), np.eye(3)])
+    t = np.array([[0.0, 0, 0], [0.2, 0, 0]])
+    bear = np.array([[0.0, 0, 1], [0.0, 0, 1]])
+    host, o_lm, o_kf = np.array([0, 0]), np.array([0, 0, 1, 1]), np.array([0, 1, 0, 1])
+    with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
+        theta = kw.window_parallax(R, t, bear, np.array([-1000.0, 800.0]), host, o_lm, o_kf, np.array([0, 1]))
+    far, near = np.degrees(np.arctan(0.2 / kw.BA_DEPTH_HI)), np.degrees(np.arctan(0.2 / kw.BA_DEPTH_LO))
+    assert np.isfinite(theta) and theta == pytest.approx((far + near) / 2)
+    x = -np.log(np.array([2.0, 4.0]))
+    assert kw.window_parallax(R, t, bear, x, host, o_lm, o_kf, np.array([0])) == \
+        pytest.approx(np.degrees(np.arctan(0.1)))
+
+
+def test_photo_feat_and_backend_option_checks():
+    """photo_feat / photo_backend need photo on; photo_feat needs photo_levels=1 (the net's training level)."""
+    for o in ({'photo_backend': 'torch'}, {'photo_feat': 'x.pt', 'photo_backend': 'torch', 'photo_levels': 1}):
+        with pytest.raises(ValueError, match='photo=all'):
+            KLTWindowOdometry(prior='oracle', **o)
+    with pytest.raises(ValueError, match='photo_levels=1'):
+        KLTWindowOdometry(prior='oracle', photo='all', photo_feat='x.pt', photo_backend='torch', photo_levels=2)
+    odo = KLTWindowOdometry(prior='oracle', photo='all', photo_feat='x.pt', photo_backend='torch', photo_levels=1)
+    assert odo.photo_feat == 'x.pt' and odo._photo_net is None          # the checkpoint is loaded lazily
+
+
+@pytest.mark.parametrize('kind', ['huber', 'cauchy'])
+def test_robust_log_residual_cost_and_derivative(kind):
+    """S4: Σψ² = 2c²Σρ(r / c), ψ keeps the sign, ψ ≈ r near 0, dψ/dr matches central differences."""
+    c = 0.05
+    r = np.r_[-0.6, -0.08, -0.05, -0.02, -1e-9, 0.0, 1e-9, 0.03, 0.049, 0.051, 0.2, 1.5]
+    psi, d = kw.robust_log_residual(r, c, kind)
+    s = r / c
+    rho = np.where(np.abs(s) <= 1, s * s / 2, np.abs(s) - 0.5) if kind == 'huber' else np.log1p(s * s) / 2
+    np.testing.assert_allclose(psi ** 2, 2 * c * c * rho, rtol=1e-12, atol=1e-30)
+    assert (np.sign(psi) == np.sign(r)).all() and (np.abs(psi) <= np.abs(r) + 1e-15).all()
+    np.testing.assert_allclose(psi[np.abs(r) < 1e-6], r[np.abs(r) < 1e-6], rtol=1e-9, atol=1e-20)
+    if kind == 'huber':
+        np.testing.assert_allclose(psi[np.abs(s) <= 1], r[np.abs(s) <= 1], rtol=1e-12)
+    eps = 1e-7
+    dn = (kw.robust_log_residual(r + eps, c, kind)[0] - kw.robust_log_residual(r - eps, c, kind)[0]) / (2 * eps)
+    smooth = np.abs(np.abs(s) - 1) > 1e-3                 # huber's ψ' jumps at |s| = 1 only in its 2nd derivative
+    np.testing.assert_allclose(d[smooth], dn[smooth], rtol=1e-5, atol=1e-7)
+    with pytest.raises(ValueError, match='kind'):
+        kw.robust_log_residual(r, c, 'tukey')
+
+
+def test_s4_options_default_identity_jacobian_and_log(scene, monkeypatch):
+    """S4: prior_obs with w fixed to 1 reproduces the default run bit for bit (and logs θ_w per BA); the weight and
+    ψ change the run; the BA Jacobian with both options matches finite differences; bad prior_loss is an error."""
+    frames, _ = scene
+
+    def incs(**o):
+        est, odo = _run(frames, prior='perturbed', prior_jitter=0.05, prior_per_kf=False, **o)
+        return np.stack([e.rel_increment for e in est]), odo
+
+    base, odo0 = incs()
+    assert odo0.prior_obs_log == []
+    same, odo1 = incs(prior_obs=True, prior_obs_min=1.0, prior_obs_max=1.0)
+    np.testing.assert_array_equal(same, base)
+    log = np.array(odo1.prior_obs_log)
+    assert len(log) >= 5 and (log[:, 2] == 1.0).all() and (log[:, 1] > 0).all()
+    ref = float(np.median(log[:, 1]))
+    obs, odo2 = incs(prior_obs=True, prior_obs_ref=ref, prior_obs_min=0.25, prior_obs_max=4.0)
+    w = np.array(odo2.prior_obs_log)[:, 2]
+    assert ((w >= 0.25) & (w <= 4.0)).all() and w.std() > 0 and not np.array_equal(obs, base)
+    cau, _ = incs(prior_loss='cauchy', prior_loss_c=0.02)
+    assert not np.array_equal(cau, base) and np.abs(cau[:, :3, 3] - base[:, :3, 3]).max() < 5e-3
+    hub, _ = incs(prior_loss='huber', prior_loss_c=1e3)       # ψ = c·(r / c) inside the kernel: rounding only,
+    np.testing.assert_allclose(hub, base, atol=1e-4)          # grown by later accept / keyframe decisions
+    with pytest.raises(ValueError, match='prior_loss'):
+        KLTWindowOdometry(prior='oracle', prior_loss='l1')
+
+    calls = []
+
+    def spy(fun, x0, jac, **kw_):
+        calls.append((fun, jac, x0.copy()))
+        return _real_least_squares(fun, x0, jac=jac, **kw_)
+
+    monkeypatch.setattr(kw, 'least_squares', spy)
+    _run(frames[:16], prior='perturbed', prior_jitter=0.05, prior_obs=True, prior_obs_ref=ref, prior_loss='cauchy',
+         prior_loss_c=0.02)
+    fun, jac, x0 = calls[-1]
+    x = x0 + np.random.default_rng(0).normal(0, 1e-3, len(x0))
+    J = jac(x).toarray()
+    eps = 1e-7
+    Jn = np.stack([(fun(x + eps * e) - fun(x - eps * e)) / (2 * eps) for e in np.eye(len(x))], 1)
+    np.testing.assert_allclose(J, Jn, atol=2e-2 * np.abs(Jn).max(), rtol=0)
+    np.testing.assert_allclose(J[:, -1], Jn[:, -1], rtol=1e-5, atol=1e-6)

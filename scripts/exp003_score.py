@@ -6,6 +6,12 @@ A run dir holds room<N>.inc.npz (searched recursively, one file per room). Repor
   official = room1-4 + room6 pooled by pairs, room5, room6, per room; mean item 03 (%), median item 03, median
   |‖t_pred‖ − ‖t_gt‖| (mm), tracked-only item 03 and share of motion_model pairs, item 03 / median |norm error| by
   GT-step bin (< 5, 5-20, 20-40, > 40 mm). Only pairs with measured GT at both ends are scored (as eval_pairs.py).
+  Added (plan v3.4 §14.4): mean |step-length error| (mm/frame) = mean |‖t_pred‖ − ‖t_gt‖| per pair in mm (JSON key
+  mean_err_mm). It is a lower bound of the mean translation-vector error |t_pred − t_gt| (direction errors are not
+  counted), so it is NOT MAC-VO's m/frame (a translation error) and must not be compared with it directly. Also a
+  'copy previous step' baseline (research 63 §3.4, EXP-015 T1): the predicted step length of pair t is the run's OWN
+  predicted length of pair t−1 (over the full contiguous increment sequence, before the GT / min-index filter; the
+  first increment keeps its own length). Deployable, no GT: it scores what a constant-speed prior would get.
 """
 import argparse
 import itertools
@@ -56,7 +62,8 @@ def pair_table(inc_path: Path, time_offset_s: float | None = None) -> dict:
     p = np.linalg.norm(inc['rel_increment'][:, :3, 3], axis=1)
     pct = np.where(g > 1e-6, np.abs(p - g) / np.maximum(g, 1e-12) * 100, 0.0)
     tracked = inc['source'] == 'tracked'
-    return {k: v[keep] for k, v in (('gt', g), ('pred', p), ('pct', pct), ('tracked', tracked))}
+    prev = np.concatenate([p[:1], p[:-1]])          # copy-previous-step baseline (own prediction of pair t-1)
+    return {k: v[keep] for k, v in (('gt', g), ('pred', p), ('pct', pct), ('tracked', tracked), ('prev_pred', prev))}
 
 
 def summarize(tabs: list[dict]) -> dict:
@@ -65,7 +72,10 @@ def summarize(tabs: list[dict]) -> dict:
     out = {'pairs': len(t['pct']), 'item03': float(t['pct'].mean()), 'median_pct': float(np.median(t['pct'])),
            'median_err_mm': float(np.median(err_mm)),
            'tracked_item03': float(t['pct'][t['tracked']].mean()) if t['tracked'].any() else float('nan'),
-           'fallback_share': float(1 - t['tracked'].mean())}
+           'fallback_share': float(1 - t['tracked'].mean()), 'mean_err_mm': float(err_mm.mean())}
+    prev_err = np.abs(t['prev_pred'] - t['gt'])
+    out['copy_prev_item03'] = float(np.where(t['gt'] > 1e-6, prev_err / np.maximum(t['gt'], 1e-12) * 100, 0.0).mean())
+    out['copy_prev_mean_err_mm'] = float(prev_err.mean() * 1e3)
     gmm = t['gt'] * 1e3
     for lo, hi in itertools.pairwise(BINS_MM):
         m = (gmm >= lo) & (gmm < hi)
@@ -107,6 +117,15 @@ def main():
         for k in ['official', 'room5', 'room6'] + [s for s in sorted(res) if s not in ('official', 'room5', 'room6')]:
             if k in res:
                 print(fmt(k, res[k]))
+        print('mm/fr = mean |step-length error| (mm/frame) = mean |‖t_pred‖ − ‖t_gt‖| per pair, a lower bound of the '
+              'translation-vector error (not MAC-VO\'s m/frame); copy-prev = own predicted length of pair t−1 '
+              '(deployable baseline, no GT)')
+        print(f'{"set":<9} {"pairs":>6} {"03 %":>7} {"mm/fr":>6} | {"copy-prev 03 %":>14} {"mm/fr":>6}')
+        for k in ['official', 'room5', 'room6'] + [s for s in sorted(res) if s not in ('official', 'room5', 'room6')]:
+            if k in res:
+                s = res[k]
+                print(f'{k:<9} {s["pairs"]:>6} {s["item03"]:7.3f} {s["mean_err_mm"]:6.3f} | '
+                      f'{s["copy_prev_item03"]:14.3f} {s["copy_prev_mean_err_mm"]:6.3f}')
     if args.json:
         args.json.write_text(json.dumps(allres, indent=1))
 
