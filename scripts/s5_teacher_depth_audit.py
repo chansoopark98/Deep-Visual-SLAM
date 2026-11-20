@@ -227,18 +227,19 @@ def _ref(hints: np.ndarray, win: np.ndarray, off: int) -> np.ndarray:
     return np.stack([np.asarray(hints[off + i][SUB], np.float32) for i in win])
 
 
-def _ssl(name: str, scene: str, paths: list[Path]) -> np.ndarray:
-    d = Path(SSL[name])
+def _cache(d, scene: str, paths: list[Path]) -> np.ndarray:
+    """A tracker depth cache's maps of `scene` (dir d), checked to be indexed by the tracker sequence `paths`."""
+    d = Path(d)
     listed = (d / f'{scene}.paths.txt').read_text().split()
     if listed != [str(p) for p in paths]:
-        raise ValueError(f'{name} {scene}: cache paths differ from the tracker sequence')
+        raise ValueError(f'{d} {scene}: cache paths differ from the tracker sequence')
     return np.load(d / f'{scene}.npy', mmap_mode='r')
 
 
 def offset_check(scene: str, paths: list[Path], off: int, frames: int = 20) -> dict:
     """Frame-alignment check of reference and SSL depth: frame-aligned log-RMSE of ssl_core against hints shifted by
     -1 / 0 / +1 frame on `frames` frames spread over the sequence (the true offset must be the clear minimum)."""
-    hints, core = _hints(scene), _ssl('ssl_core', scene, paths)
+    hints, core = _hints(scene), _cache(SSL['ssl_core'], scene, paths)
     idx = np.linspace(2, len(paths) - 3, frames).astype(int)
     out = {}
     for sh in (-1, 0, 1):
@@ -259,7 +260,7 @@ def score(args) -> int:
         print(f'{scene}: hint offset {off}, frame-shift check (ssl_core frame-aligned log-RMSE, shift -1/0/+1): '
               + ' / '.join(f'{v:.4f}' for v in checks[scene]['shift_logrmse'].values()), flush=True)
         hints = _hints(scene)
-        ssl = {k: _ssl(k, scene, paths) for k in SSL}
+        ssl = {k: _cache(d, scene, paths) for k, d in SSL.items()}
         for gap in ((1, 5) if scene in VAL_SCENES else (1,)):
             win = scene_windows(scene, len(paths), gap)
             refs = [_ref(hints, w, off) for w in win]

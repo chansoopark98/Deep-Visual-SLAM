@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import torch
 from scipy.spatial.transform import Rotation
+from test_klt_photo_torch import _plane
 from test_klt_window import H, K, W, _UnitNorm, scene  # noqa: F401  (scene is a fixture)
 
 from dvslam.odometry import klt_photo as kp
@@ -22,28 +23,6 @@ import train_photo_s2 as tr
 DEV = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
-def _plane(n=128, f=95.0):
-    """Textured plane Z_w = 2 m seen from the origin (frame 0) and from X1 = R1 X0 + t1 (frame 1):
-    (I0, I1, depth 0, depth 1, K, R1, t1)."""
-    c = (n - 1) / 2
-    Kp = np.array([[f, 0, c], [0, f, c], [0, 0, 1]])
-    uu, vv = np.meshgrid(np.arange(n), np.arange(n))
-    ray = np.stack([(uu - c) / f, (vv - c) / f, np.ones((n, n))], -1)
-
-    def render(R, t):
-        rw, cw = ray @ R, -R.T @ t
-        d = (2.0 - cw[2]) / rw[..., 2]
-        P = cw + d[..., None] * rw
-        img = 0.5 + 0.2 * np.sin(9 * P[..., 0]) * np.cos(7 * P[..., 1]) + 0.1 * np.sin(23 * P[..., 0] + 11 * P[..., 1])
-        return img.astype(np.float32), d
-
-    R1 = Rotation.from_euler('xyz', [0.3, -0.4, 0.2], degrees=True).as_matrix()
-    t1 = np.array([0.02, -0.01, 0.03])
-    I0, D0 = render(np.eye(3), np.zeros(3))
-    I1, D1 = render(R1, t1)
-    return I0, I1, D0, D1, Kp, R1, t1
-
-
 def _ckpt(tmp_path, mode, width=4):
     torch.manual_seed(0)
     p = tmp_path / f'{mode}.pt'
@@ -55,7 +34,7 @@ def _ckpt(tmp_path, mode, width=4):
 def test_untrained_net_reproduces_s1_refinement(tmp_path, mode):
     """Zero-initialised heads: weights mode is bit-identical to refine_prepared_torch; feature modes match it to the
     prepare_torch vs cv2 difference (< 1e-6 m)."""
-    I0, I1, D0, _, Kp, _, t1 = _plane()
+    I0, I1, D0, _, Kp, _, t1 = _plane(128, 95.0)
     M = np.ones(I0.shape, bool)
     M[:, -8:] = False
     pts = kp.select_points(I0, np.ones_like(M), 2, 0.002)
@@ -76,7 +55,7 @@ def test_untrained_net_reproduces_s1_refinement(tmp_path, mode):
 def test_losses_on_synthetic_data():
     """reproj_loss is 0 at the true pose and grows with a pose error (Cauchy-bounded); pose_mid is the tracker's
     midpoint; point_weights have mean 1 (exactly 1 for a zero map); photo_cost is lower at the true pose."""
-    I0, I1, D0, _, Kp, R1, t1 = _plane()
+    I0, I1, D0, _, Kp, R1, t1 = _plane(128, 95.0)
     rng = np.random.default_rng(0)
     p0 = rng.uniform(10, 118, (60, 2))
     z0 = 2.0 / ((np.c_[p0, np.ones(60)] @ np.linalg.inv(Kp).T)[:, 2])
@@ -131,8 +110,7 @@ def _sample(n=96):
     X = (np.c_[pa, np.ones(40)] @ np.linalg.inv(Kp).T * za[:, None]) @ R1.T + t1
     pb = X[:, :2] / X[:, 2:] * Kp[[0, 1], [0, 1]] + Kp[:2, 2]
     pair = {'index': 1, 's': 1.0, 'g': 0.0, 'inc': inc0, 'out': inc, 'T_f': inc, 'T_b': inc, 'ok_f': True, 'ok_b': True,
-            'ratio_f': 1.0,
-            'ratio_b': 1.0, 'vf': np.ones(len(zf), bool), 'vb': np.ones(len(zb), bool), 'zf': zf, 'zb': zb}
+            'ratio_f': 1.0, 'ratio_b': 1.0, 'vf': np.ones(len(zf), bool), 'vb': np.ones(len(zb), bool), 'zf': zf, 'zb': zb}
     return {'room': 'synthetic', 'frames': [0, 1], 'P': P, 'pts': pts, 'pairs': [pair],
             'corr': [(1, 0, pa, za, pb)], 'K': Kp}
 

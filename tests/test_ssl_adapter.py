@@ -1,5 +1,8 @@
 """dvslam.ssl.adapter (plan v3.4 S3): LoRA adapter on a frozen SSL depth net, frozen scale anchor, fixed pseudo-label
 poses and the calibration loss (CPU, 64x64 synthetic plane scene from test_ssl_geometry, no downloads)."""
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -247,3 +250,28 @@ def test_saved_adapter_loads_with_weights_only(tmp_path):
     torch.save(obj, tmp_path / 'adapter.pt')
     a = torch.load(tmp_path / 'adapter.pt', map_location='cpu', weights_only=True)
     assert set(a['adapter']) == set(obj['adapter']) and a['args'] == obj['args']
+
+
+def test_calib_labels_need_a_start0_run_of_the_scene(tmp_path):
+    """apps/calib_s3.py load_labels: inc[k] = T_{k-1<-k} (inc[0] = I), a 'motion_model' pair is not tracked; another
+    scene or a run that does not cover pairs 1..n-1 is a ValueError."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'apps'))
+    import calib_s3
+
+    n = 5
+    rel = np.stack([pose([0, 0, 0.01 * k], [0.01 * k, 0, 0]) for k in range(1, n)])
+    src = np.array(['tracked', 'motion_model', 'tracked', 'tracked'])
+
+    def save(name, index, scene='room5'):
+        np.savez(tmp_path / name, index=np.asarray(index), rel_increment=rel[:len(index)], source=src[:len(index)],
+                 meta=np.array(f'{{"scene": "{scene}"}}'))
+        return tmp_path / name
+
+    inc, ok = calib_s3.load_labels(save('a.npz', np.arange(1, n)), 'room5', n)
+    np.testing.assert_array_equal(inc[0], np.eye(4))
+    np.testing.assert_array_equal(inc[1:], rel)
+    assert ok.tolist() == [True, True, False, True, True]
+    with pytest.raises(ValueError, match='scene'):
+        calib_s3.load_labels(save('b.npz', np.arange(1, n), 'room4'), 'room5', n)
+    with pytest.raises(ValueError, match='pairs 1..4'):
+        calib_s3.load_labels(save('c.npz', np.arange(2, n)), 'room5', n)

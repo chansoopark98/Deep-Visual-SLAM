@@ -50,8 +50,8 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def build(ckpt: Path, rank: int, alpha: float, prefixes: tuple[str, ...], device: str) -> tuple[ada.AdaptedDepth,
-                                                                                             np.ndarray]:
+def build(ckpt: Path, rank: int, alpha: float, prefixes: tuple[str, ...],
+          device: str) -> tuple[ada.AdaptedDepth, np.ndarray]:
     pred = Predictor.from_checkpoint(ckpt, device)          # EMA weights, exactly the tracker caches' depth net
     return ada.AdaptedDepth(pred.model, rank, alpha, prefixes).to(device), pred.K
 
@@ -185,12 +185,7 @@ def score(args) -> int:
     for scene in args.scenes:
         paths, off = s5.scene_index(scene)
         hints = s5._hints(scene)
-        maps = {}
-        for name, d in caches.items():
-            listed = (Path(d) / f'{scene}.paths.txt').read_text().split()
-            if listed != [str(p) for p in paths]:
-                raise ValueError(f'{d} {scene}: cache paths differ from the tracker sequence')
-            maps[name] = np.load(Path(d) / f'{scene}.npy', mmap_mode='r')
+        maps = {name: s5._cache(d, scene, paths) for name, d in caches.items()}
         for gap in args.gaps:
             win = s5.tiled_windows(len(paths), gap)
             refs = [s5._ref(hints, w, off) for w in win]

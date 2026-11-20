@@ -1,10 +1,13 @@
 """S5 teacher depth audit: window tiling, hint offset, alignment scales and depth metrics on synthetic depth."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from scripts.s5_teacher_depth_audit import (
     HINT_MIN,
     N,
+    _cache,
     depth_metrics,
     evaluate_window,
     hint_offset,
@@ -111,3 +114,14 @@ def test_invalid_frames_and_summary():
     assert 0 < s['coverage'] <= 1
     e3 = evaluate_window(ref, pred[:, ::-1] * 0 - 1, min_px=200)           # nothing valid
     assert not e3['ok'].any() and np.isnan(e3['log_s_sd'])
+
+
+def test_cache_is_checked_against_the_tracker_sequence(tmp_path):
+    """_cache (also used by apps/calib_s3.py score): the maps of a depth cache whose paths list is the tracker's;
+    a cache of other frames is a ValueError."""
+    paths = [Path(f'/data/{i}.png') for i in range(3)]
+    np.save(tmp_path / 'room5.npy', np.arange(12, dtype=np.float32).reshape(3, 2, 2))
+    (tmp_path / 'room5.paths.txt').write_text('\n'.join(map(str, paths)) + '\n')
+    np.testing.assert_array_equal(_cache(str(tmp_path), 'room5', paths)[2], [[8, 9], [10, 11]])
+    with pytest.raises(ValueError, match='cache paths differ'):
+        _cache(tmp_path, 'room5', paths[1:])

@@ -273,13 +273,14 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
     (a.out / 'args.json').write_text(json.dumps({k: str(v) if isinstance(v, Path) else v for k, v in vars(a).items()},
                                                 indent=1))
-    L = max(a.gaps)
-    tr = Windows(a.rooms.split(','), a.dump, a.depth, L, a.gaps, a.cell, a.grad, expect=dump_options(a))
+    L, expect = max(a.gaps), dump_options(a)
+    tr = Windows(a.rooms.split(','), a.dump, a.depth, L, a.gaps, a.cell, a.grad, expect=expect)
     va = Windows(a.val_rooms.split(','), a.dump, a.depth, L, a.gaps, a.cell, a.grad, stride=L, limit=a.val_windows,
-                 expect=dump_options(a))
+                 expect=expect)
     print(f'train windows {len(tr)}, val windows {len(va)}, L {L}, gaps {a.gaps}', flush=True)
     net = pl.PhotoNet(a.mode, a.width).to(dev)
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=0.0)
+
     def write(rec):
         with open(a.out / 'log.jsonl', 'a') as f:
             f.write(json.dumps(rec) + '\n')

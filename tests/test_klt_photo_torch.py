@@ -14,7 +14,8 @@ DEV = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 def _plane(n=256, f=190.0):
-    """Textured plane Z_w = 2 m seen from the origin and from (R1, t1): (I0, I1, depth of frame 0, K, R1, t1)."""
+    """Textured plane Z_w = 2 m seen from the origin (frame 0) and from X1 = R1 X0 + t1 (frame 1):
+    (I0, I1, depth 0, depth 1, K, R1, t1)."""
     c = (n - 1) / 2
     Kp = np.array([[f, 0, c], [0, f, c], [0, 0, 1]])
     uu, vv = np.meshgrid(np.arange(n), np.arange(n))
@@ -30,15 +31,15 @@ def _plane(n=256, f=190.0):
     R1 = Rotation.from_euler('xyz', [0.3, -0.4, 0.2], degrees=True).as_matrix()
     t1 = np.array([0.02, -0.01, 0.03])
     I0, D0 = render(np.eye(3), np.zeros(3))
-    I1, _ = render(R1, t1)
-    return I0, I1, D0, Kp, R1, t1
+    I1, D1 = render(R1, t1)
+    return I0, I1, D0, D1, Kp, R1, t1
 
 
 @pytest.mark.parametrize('levels', [1, 3])
 def test_torch_refine_matches_numpy(levels):
     """refine_prepared_torch reproduces refine_prepared on a rendered plane: float64 to 1e-9, float32 to 2e-6 m;
     prepare_torch reproduces cv2 prepare (Sobel / 8, pyrDown, reflect-101 borders)."""
-    I0, I1, D0, Kp, _, t1 = _plane()
+    I0, I1, D0, _, Kp, _, t1 = _plane()
     M = np.ones(I0.shape, bool)
     M[:, -10:] = False                                  # an invalid band in frame t
     pts = kp.select_points(I0, np.ones_like(M), 2, 0.002)

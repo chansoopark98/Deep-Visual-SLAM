@@ -112,16 +112,17 @@ def main():
         res = score_run(run)
         allres[str(run)] = res
         print(f'== {run}')
+        order = ['official', 'room5', 'room6'] + [s for s in sorted(res) if s not in ('official', 'room5', 'room6')]
         print(f'{"set":<9} {"pairs":>6} {"03 %":>7} {"med%":>6} {"med mm":>6} {"trk03":>7} {"fallbk":>7}  '
               f'bins <5 / 5-20 / 20-40 / >40 mm: 03 % / median |err| mm')
-        for k in ['official', 'room5', 'room6'] + [s for s in sorted(res) if s not in ('official', 'room5', 'room6')]:
+        for k in order:
             if k in res:
                 print(fmt(k, res[k]))
         print('mm/fr = mean |step-length error| (mm/frame) = mean |‖t_pred‖ − ‖t_gt‖| per pair, a lower bound of the '
               'translation-vector error (not MAC-VO\'s m/frame); copy-prev = own predicted length of pair t−1 '
               '(deployable baseline, no GT)')
         print(f'{"set":<9} {"pairs":>6} {"03 %":>7} {"mm/fr":>6} | {"copy-prev 03 %":>14} {"mm/fr":>6}')
-        for k in ['official', 'room5', 'room6'] + [s for s in sorted(res) if s not in ('official', 'room5', 'room6')]:
+        for k in order:
             if k in res:
                 s = res[k]
                 print(f'{k:<9} {s["pairs"]:>6} {s["item03"]:7.3f} {s["mean_err_mm"]:6.3f} | '
