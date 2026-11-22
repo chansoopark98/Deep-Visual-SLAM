@@ -2,21 +2,12 @@
 # pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 # (scripts/setup_env.sh prints this and installs it when TORCH_INDEX_URL is set)
 
-
-#tensorflow==2.19.0
-tqdm
-pyyaml
-pandas
-opencv-python
-matplotlib
-scipy
-pytransform3d
-tensorboard
-pyvista
-imageio
-imageio[ffmpeg]
 numpy
+scipy
+opencv-python
+pyyaml
 pillow
+matplotlib
 
 # dev
 pytest

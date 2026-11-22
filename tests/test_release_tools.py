@@ -1,5 +1,5 @@
 """Release tooling: checkpoint stripper (scripts/export_release_weights.py) and the demo renderer's trajectory
-integration / running items (scripts/render_demo.py). Synthetic inputs only (CPU, no data)."""
+integration / running errors (scripts/render_demo.py). Synthetic inputs only (CPU, no data)."""
 import sys
 
 import numpy as np
@@ -91,7 +91,7 @@ def test_integrate_reproduces_gt_from_its_increments():
     np.testing.assert_allclose(R.integrate(T[5], inc[5:]), T[5:], atol=1e-9)     # a run starting at frame 5
 
 
-def test_running_items_match_scaled_translation_and_skip_invalid_pairs():
+def test_running_errors_match_scaled_translation_and_skip_invalid_pairs():
     T = _gt_poses()
     idx = np.arange(1, len(T))
     inc = np.stack([relative_pose(T[t - 1], T[t]) for t in idx])
@@ -100,10 +100,10 @@ def test_running_items_match_scaled_translation_and_skip_invalid_pairs():
     valid = np.ones(len(T) - 1, bool)
     valid[3] = False                                    # ... without measured GT: not scored
     valid[0] = False                                    # nothing scored after the first pair
-    i03, i04 = R.running_items(T, idx, inc, valid)
-    assert np.isnan(i03[0]) and np.isnan(i04[0])
-    np.testing.assert_allclose(i03[1:], 10.0, rtol=1e-9)
-    np.testing.assert_allclose(i04[1:], 0.0, atol=1e-9)
+    e_t, e_r = R.running_errors(T, idx, inc, valid)
+    assert np.isnan(e_t[0]) and np.isnan(e_r[0])
+    np.testing.assert_allclose(e_t[1:], 10.0, rtol=1e-9)
+    np.testing.assert_allclose(e_r[1:], 0.0, atol=1e-9)
 
 
 def test_poly_skips_segments_without_gt():

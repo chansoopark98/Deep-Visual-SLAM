@@ -13,7 +13,6 @@ from dvslam.odometry.base import PoseEstimate, save_increments
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / 'apps'))
 import eval_pairs  # noqa: E402
-import eval_pairs_temporal  # noqa: E402
 import run_sequence  # noqa: E402
 
 
@@ -130,7 +129,7 @@ def _all_rooms_on_disk(rooms):
         pytest.skip(f'TUM-VI {sorted(set(rooms) - have)} not on disk')
 
 
-def test_eval_gives_a_verdict_only_on_the_tumvi_target-metric_set(tmp_path, monkeypatch):
+def test_eval_gives_a_verdict_only_on_the_tumvi_official_set(tmp_path, monkeypatch):
     rooms = ['room1', 'room2', 'room3', 'room4', 'room6']            # train + test
     _all_rooms_on_disk(rooms + ['room5'])
     for r in rooms:
@@ -138,74 +137,20 @@ def test_eval_gives_a_verdict_only_on_the_tumvi_target-metric_set(tmp_path, monk
     monkeypatch.setattr(sys, 'argv', ['eval_pairs.py', '--runs', str(tmp_path)])
     eval_pairs.main()
     report = (tmp_path / 'eval_pairs.txt').read_text()
-    assert 'target-metric set: TUM-VI train + test' in report and 'INCOMPLETE' not in report
-    assert '[03]' in report and '-> PASS' in report.split('[03]')[1].splitlines()[0]
-    assert '-> PASS' in report.split('[04]')[1].splitlines()[0]
+    assert 'Official set: TUM-VI train + test' in report and 'INCOMPLETE' not in report
+    assert 'translation step error' in report
+    assert '-> PASS' in report.split('translation step error')[1].splitlines()[0]
+    assert '-> PASS' in report.split('rotation error')[1].splitlines()[0]
     # adding the validation room makes it a different set: raw values only
     _gt_run(tmp_path, 'tumvi', 'room5')
     eval_pairs.main()
     report = (tmp_path / 'eval_pairs.txt').read_text()
-    assert 'raw value, no verdict' in report and 'target-metric set: TUM-VI' not in report
-    assert 'raw value, no verdict' in report.split('[04]')[1].splitlines()[0]
-
-
-def test_temporal_slices_follow_the_redwood_rule():
-    sl = eval_pairs_temporal.frame_slices(25)
-    assert list(sl[:20]) == ['train'] * 20 and list(sl[20:22]) == ['validation'] * 2 and list(sl[22:]) == ['test'] * 3
-
-
-def test_temporal_eval_scores_all_rooms(tmp_path, monkeypatch):
-    _all_rooms_on_disk(registry._module('tumvi').SCENES)
-    for r in registry._module('tumvi').SCENES:
-        _gt_run(tmp_path, 'tumvi', r)
-    monkeypatch.setattr(sys, 'argv', ['eval_pairs_temporal.py', '--runs', str(tmp_path)])
-    eval_pairs_temporal.main()
-    report = (tmp_path / 'eval_pairs_temporal.txt').read_text()
-    assert 'INCOMPLETE' not in report
-    assert report.count('-> PASS') == 4                               # 03 and 04 on train+test and on test
-    seq = registry.load_sequence('tumvi', 'room1', 'train', load_images=False)
-    r = eval_pairs_temporal.score_room(tmp_path / 'room1.inc.npz', None)
-    # every valid pair is in exactly one slice or on one of the two boundaries
-    n_valid = int(seq.pair_valid.sum())
-    assert n_valid - 2 <= r['train'][0] + r['validation'][0] + r['test'][0] <= n_valid
-    assert r['train+test'][0] == r['train'][0] + r['test'][0]
-
-
-def test_temporal_eval_withholds_the_verdict_when_rooms_are_missing(tmp_path, monkeypatch):
-    _all_rooms_on_disk(['room1'])
-    _gt_run(tmp_path, 'tumvi', 'room1')
-    monkeypatch.setattr(sys, 'argv', ['eval_pairs_temporal.py', '--runs', str(tmp_path)])
-    eval_pairs_temporal.main()
-    report = (tmp_path / 'eval_pairs_temporal.txt').read_text()
-    assert 'INCOMPLETE' in report and 'PASS' not in report and 'no verdict' in report
+    assert 'raw value, no verdict' in report and 'Official set: TUM-VI' not in report
+    assert 'raw value, no verdict' in report.split('rotation error')[1].splitlines()[0]
 
 
 def test_run_sequence_refuses_several_redwood_splits(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run_sequence.py', '--odometry', 'klt_pnp', '--split', 'train', 'test',
+    monkeypatch.setattr(sys, 'argv', ['run_sequence.py', '--odometry', 'klt_window', '--split', 'train', 'test',
                                       '--out', str(tmp_path / 'r')])
     with pytest.raises(SystemExit, match='same five scenes'):
         run_sequence.main()
-
-
-def test_temporal_score_room_excludes_boundary_and_dropout_pairs(monkeypatch):
-    from types import SimpleNamespace
-    n = 20                                                            # train frames 0-15, val 16-17, test 18-19
-    T = np.tile(np.eye(4), (n, 1, 1))
-    T[:, 0, 3] = 0.05 * np.arange(n)
-    gt_valid = np.ones(n, bool)
-    gt_valid[5] = False                                               # dropout: pairs (4,5) and (5,6) invalid
-    class Seq(SimpleNamespace):
-        def __len__(self):
-            return n
-    seq = Seq(T_wc=T, gt_valid=gt_valid, pair_valid=gt_valid[:-1] & gt_valid[1:])
-    inc = np.stack([relative_pose(T[t - 1], T[t]) for t in range(1, n)])
-    for t in (5, 6, 16, 18):                                          # dropout pairs and the two boundary pairs
-        inc[t - 1][0, 3] *= 2                                         # 100 % error
-    inc[19 - 1][0, 3] *= 1.5                                          # one real test-pair error: 50 %
-    monkeypatch.setattr(eval_pairs_temporal, 'load_run_scene', lambda *a: (
-        {'index': np.arange(1, n), 'rel_increment': inc}, {'dataset': 'tumvi', 'scene': 'room1'}, seq))
-    r = eval_pairs_temporal.score_room(Path('x'), None)
-    assert r['train'][:2] == (13, 0.0)                                # 15 pairs in [0,16) minus 2 dropout pairs
-    assert r['validation'][:2] == (1, 0.0)                            # pair (16,17) only
-    assert r['test'][0] == 1 and abs(r['test'][1] - 50.0) < 1e-9     # pair (18,19) only
-    assert r['train+test'][0] == 14 and abs(r['train+test'][1] - 50.0 / 14) < 1e-9

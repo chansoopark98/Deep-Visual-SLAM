@@ -29,14 +29,12 @@ sequence, not just that a directory exists. Required sequences:
 | TUM-VI (512_16, cam0) | train | room1, room2, room3, room4 | `--dataset tumvi` |
 | TUM-VI (512_16, cam0) | validation | room5 | same |
 | TUM-VI (512_16, cam0) | test | room6 | same |
-| Redwood | validation / test | apartment, bedroom, boardroom, lobby, loft | `--dataset redwood`, `vo/eval_redwood.py` |
+| Redwood | validation / test | apartment, bedroom, boardroom, lobby, loft | `--dataset redwood` |
 
 Splits are defined in `SPLITS` of each loader (`euroc.py`, `tumvi.py`), not here; if they change, rerun `check`.
-TUM-VI (since 2026-11-19, target-metric track): split by whole sequence; all six rooms are the same motion-capture room. The
-official target-metric set is train + test:
+TUM-VI (since 2026-11-19): split by whole sequence; all six rooms are the same motion-capture room. The
+official evaluation set is train + test:
 `apps/run_sequence.py --dataset tumvi --split train test` then `apps/eval_pairs.py` (PASS/FAIL only on that set).
-A Redwood-style 80/10/10 split in time per room is scored separately: run all three splits, then
-`apps/eval_pairs_temporal.py --runs <dir>`.
 State on 2026-11-19 before the download below: everything present except TUM-VI room5 and room6.
 
 ## 2. Download

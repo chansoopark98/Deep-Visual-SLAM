@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end demo on one TUM-VI room with the released weights: final-candidate tracker (EXP-020 options) with the
-# live SSL depth prior, target-metric items 03 / 04, and an animated GIF.
+# live SSL depth prior, translation step / rotation errors, and an animated GIF.
 #
 #   scripts/demo_tumvi.sh [ROOM]          # ROOM = room1..room6, default room5 (validation room)
 #
@@ -59,7 +59,7 @@ echo "== $ROOM, depth $DEPTH ($CKPT) -> $OUT"
 T0=$SECONDS
 nice -n 10 "$PY" scripts/exp003_track_log.py --scene "$ROOM" --out "$OUT" "${ARGS[@]}" 2>&1 | tee "$OUT/track.log"
 T1=$SECONDS
-echo "== score (items 03 / 04)"
+echo "== score (translation step error / rotation error)"
 nice -n 10 "$PY" apps/eval_pairs.py --runs "$OUT"    # writes eval_pairs.txt, summary.csv
 nice -n 10 "$PY" scripts/exp003_score.py "$OUT" --json "$OUT/score.json" | tee "$OUT/score.txt"
 echo "== render"
@@ -69,5 +69,5 @@ echo
 echo "tracker: $((T1 - T0)) s, total: $((SECONDS - T0)) s"
 echo "outputs in $OUT:"
 echo "  $ROOM.inc.npz (increments), $ROOM.tracks.npz (KLT tracks), $ROOM.extra.npz, $ROOM.cpu.json (timing)"
-echo "  eval_pairs.txt (items 03 / 04), score.txt / score.json (item 03 by GT-step bin, mm/frame), track.log,"
+echo "  eval_pairs.txt (translation / rotation errors), score.txt / score.json (translation error by GT-step bin, mm/frame), track.log,"
 echo "  ${ROOM}_demo.gif"

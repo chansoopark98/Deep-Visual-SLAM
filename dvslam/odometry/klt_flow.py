@@ -3,7 +3,7 @@
 `flow_cache=<dir>` in KLTWindowOdometry: every track is moved t-1 -> t by the bilinearly sampled forward flow and
 checked by the backward flow (|p0 − (p1 + bwd(p1))| < fb_px), in place of pyramidal LK. Everything else (corner
 detection, keyframes, host re-track `kf_refine`, PnP, window BA) is unchanged.
-Layout of <dir> (written by scripts/exp007_cache_flow.py): <scene>.fwd.npy / <scene>.bwd.npy (n, 2, H, W) float32,
+Layout of <dir>: <scene>.fwd.npy / <scene>.bwd.npy (n, 2, H, W) float32,
 row t = flow (x, y) in pixels from frame t-1 to t / from t to t-1 (row 0 is zeros), and <scene>.paths.txt with the
 image path of frame t on line t. Frames are looked up by image path, as in klt_depth_cache.py. <scene>.meta.json
 (klt_depth_cache.write_meta) records the model and the flow H x W: FlowCache(hw=(H, W)) raises ValueError on a
@@ -59,7 +59,7 @@ class FlowCache:
 
 class OnlineRAFT:
     """EXP-008: torchvision RAFT (official weights) evaluated when the tracker asks for a pair: forward and backward
-    flow as one batch of 2, gray replicated to 3 channels in [-1, 1] (as scripts/exp007_cache_flow.py). GPU time of
+    flow as one batch of 2, gray replicated to 3 channels in [-1, 1]. GPU time of
     every call (CUDA-synchronised wall time) is appended to self.ms."""
 
     def __init__(self, model: str = 'small', iters: int = 12, device: str = 'cuda'):

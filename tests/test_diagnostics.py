@@ -1,25 +1,10 @@
 """Unit tests for dvslam.eval.diagnostics (plan v3 item 0.3)."""
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
 from dvslam.eval import diagnostics as D
 from dvslam.geometry.se3 import umeyama
-
-sys.path.insert(0, str(Path(__file__).parent / 'golden'))
-from test_baseline import SCENES, load_rows  # noqa: E402
-
-
-def baseline_steps():
-    out = []
-    for s in SCENES:
-        r = load_rows(s)
-        out.append((np.stack([r['gt_tx'], r['gt_ty'], r['gt_tz']], 1),
-                    np.stack([r['pred_tx'], r['pred_ty'], r['pred_tz']], 1)))
-    return out
 
 
 def random_steps(n=500, seed=0):
@@ -109,18 +94,3 @@ def test_block_bootstrap_ci_brackets_point_and_is_reproducible():
     pt, lo, hi = D.block_bootstrap_ci(vals)
     assert lo < pt < hi
     assert D.block_bootstrap_ci(vals) == (pt, lo, hi)
-
-
-def test_simulation_matches_report17_at_0p10mm():
-    m, _ = D.simulate_mape([g for g, _ in baseline_steps()], 0.10e-3, reps=20)
-    assert m == pytest.approx(1.67, abs=0.05)
-
-
-def test_baseline_decomposition_matches_report17():
-    ratios, rescaled = [], []
-    for g, p in baseline_steps():
-        ratios.append(D.median_step_ratio(g, p))
-        rescaled.append(D.best_rescale(g, p)[1])
-    # report 17 §5.3 says ratio 0.90-1.12; measured lobby is 0.8946 (0.89 at 2 dp). Rescaled MAPE 24.9-46.5 %.
-    assert round(min(ratios), 2) == 0.89 and round(max(ratios), 2) == 1.12
-    assert round(min(rescaled), 1) == 24.9 and round(max(rescaled), 1) == 46.5

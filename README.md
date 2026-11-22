@@ -18,10 +18,47 @@
 </p>
 
 <p align="center">
-  <img src="media/tumvi_room6_demo.gif" alt="TUM-VI room6 demo: camera frame with tracked points next to the top-down metric trajectory and mocap ground truth" width="640">
+  <img src="media/tumvi_room6_demo.gif" alt="TUM-VI room6 demo: input frame with tracked features, 3D map with keyframes and current camera, top-down trajectory against ground truth" width="900">
 </p>
 
-<p align="center"><sub>TUM-VI <code>room6</code>, a room not used for training: cam0 with tracked points (left), top-down metric trajectory vs. mocap ground truth (right). No scale alignment.</sub></p>
+<p align="center"><sub>TUM-VI <code>room6</code>, a room not used for training or tuning. Left: input frame with tracked features. Middle: map points, keyframes (blue) and current camera (green). Right: top-down trajectory, estimate vs. ground truth, metric, no alignment.</sub></p>
+
+### Results on other datasets
+
+The same pipeline, run without retraining on EuRoC and Redwood. Each sequence has an animated GIF and a static geometry
+figure (`media/*_geometry.png`: evo-style 2D trajectory and the final 3D map).
+
+<table>
+  <tr>
+    <td align="center"><img src="media/euroc_MH_01_easy_demo.gif" width="420" alt="EuRoC MH_01_easy demo"><br><sub>EuRoC <code>MH_01_easy</code>: the track diverges and is mis-scaled.</sub></td>
+    <td align="center"><img src="media/euroc_MH_01_easy_geometry.png" width="420" alt="EuRoC MH_01_easy geometry: top-down trajectory and final 3D map"><br><sub>Geometry, <code>MH_01_easy</code>.</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="media/euroc_MH_03_medium_demo.gif" width="420" alt="EuRoC MH_03_medium demo"><br><sub>EuRoC <code>MH_03_medium</code>: the track diverges and is mis-scaled.</sub></td>
+    <td align="center"><img src="media/euroc_MH_03_medium_geometry.png" width="420" alt="EuRoC MH_03_medium geometry: top-down trajectory and final 3D map"><br><sub>Geometry, <code>MH_03_medium</code>.</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="media/redwood_bedroom_demo.gif" width="420" alt="Redwood bedroom demo"><br><sub>Redwood <code>bedroom</code>: mis-scaled; the reference poses are inaccurate.</sub></td>
+    <td align="center"><img src="media/redwood_bedroom_geometry.png" width="420" alt="Redwood bedroom geometry: top-down trajectory and final 3D map"><br><sub>Geometry, <code>bedroom</code>.</sub></td>
+  </tr>
+</table>
+
+Pairs t >= 1 with ground truth at both ends, start frame 0, final configuration, live depth from
+`dvslam_depth_hints_core.pt`. ATE is the RMSE after SE(3) alignment; the other two metrics use no alignment
+(see [Metric](#metric)).
+
+| Sequence | Frames | Translation step error | Rotation error | ATE |
+|---|---|---|---|---|
+| TUM-VI room6 (unseen room) | 2617 | 3.98 % | 0.084° | 0.175 m |
+| EuRoC MH_01_easy (zero-shot) | 3638 | 178.97 % | 0.188° | 3.06 m |
+| EuRoC MH_03_medium (zero-shot) | 2631 | 116.34 % | 0.183° | 3.18 m |
+| Redwood bedroom (zero-shot) | 1097 | 64.19 % | 0.120° | 0.31 m |
+
+**Limitations.** The depth network was trained only on TUM-VI `room1`–`room4`. On EuRoC and Redwood the images are
+re-projected into its training camera (pinhole, 512 x 512, f = 190) and its metric scale does not transfer: the median
+predicted / ground-truth step length is 0.30–0.40 on EuRoC and 1.35 on Redwood. The trajectories are therefore
+mis-scaled, and the EuRoC tracks diverge. The Redwood reference poses are known to be inaccurate. The rotation error
+stays small on all sequences.
 
 ## Overview
 
@@ -30,9 +67,9 @@ carries the pose path: dense optical-flow tracks, PnP and a sliding-window bundl
 photometric step. A self-supervised depth network provides the metric scale prior. Inference uses a single RGB camera;
 stereo images and the gyroscope are used only while training the depth network.
 
-The repository also contains the original Monodepth2-style visual odometry (see [Legacy](#legacy-monodepth2-style-vo)).
+The original Monodepth2-style visual odometry is kept on a separate branch (see [Legacy](#legacy-monodepth2-style-vo)).
 
-Contents: [Pipeline](#pipeline) · [Results](#results) · [Installation](#installation) · [Data](#data) ·
+Contents: [Other datasets](#results-on-other-datasets) · [Pipeline](#pipeline) · [Results](#results) · [Installation](#installation) · [Data](#data) ·
 [Pretrained weights](#pretrained-weights) · [Quick demo](#quick-demo) · [Tests](#tests) ·
 [Reproducing the evaluation](#reproducing-the-evaluation) · [Training](#training) · [Repository layout](#repository-layout) ·
 [Legacy](#legacy-monodepth2-style-vo) · [References](#references)
@@ -64,11 +101,11 @@ The output is a causal chain of metric relative poses, one per frame.
 
 ### Metric
 
-target-metric AR pose evaluation:
+Pair-wise relative-pose errors over consecutive frame pairs:
 
-- **Item 03 (position error)**: mean over consecutive frame pairs of `|‖t_gt‖ − ‖t_pred‖| / ‖t_gt‖ × 100` (%).
-  Translations are in metres; no scale alignment. Target: <= 2.96 %.
-- **Item 04 (rotation error)**: mean absolute roll / pitch / yaw error of the relative rotation, in degrees. Target: <= 3.4°.
+- **Translation step error**: mean over consecutive frame pairs of `|‖t_gt‖ − ‖t_pred‖| / ‖t_gt‖ × 100` (%).
+  Translations are in metres; no scale alignment. Target threshold: <= 2.96 %.
+- **Rotation error**: mean absolute roll / pitch / yaw error of the relative rotation, in degrees. Target threshold: <= 3.4°.
 
 ### Conditions
 
@@ -80,15 +117,15 @@ target-metric AR pose evaluation:
 
 | Metric | Value | Setting |
 |---|---|---|
-| Item 03 | **2.482 ± 0.010 %** (worst 2.497 %) | official set, 3 depth-training seeds x 3 start frames |
+| Translation step error | **2.482 ± 0.010 %** (worst 2.497 %) | official set, 3 depth-training seeds x 3 start frames |
 | Mean step-length error | 0.687 mm/frame | same runs |
-| Item 04 | **0.100°** | official set, pair-weighted, start frame 0, 3 seeds |
+| Rotation error | **0.100°** | official set, pair-weighted, start frame 0, 3 seeds |
 
 ### Per room
 
 Mean of 3 depth-training seeds, start frame 0.
 
-| Room | Item 03 | Item 04 | ATE-SE(3) |
+| Room | Translation step error | Rotation error | ATE-SE(3) |
 |---|---|---|---|
 | room1 | 2.041 % | 0.090° | 0.098 m |
 | room2 | 1.712 % | 0.120° | 0.301 m |
@@ -101,14 +138,14 @@ Mean of 3 depth-training seeds, start frame 0.
 
 `room4` is held out from depth training (depth network trained on `room1`–`room3`) and scored as an unseen room.
 
-| Variant | Item 03 on room4 |
+| Variant | Translation step error on room4 |
 |---|---|
 | Baseline | 4.203 % |
 | + S3 test-time depth adaptation | 3.987 % |
 | + S2 learned weights (trained on room1–3) | 3.952–4.013 % |
 | S2 + S3 | 3.765–3.839 % |
 
-Item 04 is unchanged across these variants (0.086–0.087°).
+The rotation error is unchanged across these variants (0.086–0.087°).
 
 ### Caveats
 
@@ -162,7 +199,7 @@ variables:
 |---|---|
 | `DVSLAM_TUMVI_ROOT` | TUM-VI root, containing `dataset-room{N}_512_16/` |
 | `DVSLAM_CACHE_ROOT` | Rectified-image cache, built on the first run of a room |
-| `DVSLAM_EUROC_ROOT`, `DVSLAM_REDWOOD_ROOT` | EuRoC and Redwood roots (not needed for the TUM-VI results) |
+| `DVSLAM_EUROC_ROOT`, `DVSLAM_REDWOOD_ROOT` | EuRoC and Redwood roots (only for [other datasets](#other-datasets)) |
 
 The defaults of the loaders and of `scripts/fetch_datasets.sh` are paths on the author's workstation, so set the
 variables explicitly. `scripts/demo_tumvi.sh` defaults to `<repo>/data/tum_vi` and `<repo>/runs/cache`; use the same
@@ -212,7 +249,7 @@ bash scripts/demo_tumvi.sh room5      # room1..room6, default room5
 Needs a CUDA GPU, the room's TUM-VI sequence (see [Data](#data)) and the downloaded weights. The script:
 
 1. runs the final-candidate tracker with the live depth prior over the whole room,
-2. scores target-metric items 03 and 04,
+2. scores the translation step error and the rotation error,
 3. renders an animated GIF.
 
 Outputs go to `runs/demo/<room>-<depth>-<timestamp>/` (override with `OUT`):
@@ -221,13 +258,13 @@ Outputs go to `runs/demo/<room>-<depth>-<timestamp>/` (override with `OUT`):
 |---|---|
 | `<room>.inc.npz` | Per-frame relative pose increments |
 | `<room>.tracks.npz`, `<room>.extra.npz`, `<room>.cpu.json` | Tracks, diagnostics, timing |
-| `eval_pairs.txt`, `summary.csv` | Items 03 / 04 |
-| `score.txt`, `score.json` | Item 03 by ground-truth step bin, mean step-length error (mm/frame) |
+| `eval_pairs.txt`, `summary.csv` | Translation step error, rotation error |
+| `score.txt`, `score.json` | Translation step error by ground-truth step bin, mean step-length error (mm/frame) |
 | `track.log` | Tracker log |
 | `<room>_demo.gif` | Camera frame with tracked points, top-down trajectory vs. ground truth |
 
-Expected for `room5` with the released `dvslam_depth_hints_core.pt` on an RTX 5090: item 03 **3.210 %**, item 04
-**0.090°**, about 410 s. (The per-room table above averages three depth-training seeds, hence 3.279 %.)
+Expected for `room5` with the released `dvslam_depth_hints_core.pt` on an RTX 5090: translation step error **3.210 %**,
+rotation error **0.090°**, about 410 s. (The per-room table above averages three depth-training seeds, hence 3.279 %.)
 
 Options (environment variables):
 
@@ -239,23 +276,62 @@ Options (environment variables):
 | `GIF_ARGS` | empty | Extra arguments for `scripts/render_demo.py`, e.g. `"--stride 6 --fps 12"` |
 | `DVSLAM_THREADS` | `4` | Cap for OMP / BLAS threads |
 
-Render a GIF from an existing run directory:
+### Rendering
+
+`scripts/render_demo.py` draws a tracker run as an animated GIF (`--out`) and a static geometry figure (`--png`: top-down
+trajectory and final 3D map):
 
 ```bash
-python scripts/render_demo.py --run runs/demo/<run> --scene room6 --out media/room6.gif \
-    [--start 0 --end -1 --stride 11 --fps 10 --width 640]
+python scripts/render_demo.py --run runs/demo/<run> --scene room6 \
+    --out media/room6_demo.gif --png media/room6_geometry.png \
+    [--start 0 --end -1 --stride 11 --fps 10 --width 1080 --dpi 150]
 ```
+
+At least one of `--out` and `--png` is required. Other options: `--grays`, `--azim`, `--elev`, `--margin`, `--min-obs`,
+`--kf-size`, `--kf-spacing` (3D view) and `--data-root` (TUM-VI root for runs without `<scene>.seq.npz`); `-h` lists all.
+The script prints the frame count, translation step error, rotation error and ATE (SE(3)) of the rendered run.
+
+### Other datasets
+
+`scripts/demo_track.py` runs the tracker on one sequence of any dataset (`--dataset tumvi|euroc|redwood`) and writes
+everything the renderer needs (`<scene>.inc.npz`, `.extra.npz`, `.tracks.npz`, `.map.npz`, `.seq.npz`, `.cpu.json`).
+It takes the tracker options as repeated `--opt k=v`; use the final-candidate list from
+[Reproducing the evaluation](#reproducing-the-evaluation). Set `DVSLAM_EUROC_ROOT` / `DVSLAM_REDWOOD_ROOT` first.
+
+```bash
+OPTS="--opt prior=ssl --opt prior_ckpt=weights/dvslam/dvslam_depth_hints_core.pt --opt quality=0.001 --opt lk_win=15
+  --opt jump_ref_tracked=true --opt photo=all --opt photo_tol=0.01 --opt photo_levels=1 --opt ba_nfev=10
+  --opt n_features=250 --opt kf_ratio=0.3 --opt prior_per_kf=false --opt g_tau=5 --opt flow_cache=raft_large
+  --opt kf_refine=0 --opt photo_cell=1 --opt photo_grad=0.002 --opt photo_bidir=true --opt photo_backend=torch"
+
+python scripts/demo_track.py --dataset euroc --scene MH_01_easy --out runs/demo/euroc $OPTS
+python scripts/render_demo.py --run runs/demo/euroc --scene MH_01_easy \
+    --out media/euroc_MH_01_easy_demo.gif --png media/euroc_MH_01_easy_geometry.png --stride 17 --fps 10
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--dataset` | required | `redwood`, `tumvi` or `euroc` |
+| `--scene` | required | Sequence name, e.g. `room6`, `MH_01_easy`, `bedroom` |
+| `--out` | required | Output directory |
+| `--split` | inferred (`test` for Redwood) | Dataset split |
+| `--camera` | `tumvi` except for TUM-VI | `tumvi` re-projects the images into the TUM-VI 512 x 512, f = 190 pinhole camera, which the depth network requires; `native` keeps the dataset camera |
+| `--erode` | `8` | Pixels the valid-region mask is eroded by (`--camera tumvi`) |
+| `--frames` | `0` | Track only the first N frames (`0` = all) |
+| `--cv-threads` | unset | OpenCV thread count |
+
+The scores in [Results on other datasets](#results-on-other-datasets) come from such runs: the depth network sees the
+re-projected image, so its depth is zero-shot there. Re-projected canvases are cached under
+`DVSLAM_CACHE_ROOT/<dataset>/<scene>/tumvi_512_f190`.
 
 ## Tests
 
 ```bash
-bash scripts/run_tests.sh                       # CPU unit tests (pytest -m 'not gpu') + ruff report
+bash scripts/run_tests.sh                       # unit tests + ruff report
 bash scripts/run_tests.sh tests/test_release_tools.py -x   # extra arguments go to pytest
-bash scripts/run_tests.sh -m gpu                # GPU and data tests
 ```
 
-Tests that need data, a GPU or optional packages skip themselves (reasons are listed). Tests marked `gpu` are deselected by
-default. `ruff` findings are printed but do not change the exit status. `DVSLAM_THREADS` (default 4) caps the thread count.
+Tests that need data skip themselves (reasons are listed). `ruff` findings are printed but do not change the exit status. `DVSLAM_THREADS` (default 4) caps the thread count.
 
 ## Reproducing the evaluation
 
@@ -276,7 +352,7 @@ This writes `runs/eval/final/<scene>.inc.npz`, `<scene>.causal.tum` and `timings
 single room, or `--split validation` for `room5`. Score the run:
 
 ```bash
-python apps/eval_pairs.py --runs runs/eval/final      # items 03 / 04, PASS/FAIL on the official set
+python apps/eval_pairs.py --runs runs/eval/final      # translation / rotation errors, PASS/FAIL on the official set
 python scripts/exp003_score.py runs/eval/final        # official set pooled by pairs, per room, by GT-step bin, mm/frame
 ```
 
@@ -324,11 +400,10 @@ Uses the pseudo-label poses of one tracker run on the test sequence (`--labels`,
 ```bash
 python apps/calib_s3.py train --ckpt runs/ssl/<run>/last.pt --scene room5 --labels <run>/room5.inc.npz --out runs/s3/room5
 python apps/calib_s3.py cache --ckpt runs/ssl/<run>/last.pt --adapter runs/s3/room5/adapter.pt --scene room5 --out runs/s3/depth
-python apps/calib_s3.py score --cache before=<dir> after=runs/s3/depth --scenes room4 room5
 ```
 
-`cache` writes a depth cache that the tracker reads with `--opt prior=cache --opt prior_ckpt=runs/s3/depth`. `score` compares
-depth against the stereo hints (evaluation only; the hints use cam1). Run `python apps/calib_s3.py <command> -h` for all options.
+`cache` writes a depth cache that the tracker reads with `--opt prior=cache --opt prior_ckpt=runs/s3/depth`.
+Run `python apps/calib_s3.py <command> -h` for all options.
 
 ### Exporting release weights
 
@@ -342,58 +417,34 @@ with `--verify-images`, checks that the depth output is bit-identical.
 ## Repository layout
 
 ```
-apps/                  Entry points: run_sequence, eval_pairs, eval_pairs_temporal, train_ssl, train_photo_s2, calib_s3
+apps/                  Entry points: run_sequence, eval_pairs, train_ssl, train_photo_s2, calib_s3 (train, cache)
 configs/               ssl_tumvi.yaml (SSL depth training)
 dvslam/
-  data/                TUM-VI, EuRoC, Redwood loaders and the rectified-image cache
-  depth/               Depth priors (SSL network and others) behind the tracker
-  odometry/            Trackers: klt_window.py (final pipeline), klt_photo_torch.py, photo_learned.py, baselines
+  data/                TUM-VI, EuRoC, Redwood loaders, dataset registry, rectified-image cache
+  depth/               Depth priors behind the tracker (SSL network; perturbed GT depth for tests)
+  odometry/            Tracker: klt_window.py (final pipeline) and its parts (klt_pnp, klt_flow, klt_photo,
+                       klt_photo_torch, klt_depth_cache, klt_lag, photo_learned, base)
   ssl/                 Self-supervised depth + pose training, predictor, LoRA adapter (adapter.py)
-  scale/               Global log-scale filter
-  eval/                target-metric metrics and diagnostics
-  geometry/, runtime/, export/, train/
-scripts/               setup_env.sh, download_weights.sh, run_tests.sh, demo_tumvi.sh, render_demo.py,
-                       export_release_weights.py, fetch_datasets.sh, exp*.py experiment and scoring tools
+  eval/                Pair-wise pose-error metrics and diagnostics
+  geometry/            SE(3) helpers
+scripts/               setup_env.sh, download_weights.sh, fetch_datasets.sh, run_tests.sh, demo_tumvi.sh,
+                       demo_track.py (any dataset), render_demo.py (GIF and geometry PNG), export_release_weights.py,
+                       exp003_*.py / exp009_stereo_depth.py / cache_stereo_hints.py / s2_dump_pairs.py
+                       (tracking log, scoring, depth caches, S2 dumps)
 tests/                 pytest suite
 docs/DATASETS.md       Dataset layouts, download, cache
-media/                 Demo GIF
+media/                 Demo GIFs and geometry figures (TUM-VI room6, EuRoC MH_01 / MH_03, Redwood bedroom)
+model/                 ResNet encoder and depth decoder used by dvslam/ssl
 weights/dvslam/        Downloaded release weights (git-ignored)
-vo/ depth/ model/ slam/   Legacy Monodepth2-style VO (see below)
 ```
+
+Top level: `README.md`, `LICENSE`, `CODE_OF_CONDUCT.md`, `pyproject.toml`, `requirements.txt`.
 
 ## Legacy: Monodepth2-style VO
 
-<p align="center">
-  <a href="https://youtu.be/in82U0r8gM0?si=tQRSAcHJxwvZIJG9" target="_blank">
-   <img src="output_concat_video.gif" alt="Legacy Monodepth2-style visual odometry demo" width="640" height="480">
-  </a>
-</p>
-
-The repository began as a Monodepth2-based monocular visual odometry: ResNet-18 depth and pose networks trained jointly
-with a photometric loss (SSIM + L1) on Redwood RGB-D and NYU Depth V2, without ground-truth depth or pose. That code is
-kept in `vo/`, `depth/`, `model/` and `slam/`; its commands are unchanged. It does not use `dvslam/`, and it needs the
-Redwood layout below.
-
-```bash
-python depth/train.py          # depth network, settings in depth/config.yaml
-python vo/train.py             # depth + pose networks, settings in vo/config.yaml
-python vo/predict.py           # inference + 3D point cloud / trajectory video; needs weights/vo/{depth,pose}_net_epoch_30.pth
-python vo/eval_traj.py         # trajectory evaluation (ATE, RPE)
-python depth/eval.py           # depth evaluation (AbsRel, SqRel, RMSE, RMSE_log, delta < 1.25^n)
-python vo/eval_redwood.py      # target-metric items 03 / 04 on the Redwood test split (--data-root, --weights)
-```
-
-Datasets: [Redwood Indoor LiDAR-RGBD](http://redwood-data.org/indoor_lidar_rgbd/download.html) (poses in Open3D format,
-default intrinsics fx = fy = 525, principal point (319.5, 239.5), 640 x 480) and
-[NYU Depth V2](https://cs.nyu.edu/~silberman/datasets/nyu_depth_v2.html).
-
-```
-vo/data/redwood/{train,test}/<scene>/{image/*.jpg, depth/*.png (16-bit, mm), <scene>.json}
-depth/data/nyu_depth_v2_raw/{train,valid}/{rgb,depth}/*.png
-```
-
-The legacy evaluation of the target-metric items on Redwood uses the same metric as above (apartment, bedroom, boardroom, lobby,
-loft; per-sequence mean, then the mean of the 5 sequences) and writes `results/pairs_eval/<timestamp>/`.
+The legacy Monodepth2 code (depth and pose networks trained on Redwood and NYU Depth V2, ROS 2 and C++ tools) is on
+branch `legacy/monodepth2`. Earlier stereo-training and PyTorch-port work is on `legacy/stereo-training` and
+`legacy/torch`.
 
 ## References
 
@@ -402,7 +453,6 @@ loft; per-sequence mean, then the mean of the 5 sequences) and writes `results/p
 - [TUM-VI](https://cvg.cit.tum.de/data/datasets/visual-inertial-dataset): Schubert et al., *The TUM VI Benchmark for Evaluating Visual-Inertial Odometry*, IROS 2018
 - [LoRA](https://arxiv.org/abs/2106.09685): Hu et al., *LoRA: Low-Rank Adaptation of Large Language Models*, 2021
 - [Redwood Indoor Dataset](http://redwood-data.org/indoor_lidar_rgbd/)
-- [NYU Depth V2](https://cs.nyu.edu/~silberman/datasets/nyu_depth_v2.html)
 
 ## License
 

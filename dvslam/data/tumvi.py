@@ -1,9 +1,8 @@
 """TUM-VI room sequences, cam0, 512x512 version (plan v3.2 item T.1).
 
-Splits (user decision 2026-11-19, target-metric track; replaces plan §12.3's room1-2 validation / room3-6 test): whole
+Splits (user decision 2026-11-19; replaces plan §12.3's room1-2 validation / room3-6 test): whole
 sequences, train room1-4, validation room5, test room6. All six rooms are the same motion-capture room, so the split
-separates trajectories, not scenes. The official target-metric evaluation set is train + test (room1-4, room6).
-A Redwood-style 80/10/10 split in time within each room is a separate evaluation: apps/eval_pairs_temporal.py.
+separates trajectories, not scenes. The official evaluation set is train + test (room1-4, room6).
 
 Layout per sequence <root>/dataset-room{N}_512_16/: mav0/cam0/data.csv + data/<ns>.png (grayscale fisheye),
 mav0/mocap0/data.csv (120 Hz), dso/camchain.yaml (cam0: T_cam_imu, equidistant intrinsics and k1..k4).

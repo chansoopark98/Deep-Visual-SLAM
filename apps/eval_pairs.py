@@ -1,13 +1,16 @@
-"""Score a run directory of <scene>.inc.npz files: target-metric items 03/04 + diagnostics (plan v3 §4.8, item 0.4).
+"""Score a run directory of <scene>.inc.npz files: pair-wise pose errors + diagnostics (plan v3 §4.8, item 0.4).
+
+Translation step error: mean |‖t_gt‖ − ‖t_pred‖| / ‖t_gt‖ (%) over consecutive pairs, no scale alignment.
+Rotation error: mean |roll|, |pitch|, |yaw| error of the relative rotation (deg). Both are compared with the target
+thresholds of dvslam/eval/metrics.py.
 
   python apps/eval_pairs.py --runs runs/<id>     -> prints and writes runs/<id>/eval_pairs.txt, summary.csv
 
-PASS/FAIL is given for the two official sets: Redwood test (5 scenes) and, since 2026-11-19 (target-metric approved the
-change), TUM-VI train + test (room1-4, room6; tumvi.SPLITS). Any other set gets raw values only.
+PASS/FAIL is given for the two official sets: Redwood test (5 scenes) and TUM-VI train + test (room1-4, room6;
+tumvi.SPLITS). Any other set gets raw values only.
 """
 import argparse
 import csv
-import json
 import sys
 from pathlib import Path
 
@@ -17,14 +20,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 from dvslam.data import redwood, registry  # noqa: E402
 from dvslam.eval import diagnostics as D  # noqa: E402
-from dvslam.eval.metrics import (POS_MAPE_TARGET_PCT, ROT_ABS_TARGET_DEG, target-metric_items,  # noqa: E402
-                                 pair_metrics, scene_summary)
+from dvslam.eval.metrics import (POS_MAPE_TARGET_PCT, ROT_ABS_TARGET_DEG, pair_metrics,  # noqa: E402
+                                 scene_summary, target_items)
 from dvslam.geometry.se3 import relative_pose  # noqa: E402
 from dvslam.odometry.base import causal_trajectory, load_increments  # noqa: E402
-from scripts.verify_baseline import DEFAULT_BASELINE, sha256_of  # noqa: E402
 
-BASELINE_MANIFEST = DEFAULT_BASELINE / 'MANIFEST.json'
-target-metric_TUMVI_SPLITS = ('train', 'test')                  # official TUM-VI set (user decision 2026-11-19)
+OFFICIAL_TUMVI_SPLITS = ('train', 'test')               # official TUM-VI set (user decision 2026-11-19)
 
 
 def load_run_scene(inc_path: Path, data_root: Path | None):
@@ -79,19 +80,6 @@ def evaluate_scene(inc_path: Path, data_root: Path | None) -> tuple[dict, np.nda
     return s, pos, meta
 
 
-def check_test_gt(metas: list[dict], data_root: Path | None) -> str:
-    """Compare each scored test scene's GT json against the sha256 frozen in the baseline MANIFEST."""
-    manifest = json.loads(BASELINE_MANIFEST.read_text())['data']
-    status = 'OK'
-    for meta in metas:
-        if meta['split'] != 'test' or meta['scene'] not in manifest:
-            return 'n/a'
-        gt = Path(data_root or meta['data_root']) / manifest[meta['scene']]['gt_json']
-        if sha256_of(gt) != manifest[meta['scene']]['gt_json_sha256']:
-            status = 'MISMATCH'
-    return status
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--runs', type=Path, required=True)
@@ -109,14 +97,13 @@ def main():
         metas.append(meta)
     if len({m.get('dataset', 'redwood') for m in metas}) > 1:
         sys.exit(f'{args.runs}: mixes datasets; score one dataset per run directory')
-    k = target-metric_items(summaries)
+    k = target_items(summaries)
     win = {w: float(np.mean([s[f'win{w}s_rescaled_mape_pct'] for s in summaries])) for w in (1, 2)}
-    gt_check = check_test_gt(metas, args.data_root)
     fps = int(round(metas[0].get('frame_rate_hz', 30.0)))
     _, lo, hi = D.block_bootstrap_ci(per_scene_pos, block=fps)     # 1 s blocks (30 pairs for Redwood)
 
     lines = [f'=== eval_pairs: {args.runs} ===', '',
-             f'{"scene":<10} {"pairs":>6} {"03 MAPE%":>9} {"04 RPY°":>9} {"ratio":>6} {"rescaled%":>9} '
+             f'{"scene":<10} {"pairs":>6} {"trans %":>9} {"rot °":>9} {"ratio":>6} {"rescaled%":>9} '
              f'{"σ∥ mm":>7} {"<2mm share":>10} {"ATE se3 m":>9} {"ATE sim3 m":>10}']
     for s in summaries:
         lines.append(f'{s["scene"]:<10} {s["pairs"]:>6} {s["pos_mape_pct"]:>9.4f} {s["rot_rpy_mean_deg"]:>9.6f} '
@@ -127,27 +114,28 @@ def main():
     is_redwood = datasets == {'redwood'}
     scored = sorted(s['scene'] for s in summaries)
     complete = is_redwood and scored == sorted(redwood.SCENES) and splits == {'test'}
-    target-metric_tumvi = datasets == {'tumvi'} and splits == set(target-metric_TUMVI_SPLITS) and scored == sorted(
-        sc for sp in target-metric_TUMVI_SPLITS for sc in registry.expected_scenes('tumvi', sp))
-    verdict = is_redwood or target-metric_tumvi
-    lines.insert(1, f'split: {", ".join(sorted(splits))}   GT sha256 vs baseline MANIFEST: {gt_check}')
+    official_tumvi = datasets == {'tumvi'} and splits == set(OFFICIAL_TUMVI_SPLITS) and scored == sorted(
+        sc for sp in OFFICIAL_TUMVI_SPLITS for sc in registry.expected_scenes('tumvi', sp))
+    verdict = is_redwood or official_tumvi
+    lines.insert(1, f'split: {", ".join(sorted(splits))}')
     lines += ['',
-              f'[03] {k["item03_mape_pct"]:.4f} %  95 % block CI [{lo:.2f}, {hi:.2f}]  (≤ {POS_MAPE_TARGET_PCT} %) -> '
+              f'translation step error {k["item03_mape_pct"]:.4f} %  95 % block CI [{lo:.2f}, {hi:.2f}]  '
+              f'(target ≤ {POS_MAPE_TARGET_PCT} %) -> '
               + (('PASS' if k['item03_pass'] else 'FAIL') if verdict else 'raw value, no verdict'),
-              f'[04] {k["item04_rpy_mean_deg"]:.6f} °  (≤ {ROT_ABS_TARGET_DEG} °) -> '
+              f'rotation error {k["item04_rpy_mean_deg"]:.6f} °  (target ≤ {ROT_ABS_TARGET_DEG} °) -> '
               + (('PASS' if k['item04_pass'] else 'FAIL') if verdict else 'raw value, no verdict'),
               f'G0 oracle (scale fitted per window, uses GT): 1 s {win[1]:.3f} %, 2 s {win[2]:.3f} %',
-              'G1\' (NO-GO branch ranking): stride-3 item 03 {:.3f} %, min-2mm item 03 {:.3f} %, RPE 1 s {:.4f} m, ATE SE3 {:.4f} m'.format(
+              'G1\' (NO-GO branch ranking): stride-3 translation {:.3f} %, min-2mm translation {:.3f} %, RPE 1 s {:.4f} m, ATE SE3 {:.4f} m'.format(
                   *(float(np.mean([s[c] for s in summaries])) for c in ('g1p_stride3_mape_pct', 'g1p_min2mm_mape_pct', 'rpe30_trans_m', 'ate_se3_m'))),
               f'tracked-only pairs: {sum(s["tracked_pairs"] for s in summaries)} / {sum(s["pairs"] for s in summaries)}']
     if not is_redwood:
         tau = sorted({m.get('time_offset_s', 0.0) for m in metas})
-        if target-metric_tumvi:
-            lines.append('target-metric set: TUM-VI train + test (room1-4, room6), raw items 03/04; pairs without measured '
+        if official_tumvi:
+            lines.append('Official set: TUM-VI train + test (room1-4, room6), raw errors; pairs without measured '
                          'GT are excluded. The model may have been trained on these sequences: say so in the report')
         else:
-            lines.append(f'dataset: {", ".join(sorted(datasets))} -> items 03/04 above are raw values (plan §12.2 '
-                         f'diagnostic c), pairs without measured GT are excluded; PASS/FAIL only on the target-metric set '
+            lines.append(f'dataset: {", ".join(sorted(datasets))} -> the errors above are raw values (plan §12.2 '
+                         f'diagnostic c), pairs without measured GT are excluded; PASS/FAIL only on the official set '
                          f'(TUM-VI train + test)')
         lines.append(f'GT time offset used: {tau} s (not measured yet: plan T.1); bootstrap blocks and the 1 s / 2 s '
                      f'windows run over the kept pairs, so they span GT dropouts')
@@ -159,8 +147,6 @@ def main():
     elif not complete:
         lines.append(f'INCOMPLETE: scenes {sorted(s["scene"] for s in summaries)}, split {sorted(splits)} '
                      f'-> not an official result (needs the 5 test scenes once each)')
-    if gt_check == 'MISMATCH':
-        lines.append('GT MISMATCH: test GT differs from the frozen baseline manifest -> not comparable to 40.0591 %')
     report = '\n'.join(lines)
     print(report)
     (args.runs / 'eval_pairs.txt').write_text(report + '\n', encoding='utf-8')

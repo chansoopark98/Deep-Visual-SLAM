@@ -1,4 +1,4 @@
-"""dvslam.ssl trainer / predictor / odometry wrapper / depth prior on a synthetic batch (CPU, 64x64, batch 2, no
+"""dvslam.ssl trainer / predictor / depth prior on a synthetic batch (CPU, 64x64, batch 2, no
 pretrained weights, flow teacher off, no dataset)."""
 import copy
 from pathlib import Path
@@ -10,8 +10,7 @@ import torch
 import yaml
 
 from dvslam.depth.ssl import SSLDepth
-from dvslam.odometry.base import Frame, PinholeCamera
-from dvslam.odometry.ssl_posenet import SSLPoseNetOdometry
+from dvslam.odometry.base import Frame
 from dvslam.ssl.predict import Predictor
 from dvslam.ssl.trainer import Trainer, apply_overrides
 
@@ -88,7 +87,7 @@ def test_checkpoint_roundtrip_predictor_identical(trained):
     assert tr2.step == 2 and tr2.sched.last_epoch == 2 and int(tr2.ema.n_averaged) == 2
 
 
-def test_odometry_wrapper_and_depth_prior(trained, tmp_path):
+def test_depth_prior(trained, tmp_path):
     _, _, _, out = trained
     rng = np.random.default_rng(1)
     paths = []
@@ -96,18 +95,6 @@ def test_odometry_wrapper_and_depth_prior(trained, tmp_path):
         p = tmp_path / f'{i:03d}.png'
         cv2.imwrite(str(p), rng.integers(0, 256, (H, W), dtype=np.uint8))
         paths.append(p)
-    odo = SSLPoseNetOdometry(str(out / 'last.pt'), device='cpu')
-    odo.reset(PinholeCamera(K, W, H))
-    est = [odo.step(Frame(i, 0.05 * i, p)) for i, p in enumerate(paths)]
-    assert est[0] is None and [e.index for e in est[1:]] == [1, 2, 3]
-    assert all(e.rel_increment.shape == (4, 4) and np.isfinite(e.rel_increment).all() for e in est[1:])
-    expect = Predictor.from_checkpoint(out / 'last.pt', 'cpu').increment(
-        cv2.imread(str(paths[0]), cv2.IMREAD_GRAYSCALE), cv2.imread(str(paths[1]), cv2.IMREAD_GRAYSCALE))
-    np.testing.assert_array_equal(est[1].rel_increment, expect)
-    with pytest.raises(ValueError):
-        odo.reset(PinholeCamera(K * 1.01, W, H))
-    with pytest.raises(ValueError):
-        odo.reset(PinholeCamera(K, W * 2, H))
     depth, conf = SSLDepth(str(out / 'last.pt'), K, device='cpu').predict(Frame(0, 0.0, paths[0]))
     assert conf is None and depth.shape == (H, W) and (depth >= 0.1 - 1e-4).all() and (depth <= 20.0 + 1e-3).all()
 

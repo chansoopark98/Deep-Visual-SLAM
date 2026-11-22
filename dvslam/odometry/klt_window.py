@@ -36,7 +36,7 @@ are reused unchanged.
                that passed the gate is repeated by the motion model and every later correct solve differs from it by
                > max_jump_m, so the tracker never recovers (measured: room4 with quality=0.001 lk_win=15, 1,500 pairs).
 
-Prior: `prior` ∈ {perturbed (b = 2 %, jitter 3 %), oracle (GT depth), da3 (DA3METRIC-L), dav2_ft, ssl, cache (maps
+Prior: `prior` ∈ {perturbed (b = 2 %, jitter 3 %), oracle (GT depth), ssl, cache (maps
 cached on disk by scripts/exp003_cache_depth.py; prior_ckpt = the cache directory)}. `prior_seed`
 seeds the perturbed jitter. `ba=False kf_align=False` is the 0.7 sensor-depth path with a prior (baseline).
 EXP-007 front-end options (default off): flow_cache=<dir> moves tracks by dense flow cached offline instead of LK
@@ -76,7 +76,7 @@ same output, same speed). reset() caps it with cv2.setNumThreads, which is PROCE
 the process, not only this tracker; deliberate, it protects the shared workstation): cv_threads=None (default) uses
 OMP_NUM_THREADS when that is set, else leaves OpenCV's pool alone; cv_threads=N > 0 sets N; cv_threads=0 leaves the
 pool as it is (it does NOT call cv2.setNumThreads(0), which would disable OpenCV threading).
-`head_inputs` (BA-unit ΔT^raw, g, BA depths of frame t−1) is exposed for the precision head (klt_head.py).
+`head_inputs` (BA-unit ΔT^raw, g, BA depths of frame t−1) is exposed for diagnostics.
 """
 import os
 import time
@@ -120,19 +120,13 @@ def make_prior(name: str, K: np.ndarray, seed: int = 0, bias: float = 0.02, jitt
     if name == 'oracle':
         from dvslam.depth.perturbed import PerturbedGTDepth
         return PerturbedGTDepth(bias=0.0, jitter_logsd=0.0, seed=seed)
-    if name == 'da3':
-        from dvslam.depth import build
-        return build('da3m', K)
-    if name == 'dav2_ft':
-        from dvslam.depth.dav2_ft import DAv2FT
-        return DAv2FT(ckpt=ckpt, K=K)
     if name == 'ssl':
         from dvslam.depth.ssl import SSLDepth
         return SSLDepth(ckpt=ckpt, K=K)
     if name == 'cache':
         from dvslam.odometry.klt_depth_cache import CachedDepth
         return CachedDepth(ckpt, hw)
-    raise ValueError(f'prior must be perturbed|oracle|da3|dav2_ft|ssl|cache, got {name!r}')
+    raise ValueError(f'prior must be perturbed|oracle|ssl|cache, got {name!r}')
 
 
 def sample_depth(depth: np.ndarray, px: np.ndarray, dmin: float = 0.2, dmax: float = 6.0,
@@ -230,7 +224,7 @@ class KLTWindowOdometry(KLTPnPOdometry):
                  prior_loss: str = 'off', prior_loss_c: float = 0.05, photo_feat: str = '', **klt_kw):
         super().__init__(mode='sensor_depth', tri_deg=tri_deg, kf_ratio=kf_ratio, **klt_kw)
         self.prior_name, self.prior_seed, self.prior_bias, self.prior_jitter = prior, prior_seed, prior_bias, prior_jitter
-        self.prior_ckpt = prior_ckpt                    # dav2_ft checkpoint; None = the model's default weights
+        self.prior_ckpt = prior_ckpt                    # ssl checkpoint / cache directory
         self.window, self.kf_px, self.kf_max, self.ba = max(2, int(window)), kf_px, kf_max, ba
         self.prior_sigma, self.px_sigma, self.huber, self.ba_nfev = prior_sigma, px_sigma, huber, ba_nfev
         self.g_tau, self.g_min_m, self.g_gate_cos = g_tau, g_min_m, np.cos(np.radians(g_gate_deg))

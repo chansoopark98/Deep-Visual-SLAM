@@ -7,7 +7,7 @@ smooth : fixed-lag RTS smoother of a constant-acceleration Kalman filter on the 
          frame, v_t = R_wc(t-1) t_inc,t (R_wc chained from the emitted rotations, so it uses no future data for the
          frame itself). State (v, a), v_t = v_{t-1} + a_{t-1}, a_t = a_{t-1} + w, w ~ N(0, q²) per axis; measurement v_t
          with noise r² on tracked pairs, none on motion-model pairs. The output of pair k is the RTS estimate using
-         measurements up to k+L. Identical to scripts/exp008_filter.py (mode ca) run with --lag L on the same input.
+         measurements up to k+L.
 window : the causal increment is corrected by the change of the window's relative pose of (k-1, k) between the time
          pair k was emitted causally and the time frame k+L was processed (implemented in klt_window.py).
 End of sequence: flush() emits the last L pairs with the data available (lag L-1, ..., 0), so every pair is emitted

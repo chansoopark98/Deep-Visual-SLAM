@@ -7,9 +7,6 @@
   cache  python apps/calib_s3.py cache --ckpt ... --adapter <out>/adapter.pt --scene room5 --out <depth dir>
          -> tracker depth cache <depth dir>/<scene>.npy / .paths.txt / .meta.json (klt_depth_cache.write_cache),
             one image per forward pass like scripts/exp003_cache_depth.py; without --adapter: the frozen net.
-  score  python apps/calib_s3.py score --cache before=<dir> after=<dir> --scenes room4 room5 [--json f]
-         -> depth vs the stereo hints (scripts/s5_teacher_depth_audit.py metrics: tiled 8-frame windows, gaps 1 / 5,
-            frame / window / no alignment, within-window scale sd). Evaluation only (the hints use cam1).
 
 Inputs of calibration (cam0 only, plan §14.6 Q2): the tracker sequence's rectified cam0 frames (dvslam.data.tumvi
 load_sequence: the frame range the tracker runs on), the cam0 vignette and exposure times (photometric loss images as
@@ -177,33 +174,6 @@ def cache(args) -> int:
     return 0
 
 
-def score(args) -> int:
-    sys.path.insert(0, str(REPO_ROOT / 'scripts'))
-    import s5_teacher_depth_audit as s5
-    caches = dict(c.split('=', 1) for c in args.cache)
-    rows = {}
-    for scene in args.scenes:
-        paths, off = s5.scene_index(scene)
-        hints = s5._hints(scene)
-        maps = {name: s5._cache(d, scene, paths) for name, d in caches.items()}
-        for gap in args.gaps:
-            win = s5.tiled_windows(len(paths), gap)
-            refs = [s5._ref(hints, w, off) for w in win]
-            for name, m in maps.items():
-                preds = [np.stack([np.asarray(m[i][s5.SUB], np.float32) for i in w]) for w in win]
-                rows[(name, scene, gap)] = s5.summarise([s5.evaluate_window(r, p) for r, p in zip(refs, preds)])
-    print(f'{"cache":<14} {"scene":<6} {"g":>2} {"frames":>6} | {"frame AbsRel":>12} {"window AbsRel":>13} '
-          f'{"logRMSE(w)":>10} | {"scale sd med/mean %":>19} | {"none AbsRel":>11} {"bias %":>7}')
-    for (name, scene, gap), v in rows.items():
-        print(f'{name:<14} {scene:<6} {gap:>2} {v["frames_ok"]:>6} | {100 * v["frame_absrel"]:12.3f} '
-              f'{100 * v["window_absrel"]:13.3f} {100 * v["window_logrmse"]:10.3f} | {100 * v["scale_sd_median"]:9.3f} '
-              f'{100 * v["scale_sd_mean"]:9.3f} | {100 * v["none_absrel"]:11.3f} {100 * v["none_bias"]:+7.3f}')
-    if args.json:
-        args.json.write_text(json.dumps([dict(cache=k[0], scene=k[1], gap=k[2], **v) for k, v in rows.items()],
-                                        indent=1))
-    return 0
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -226,13 +196,8 @@ def main() -> int:
         p.add_argument('--scene', required=True)
         p.add_argument('--out', type=Path, required=True)
         p.add_argument('--device', default='cuda')
-    s = sub.add_parser('score')
-    s.add_argument('--cache', nargs='+', required=True, metavar='NAME=DIR')
-    s.add_argument('--scenes', nargs='+', default=['room4', 'room5'])
-    s.add_argument('--gaps', nargs='+', type=int, default=[1, 5])
-    s.add_argument('--json', type=Path, default=None)
     args = ap.parse_args()
-    return {'train': train, 'cache': cache, 'score': score}[args.cmd](args)
+    return {'train': train, 'cache': cache}[args.cmd](args)
 
 
 if __name__ == '__main__':

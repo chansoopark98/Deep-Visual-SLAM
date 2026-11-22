@@ -7,7 +7,7 @@ Conventions:
   sigma  : with `uncertainty`, a second decoder channel gives sigma = sigma_min + (1 - sigma_min) sigmoid in
            (sigma_min, 1] per pixel (D3VO-style photometric uncertainty).
   pose   : pose(A, B) = T_{A<-B} (X_A = T X_B). B is the TARGET (its depth is used), A the SOURCE. For the scored pair
-           pose(I_{t-1}, I_t) is the target-metric rel_increment inv(T_wc[t-1]) @ T_wc[t].
+           pose(I_{t-1}, I_t) is the scored rel_increment inv(T_wc[t-1]) @ T_wc[t].
   refine : pose_iters - 1 residual steps (MonoIndoor-style). A is warped into B's view with depth(B) and the current
            T (warped image detached); the residual net on (warped, B) returns T_{w<-B} of the virtual camera w with
            X_w = T^-1 T_true X_B, so T <- T @ T_{w<-B}. The residual net is shared across steps and starts at identity.

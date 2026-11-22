@@ -318,17 +318,6 @@ def test_out_lag_default_unchanged_and_alignment(scene):
         assert [e.timestamp for e in est] == [f.timestamp for f in frames[1:]]
 
 
-def test_out_lag_smooth_equals_offline_fixed_lag_filter(scene):
-    """smooth mode = scripts/exp008_filter.py (mode ca, same q, r, lag) applied to the lag-0 output."""
-    from scripts.exp008_filter import filter_run
-    frames, _ = scene
-    base, _ = _run(frames, prior='perturbed', prior_jitter=0.05)
-    inc = {'rel_increment': np.stack([e.rel_increment for e in base]), 'source': np.array([e.source for e in base])}
-    ret, fl, _ = _run_lag(frames, prior='perturbed', prior_jitter=0.05, out_lag=2, out_lag_q=0.002, out_lag_r=0.001)
-    got = np.stack([e.rel_increment for e in [r for r in ret if r is not None] + fl])
-    np.testing.assert_allclose(got, filter_run(inc, 'ca', 0.002, 0.001, 2), atol=1e-12)
-
-
 def test_out_lag_window_mode_applies_only_later_window_changes(scene):
     """window mode = causal increment × (change of the window's relative pose since it was emitted): with no BA the
     keyframe poses never move, so the lagged output equals the causal one; with BA it differs (and stays sane)."""

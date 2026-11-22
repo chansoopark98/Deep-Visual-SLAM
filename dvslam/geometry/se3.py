@@ -43,7 +43,7 @@ def se3_exp(xi: np.ndarray) -> np.ndarray:
 
 
 def euler_zyx(R: np.ndarray) -> np.ndarray:
-    """(roll, pitch, yaw) in radians, ZYX convention (same formula as the 2026 target-metric evaluator)."""
+    """(roll, pitch, yaw) in radians, ZYX convention (the formula of the rotation-error metric)."""
     sy = np.sqrt(R[0, 0]**2 + R[1, 0]**2)
     if sy >= 1e-6:
         roll = np.arctan2(R[2, 1], R[2, 2])

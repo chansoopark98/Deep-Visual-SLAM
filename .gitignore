@@ -3,8 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-assets/
-results/
 .vscode/
 
 # C extensions
@@ -17,33 +15,8 @@ results/
 *.csv
 *.pth
 
-# web
-/web/modules/three.js/*
-/web/node_modules/*
-
-# tensorboard log
-/tensorboard/
-
-# Assets
-/assets/weights/
-
-# depth ignore files and directories 
-/depth/data/*
-/depth/weights/
-/depth/tensorboard/
-/depth/results/
-
-# flow ignore files and directories
-/flow/data/*
-/flow/weights/
-/flow/tensorboard/
-
-# vo ignore files and directories
-/vo/data/
-/vo/export/
+# downloaded release weights (scripts/download_weights.sh)
 /weights/
-/vo/weights/
-/vo/tensorboard/
 
 # Distribution / packaging
 .Python
@@ -200,17 +173,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# frozen baselines are tracked (plan v3 item 0.1)
-!baselines/**/*.csv
-baselines/**/*.png
 runs/
-
-# third_party build outputs and weights
-third_party/*/build/
-third_party/**/*.o
-third_party/**/*.egg-info/
-third_party/*/models/
-cpp/build/
 
 # OMC runtime state (machine-local); plans/research/handoffs are tracked
 .omc/state/

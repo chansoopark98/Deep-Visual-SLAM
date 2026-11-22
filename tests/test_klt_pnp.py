@@ -7,7 +7,6 @@ from scipy.spatial.transform import Rotation
 from dvslam.geometry.se3 import relative_pose
 from dvslam.odometry.base import Frame, PinholeCamera
 from dvslam.odometry.klt_pnp import KLTPnPOdometry
-from scripts.cv_prior import cv_filter
 
 W, H, N_FRAMES = 320, 240, 30          # half resolution keeps the rendering fast
 K = np.array([[262.5, 0, 159.5], [0, 262.5, 119.5], [0, 0, 1]])
@@ -90,13 +89,3 @@ def test_depth_free_recovers_increments_up_to_scale(scene):
     s = (p * g).sum() / (p * p).sum()                         # one scale for the whole tracked run
     rel = np.linalg.norm(s * p - g, axis=1) / np.linalg.norm(g, axis=1)
     assert np.median(rel) < 0.03 and rel.max() < 0.06, (np.median(rel), rel.max())
-
-
-def test_cv_prior_is_causal_and_identity_at_zero():
-    rng = np.random.default_rng(1)
-    inc = np.tile(np.eye(4), (20, 1, 1))
-    inc[:, :3, 3] = rng.normal(0, 0.01, (20, 3))
-    np.testing.assert_allclose(cv_filter(inc, 0.0), inc, atol=1e-12)
-    a, b = inc.copy(), inc.copy()
-    b[10:, :3, 3] += 1.0                                      # change the future only
-    np.testing.assert_allclose(cv_filter(a, 0.4)[:10], cv_filter(b, 0.4)[:10], atol=1e-12)

@@ -1,7 +1,6 @@
 """Run an odometry over a dataset (Redwood by default; --dataset tumvi | euroc) and write causal increments
 
-  python apps/run_sequence.py --odometry legacy_posenet --split test
-  python apps/run_sequence.py --odometry klt_window --dataset tumvi --split train test   # target-metric set (room1-4, 6)
+  python apps/run_sequence.py --odometry klt_window --dataset tumvi --split train test   # official set (room1-4, 6)
   -> runs/<id>/<scene>.inc.npz, <scene>.causal.tum, timings.csv
 """
 import argparse
@@ -15,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-try:  # torch-free envs (e.g. the py3.10 cuVSLAM env) can still run non-torch trackers
+try:  # torch-free envs can still run the numpy tracker path
     import torch
 except ImportError:
     torch = None
@@ -28,15 +27,7 @@ from dvslam.odometry.base import Frame, PinholeCamera, causal_trajectory, save_i
 
 # name -> (module, class). Modules are imported lazily so one tracker's heavy deps never block another.
 ODOMETRY = {
-    'legacy_posenet': ('dvslam.odometry.legacy_posenet', 'LegacyPoseNetOdometry'),
-    'klt_pnp': ('dvslam.odometry.klt_pnp', 'KLTPnPOdometry'),           # plan 0.7 (C)
-    'dpvo_mono': ('dvslam.odometry.dpvo_mono', 'DPVOMonoOdometry'),     # plan 0.6 (B, depth-free)
-    'rgbd_icp': ('dvslam.odometry.rgbd_icp', 'RGBDICPOdometry'),        # plan 0.8 (E0, sensor depth)
-    'cuvslam_rgbd': ('dvslam.odometry.cuvslam_rgbd', 'CuVSLAMRGBDOdometry'),  # plan 0.8/1.4 (A); needs py3.10 env
-    'dpvo_metric': ('dvslam.odometry.dpvo_metric', 'DPVOMetricOdometry'),  # plan 1.1/1.2 (B + depth prior)
     'klt_window': ('dvslam.odometry.klt_window', 'KLTWindowOdometry'),    # plan 1.3 (C + window BA + prior)
-    'klt_head': ('dvslam.odometry.klt_head', 'KLTHeadOdometry'),          # plan 1.5 (precision head over any base)
-    'ssl_posenet': ('dvslam.odometry.ssl_posenet', 'SSLPoseNetOdometry'),  # self-supervised metric pose (dvslam/ssl)
 }
 
 

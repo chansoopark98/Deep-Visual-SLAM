@@ -1,9 +1,9 @@
-"""target-metric items 03/04 on per-pair (t-1, t) relative poses.
+"""Pair-wise pose errors on per-pair (t-1, t) relative poses (no scale alignment).
 
-03: per pair |‖t_pred‖ − ‖t_gt‖| / ‖t_gt‖ · 100 (meters, magnitude only; 0 % when ‖t_gt‖ <= 1e-6 m),
-    mean over pairs per scene, then mean over scenes. Target <= 2.96 %.
-04: per pair |Δ| of ZYX roll/pitch/yaw of the relative rotation (deg, wrapped), mean over pairs and axes
-    per scene, then mean over scenes. Target <= 3.4 deg.
+03 (translation step error): per pair |‖t_pred‖ − ‖t_gt‖| / ‖t_gt‖ · 100 (meters, magnitude only; 0 % when ‖t_gt‖ <= 1e-6 m),
+    mean over pairs per scene, then mean over scenes. Target threshold <= 2.96 %.
+04 (rotation error): per pair |Δ| of ZYX roll/pitch/yaw of the relative rotation (deg, wrapped), mean over pairs and axes
+    per scene, then mean over scenes. Target threshold <= 3.4 deg.
 """
 import numpy as np
 
@@ -25,7 +25,7 @@ def rpy_abs_err_deg(euler_gt: np.ndarray, euler_pred: np.ndarray) -> np.ndarray:
 
 
 def pair_metrics(T_gt_rel: np.ndarray, T_pred_rel: np.ndarray) -> dict:
-    """Every per-pair quantity the target-metric CSV reports."""
+    """Every per-pair quantity of the pose-error CSV."""
     gt_t, pred_t = T_gt_rel[:3, 3], T_pred_rel[:3, 3]
     gt_euler, pred_euler = euler_zyx(T_gt_rel[:3, :3]), euler_zyx(T_pred_rel[:3, :3])
     gt_rot_norm, pred_rot_norm = np.linalg.norm(gt_euler), np.linalg.norm(pred_euler)
@@ -57,8 +57,8 @@ def scene_summary(scene: str, pos_error_pct: list, rpy_err_deg: np.ndarray, gt_t
     }
 
 
-def target-metric_items(summaries: list[dict]) -> dict:
-    """Mean of per-scene means and PASS/FAIL for items 03 and 04."""
+def target_items(summaries: list[dict]) -> dict:
+    """Mean of per-scene means and PASS/FAIL against the target thresholds (03 translation, 04 rotation)."""
     pos = float(np.mean([s['pos_mape_pct'] for s in summaries]))
     rot = float(np.mean([s['rot_rpy_mean_deg'] for s in summaries]))
     return {'item03_mape_pct': pos, 'item03_pass': pos <= POS_MAPE_TARGET_PCT,
