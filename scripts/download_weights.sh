@@ -11,7 +11,7 @@
 # Files already present with the right checksum are not downloaded again.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-BASE=${DVSLAM_WEIGHTS_URL:-https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2/releases/download/v0.1.0}
+BASE=${DVSLAM_WEIGHTS_URL:-https://github.com/chansoopark98/Deep-Visual-SLAM/releases/download/v0.1.0}
 DEST=${DVSLAM_WEIGHTS:-$REPO/weights/dvslam}
 FILES=(dvslam_depth_hints_core.pt dvslam_depth_core.pt dvslam_s2_photonet_v4.pt)
 

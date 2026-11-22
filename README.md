@@ -1,11 +1,11 @@
 # Deep Visual SLAM: Monocular Metric Visual Odometry with Self-Supervised Depth
 
-[![License](https://img.shields.io/github/license/chansoopark98/Deep-Visual-SLAM-Monodepth2)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/chansoopark98/Deep-Visual-SLAM-Monodepth2)](https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2/releases/tag/v0.1.0)
-[![Downloads](https://img.shields.io/github/downloads/chansoopark98/Deep-Visual-SLAM-Monodepth2/total.svg)](https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2/releases)
+[![License](https://img.shields.io/github/license/chansoopark98/Deep-Visual-SLAM)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/chansoopark98/Deep-Visual-SLAM)](https://github.com/chansoopark98/Deep-Visual-SLAM/releases/tag/v0.1.0)
+[![Downloads](https://img.shields.io/github/downloads/chansoopark98/Deep-Visual-SLAM/total.svg)](https://github.com/chansoopark98/Deep-Visual-SLAM/releases)
 [![Python](https://img.shields.io/badge/Python-%E2%89%A53.10-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
-[![Stars](https://img.shields.io/github/stars/chansoopark98/Deep-Visual-SLAM-Monodepth2?style=social)](https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2)
+[![Stars](https://img.shields.io/github/stars/chansoopark98/Deep-Visual-SLAM?style=social)](https://github.com/chansoopark98/Deep-Visual-SLAM)
 
 <p align="center">
   <img src="media/tumvi_room6_demo.gif" alt="TUM-VI room6 demo: input frame with tracked features, 3D map with keyframes and current camera, top-down trajectory against ground truth" width="900">
@@ -57,8 +57,8 @@ study and caveats are in [docs/EVALUATION.md](docs/EVALUATION.md). Runtime is ab
 Requires Linux, Python >= 3.10 and an NVIDIA GPU (the unit tests run on the CPU).
 
 ```bash
-git clone https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2.git
-cd Deep-Visual-SLAM-Monodepth2
+git clone https://github.com/chansoopark98/Deep-Visual-SLAM.git
+cd Deep-Visual-SLAM
 TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 bash scripts/setup_env.sh   # venv + PyTorch (CUDA 12.8) + package
 source .venv/bin/activate
 ```
@@ -72,7 +72,7 @@ export DVSLAM_CACHE_ROOT=$PWD/runs/cache
 bash scripts/fetch_datasets.sh tumvi room5        # about 1.7 GB per room; the demo needs only the room it runs
 ```
 
-**Weights.** Release [`v0.1.0`](https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2/releases/tag/v0.1.0)
+**Weights.** Release [`v0.1.0`](https://github.com/chansoopark98/Deep-Visual-SLAM/releases/tag/v0.1.0)
 (research release). SHA-256 checksums are verified. RAFT-large weights are downloaded by torchvision on first use.
 
 ```bash
@@ -114,7 +114,7 @@ Citation metadata is in [`CITATION.cff`](CITATION.cff) (GitHub shows a "Cite thi
   title   = {Deep Visual SLAM: Monocular Metric Visual Odometry with Self-Supervised Depth},
   year    = {2026},
   version = {0.1.0},
-  url     = {https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2}
+  url     = {https://github.com/chansoopark98/Deep-Visual-SLAM}
 }
 ```
 
