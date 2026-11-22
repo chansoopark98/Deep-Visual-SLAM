@@ -216,3 +216,6 @@ cpp/build/
 .omc/state/
 .omc/sessions/
 .omc/project-memory.json
+
+# release staging (scripts/export_release_weights.py); assets are published as GitHub release files
+/release/

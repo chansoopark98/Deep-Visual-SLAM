@@ -1,5 +1,6 @@
-# Install Pytorch
-# pip3 install torch torchvision
+# Install Pytorch (with CUDA) first, e.g. for CUDA 12.8 (RTX 50xx):
+# pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# (scripts/setup_env.sh prints this and installs it when TORCH_INDEX_URL is set)
 
 
 #tensorflow==2.19.0
@@ -14,3 +15,9 @@ tensorboard
 pyvista
 imageio
 imageio[ffmpeg]
+numpy
+pillow
+
+# dev
+pytest
+ruff

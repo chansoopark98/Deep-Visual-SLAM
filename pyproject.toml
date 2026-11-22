@@ -9,7 +9,7 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "scipy"]
 
 [tool.setuptools.packages.find]
-include = ["dvslam*"]
+include = ["dvslam*", "model*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

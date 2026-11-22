@@ -108,5 +108,5 @@ the rectification parameters change the loader raises an error instead of reusin
 - `euroc/machine_hall/MH_01_easy` and `MH_02_easy` still contain the original `.zip` and `.bag` (about 7.4 GB in
   total); the loader reads only the extracted `mav0/`, so they can be deleted.
 - Redwood: a local copy is at `/home/park-ubuntu/park/datasets/redwood` (49 GB) and the read-only original at
-  `/mnt/backup/SLAM/redwood`. TUM RGB-D (training data for the depth network) is described in
-  `reports/phase3/DATA.md` with its own script, `/home/park-ubuntu/park/datasets/scripts/fetch_tum.sh`.
+  `/mnt/backup/SLAM/redwood`. TUM RGB-D was used only by an earlier depth-network
+  experiment and is not needed for the current pipeline.
