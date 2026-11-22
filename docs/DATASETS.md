@@ -1,15 +1,16 @@
 # SLAM evaluation datasets: layout, download, repository setup
 
 Datasets live **outside the repository** (they are tens of GB). The loaders in `dvslam/data/` find them through
-three environment variables; the defaults point at this workstation's local disk.
+environment variables; by default they look under `data/` in the repository root (git-ignored), so either
+download there or point the variables at an existing copy (a symlink `data/tum_vi -> /path/to/tum_vi` also works).
 
 | Variable | Default | Used by |
 |---|---|---|
-| `DVSLAM_TUMVI_ROOT` | `/home/park-ubuntu/park/datasets/tum_vi` | `dvslam/data/tumvi.py` |
-| `DVSLAM_EUROC_ROOT` | `/home/park-ubuntu/park/datasets/euroc` | `dvslam/data/euroc.py` |
-| `DVSLAM_CACHE_ROOT` | `/home/park-ubuntu/park/datasets/cache` | `dvslam/data/base.py` (rectified-image cache) |
+| `DVSLAM_TUMVI_ROOT` | `data/tum_vi` | `dvslam/data/tumvi.py` |
+| `DVSLAM_EUROC_ROOT` | `data/euroc` | `dvslam/data/euroc.py` |
+| `DVSLAM_CACHE_ROOT` | `data/cache` | `dvslam/data/base.py` (rectified-image cache) |
 
-Redwood is read from `--data-root` (apps) and has no environment variable; see the README. Keep working data on
+Redwood is read from `DVSLAM_REDWOOD_ROOT` (default `data/redwood`) or `--data-root`; see [OTHER_DATASETS.md](OTHER_DATASETS.md). Keep working data on
 **local disk**, not on the NFS mounts (`/mnt/*`): the NFS volume has filled up before, and rectified-image reads are
 random-access.
 
@@ -95,16 +96,3 @@ TUM-VI (equidistant fisheye) and EuRoC (radial-tangential) images are remapped o
 parameters, e.g. `cam0_pinhole_512_f190`). The first run of a sequence builds its cache; later runs reuse it. If
 the rectification parameters change the loader raises an error instead of reusing a stale cache: delete that
 `<tag>` directory and rerun.
-
-## 4. Notes on this workstation
-
-- `/home/park-ubuntu/park/datasets/tum_vi` is a **symlink** to
-  `/home/park-ubuntu/park/SOLUTION/SOLUTION_Visual-SLAM/assets/datasets/tum_vi` (another project's assets). New
-  sequences land there too. If that project is moved or cleaned, TUM-VI disappears from this one; to decouple,
-  `mv` the target directory over the symlink.
-- TUM-VI also holds `magistrale1`, `outdoors1`, `slides1` (about 30 GB); no loader or split uses them.
-- `euroc/machine_hall/MH_01_easy` and `MH_02_easy` still contain the original `.zip` and `.bag` (about 7.4 GB in
-  total); the loader reads only the extracted `mav0/`, so they can be deleted.
-- Redwood: a local copy is at `/home/park-ubuntu/park/datasets/redwood` (49 GB) and the read-only original at
-  `/mnt/backup/SLAM/redwood`. TUM RGB-D was used only by an earlier depth-network
-  experiment and is not needed for the current pipeline.

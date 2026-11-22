@@ -182,3 +182,6 @@ runs/
 
 # release staging (scripts/export_release_weights.py); assets are published as GitHub release files
 /release/
+
+# local datasets (or symlinks to them): data/tum_vi, data/euroc, data/redwood, data/cache
+/data/

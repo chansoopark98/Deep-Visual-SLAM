@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "Deep Visual SLAM: Monocular Metric Visual Odometry with Self-Supervised Depth"
+authors:
+  - alias: chansoopark98
+repository-code: "https://github.com/chansoopark98/Deep-Visual-SLAM-Monodepth2"
+license: MIT
+version: 0.1.0
+date-released: "2026-11-22"
+keywords:
+  - visual odometry
+  - visual SLAM
+  - monocular SLAM
+  - metric scale
+  - self-supervised depth estimation
+  - monocular depth estimation
+  - RAFT
+  - optical flow
+  - bundle adjustment
+  - photometric alignment
+  - LoRA test-time adaptation
+  - PyTorch
+  - TUM-VI
+  - robotics
+  - AR

@@ -29,7 +29,7 @@ import yaml
 
 from dvslam.data import base
 
-DEFAULT_ROOT = Path(os.environ.get('DVSLAM_EUROC_ROOT', '/home/park-ubuntu/park/datasets/euroc'))
+DEFAULT_ROOT = Path(os.environ.get('DVSLAM_EUROC_ROOT', base.DATA_ROOT / 'euroc'))
 SPLITS = {'validation': ('MH_01_easy', 'MH_02_easy'),
           'test': ('MH_03_medium', 'MH_04_difficult', 'MH_05_difficult')}
 FRAME_RATE_HZ = 20.0

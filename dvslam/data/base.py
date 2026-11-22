@@ -14,7 +14,8 @@ import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-CACHE_ROOT = Path(os.environ.get('DVSLAM_CACHE_ROOT', '/home/park-ubuntu/park/datasets/cache'))
+DATA_ROOT = Path(__file__).resolve().parents[2] / 'data'   # <repo>/data; every default below can be overridden by env var
+CACHE_ROOT = Path(os.environ.get('DVSLAM_CACHE_ROOT', DATA_ROOT / 'cache'))
 
 
 @dataclass

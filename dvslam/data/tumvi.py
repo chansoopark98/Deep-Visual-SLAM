@@ -36,7 +36,7 @@ import yaml
 
 from dvslam.data import base
 
-DEFAULT_ROOT = Path(os.environ.get('DVSLAM_TUMVI_ROOT', '/home/park-ubuntu/park/datasets/tum_vi'))
+DEFAULT_ROOT = Path(os.environ.get('DVSLAM_TUMVI_ROOT', base.DATA_ROOT / 'tum_vi'))
 SCENES = ('room1', 'room2', 'room3', 'room4', 'room5', 'room6')
 SPLITS = {'train': ('room1', 'room2', 'room3', 'room4'), 'validation': ('room5',), 'test': ('room6',)}
 FRAME_RATE_HZ = 20.0

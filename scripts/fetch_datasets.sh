@@ -9,8 +9,8 @@
 # Single sequential curl stream, resumable (-C -). Archives are deleted after a verified extract.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TUMVI_ROOT=${DVSLAM_TUMVI_ROOT:-/home/park-ubuntu/park/datasets/tum_vi}
-EUROC_ROOT=${DVSLAM_EUROC_ROOT:-/home/park-ubuntu/park/datasets/euroc}
+TUMVI_ROOT=${DVSLAM_TUMVI_ROOT:-$(cd "$(dirname "$0")/.." && pwd)/data/tum_vi}
+EUROC_ROOT=${DVSLAM_EUROC_ROOT:-$(cd "$(dirname "$0")/.." && pwd)/data/euroc}
 TUMVI_URL=https://cdn3.vision.in.tum.de/tumvi/exported/euroc/512_16
 EUROC_URL=http://robotics.ethz.ch/~asl-datasets/ijrr_euroc_mav_dataset/machine_hall
 

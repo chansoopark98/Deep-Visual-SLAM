@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-DEFAULT_ROOT = Path(os.environ.get('DVSLAM_REDWOOD_ROOT', '/mnt/backup/SLAM/redwood'))
+DEFAULT_ROOT = Path(os.environ.get('DVSLAM_REDWOOD_ROOT', Path(__file__).resolve().parents[2] / 'data' / 'redwood'))
 SCENES = ('apartment', 'bedroom', 'boardroom', 'lobby', 'loft')
 # UNVERIFIED: the data has no timestamps; 30 Hz is the usual rate of the PrimeSense-class sensor used for
 # Redwood, not yet checked against the dataset documentation (plan v3 §2.2). Timestamps below are index / 30.
